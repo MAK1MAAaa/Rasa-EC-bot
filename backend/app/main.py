@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
 from datetime import timedelta
 from sqlmodel import select
@@ -13,6 +14,21 @@ from .auth import (
 from .database import get_session, init_db
 
 app = FastAPI(title="Rasa-EC-bot Backend", version="0.1.0")
+
+# 配置 CORS
+origins = [
+    "http://localhost:5173",    # Vite 默认开发端口
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",    # 其他常用前端端口
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.on_event("startup")
 async def on_startup():
