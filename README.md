@@ -46,5 +46,14 @@ docker run --name rasa-redis -p 6379:6379 -v D:/Github/Rasa-EC-bot/database/redi
 
 ### 3. 前端环境配置
 1. 进入 `frontend` 目录。
-2. 安装依赖: `npm install`。
-3. 启动开发服务器: `npm run dev`。
+2. 安装依赖: `pnpm install`。
+3. 启动开发服务器: `pnpm dev`。
+4. 详细说明请参考 `frontend/README.md`。
+
+---
+
+## 项目结构
+- `backend/`: FastAPI 后端服务
+- `frontend/`: Vue 3 前端界面
+- `database/`: 数据库持久化文件 (已忽略)
+- `db/`: 数据库初始化 SQL 脚本
