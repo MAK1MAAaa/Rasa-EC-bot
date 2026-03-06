@@ -14,17 +14,19 @@
 ### 2. 初始化数据库表结构与数据
 
 #### 在 PowerShell (Windows) 中运行：
-> **注意**: 必须指定 `-Encoding UTF8` 以防止中文乱码导致 SQL 语法错误。
+> **注意**: 为了彻底解决中文乱码，请务必先执行第一行设置编码的命令。
 ```powershell
+# 设置 PowerShell 管道输出编码为 UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+
 # 创建表结构
-Get-Content -Encoding UTF8 db/init_db.sql | docker exec -i rasa-postgres psql -U postgres -d postgres
+Get-Content -Raw -Encoding UTF8 db/init_db.sql | docker exec -i -e PGCLIENTENCODING=UTF8 rasa-postgres psql -U postgres -d postgres
 
 # 插入测试数据
-Get-Content -Encoding UTF8 db/seed_data.sql | docker exec -i rasa-postgres psql -U postgres -d postgres
+Get-Content -Raw -Encoding UTF8 db/seed_data.sql | docker exec -i -e PGCLIENTENCODING=UTF8 rasa-postgres psql -U postgres -d postgres
 ```
 
 #### 在 Bash (Linux/macOS/Git Bash) 中运行：
-> **注意**: 使用 `PGCLIENTENCODING=UTF8` 确保客户端编码正确处理中文。
 ```bash
 # 创建表结构
 docker exec -i -e PGCLIENTENCODING=UTF8 rasa-postgres psql -U postgres -d postgres < db/init_db.sql

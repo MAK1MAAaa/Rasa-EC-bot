@@ -6,7 +6,7 @@ DROP TABLE IF EXISTS users CASCADE;
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     username VARCHAR(255) NOT NULL,
-    phone VARCHAR(20) UNIQUE NOT NULL,
+    email VARCHAR(255) UNIQUE NOT NULL,
     hashed_password VARCHAR(255) NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -27,7 +27,7 @@ CREATE TABLE orders (
     user_id UUID REFERENCES users(id),
     status VARCHAR(50) NOT NULL, -- 待发货/已发货/已完成/已取消
     address TEXT NOT NULL,
-    contact_phone VARCHAR(20) NOT NULL,
+    contact_email VARCHAR(255) NOT NULL,
     total_amount DECIMAL(10, 2) NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );

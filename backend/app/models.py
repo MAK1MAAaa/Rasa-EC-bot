@@ -5,7 +5,7 @@ from sqlmodel import Field, SQLModel
 
 class UserBase(SQLModel):
     username: str = Field(index=True)
-    phone: str = Field(unique=True, index=True)
+    email: str = Field(unique=True, index=True)
 
 class User(UserBase, table=True):
     __tablename__ = "users"
@@ -25,4 +25,4 @@ class Token(SQLModel):
     token_type: str = "bearer"
 
 class TokenData(SQLModel):
-    username: Optional[str] = None
+    email: Optional[str] = None

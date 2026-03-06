@@ -28,11 +28,11 @@
 
 ## 3. 系统架构设计
 
-系统整体采用 **前后端分离 + 纯 Python AI 微服务** 的架构，技术栈高度统一，大幅降低沟通和维护成本：
+系统整体采用 **前后端分离 + 纯 Python AI 微服务** 的架构，技术栈高度统一，大幅降低沟通 and 维护成本：
 
 1. **表现层 (UI)**：Vue3 负责渲染 WebChat 界面，与 FastAPI 后端通过 HTTP/WebSocket 通信。
 2. **业务网关层 (FastAPI)**：处理鉴权、限流、数据库 CRUD 操作。包含两个核心方向：响应前端请求，以及为 Rasa Action Server 提供 RESTful 接口。利用其原生异步 (Asyncio) 特性处理高并发对话请求。
-3. **对话管理层 (Rasa CALM)**：解析用户输入，利用内置的 LLM Command Generator 将自然语言转化为业务指令，并通过 `flows.yaml` 驱动对话状态机。当需要查询数据时，调用 Python Action Server。
+3. **对话管理层 (Rasa CALM)**：解析用户输入，利用内置的 LLM Command Generator 将自然语言转化为业务指令，并通过 `flows.yaml`驱动对话状态机。当需要查询数据时，调用 Python Action Server。
 4. **动作执行层 (Action Server)**：Python 服务，作为 Rasa 和 FastAPI 核心业务线之间的粘合剂，发起 HTTP 请求给 FastAPI 接口。*(注：由于语言统一，后期甚至可以直接把 Action 逻辑揉进核心 FastAPI 服务中，简化架构。)*
 5. **LLM 支撑层**：部署于本地的微调大模型，提供意图/槽位解析、闲聊生成服务。
 
@@ -47,7 +47,7 @@
 | :----------- | :-------- | :------------ |
 | `id`         | UUID      | 主键          |
 | `username`   | VARCHAR   | 用户名        |
-| `phone`      | VARCHAR   | 手机号 (唯一) |
+| `email`      | VARCHAR   | 邮箱 (唯一)   |
 | `created_at` | TIMESTAMP | 注册时间      |
 
 ### 4.2 订单主表 (`orders`)
@@ -59,7 +59,7 @@
 | `user_id`       | UUID     | 外键 -> users.id                   |
 | `status`        | VARCHAR  | 状态 (待发货/已发货/已完成/已取消) |
 | `address`       | VARCHAR  | 收货地址                           |
-| `contact_phone` | VARCHAR  | 收件人电话                         |
+| `contact_email` | VARCHAR  | 收件人邮箱                         |
 | `total_amount`  | DECIMAL  | 订单总金额                         |
 
 ### 4.3 商品表 (`products`)
@@ -131,12 +131,12 @@ flows:
             step: show_status
 
   modify_shipping_info:
-    description: "用户想要修改收货地址或电话"
+    description: "用户想要修改收货地址或邮箱"
     steps:
       - collect: order_id
       - action: action_check_order_can_modify # 校验是否已发货
       - collect: new_address
-      - collect: new_phone
+      - collect: new_email
       - action: action_update_shipping_info
 ```
 
@@ -158,7 +158,7 @@ flows:
 ### 7.3 闲聊与对话修复 (Chitchat & Repair)
 
 * **Chitchat**: 当用户输入与 5 大核心 Flow 无关时（如：“你们这儿的客服态度真好”），触发 Fallback，直接请求本地 LLM 生成闲聊文本并返回。
-* **Repair**: 利用 CALM 特性。若用户在执行 `modify_shipping_info` 途中询问 `check_order_status`（物流流转），Rasa 自动挂起修改流程，执行物流查询流，结束后提示“我们回到刚才修改地址的步骤，您的新地址是？”。
+* **Repair**: 利用 CALM 特性。若用户在执行 `modify_shipping_info` 途中询问 `check_order_status`（物流流转），Rasa 自动挂起修改流程，执行物流查询流，结束后提示“我们回到刚才修改地址的步骤，您的新邮箱是？”。
 
 ## 8. 项目实施计划（4周极限版）
 
@@ -182,4 +182,3 @@ flows:
   * Vue3 + Tailwind CSS 开发响应式 WebChat 界面。
   * 前后端联调，修复跨域（CORS）、WebSocket 断连等工程问题。
   * 撰写毕业论文，整理系统截图与性能评测指标（如槽位提取准确率、平均响应延迟等），录制答辩 Demo 视频。
-
