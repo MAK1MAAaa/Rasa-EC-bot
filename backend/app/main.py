@@ -42,18 +42,18 @@ async def root():
 
 @app.post("/api/v1/auth/register", response_model=UserRead)
 async def register(user: UserCreate, session: AsyncSession = Depends(get_session)):
-    # 检查手机号是否已注册
-    statement = select(User).where(User.phone == user.phone)
+    # 检查邮箱是否已注册
+    statement = select(User).where(User.email == user.email)
     result = await session.execute(statement)
     existing_user = result.scalar_one_or_none()
     
     if existing_user:
-        raise HTTPException(status_code=400, detail="Phone number already registered")
+        raise HTTPException(status_code=400, detail="Email already registered")
     
     hashed_password = get_password_hash(user.password)
     new_user = User(
         username=user.username,
-        phone=user.phone,
+        email=user.email,
         hashed_password=hashed_password
     )
     session.add(new_user)
@@ -66,21 +66,21 @@ async def login(
     form_data: OAuth2PasswordRequestForm = Depends(), 
     session: AsyncSession = Depends(get_session)
 ):
-    # 这里 form_data.username 对应手机号
-    statement = select(User).where(User.phone == form_data.username)
+    # 这里 form_data.username 对应邮箱
+    statement = select(User).where(User.email == form_data.username)
     result = await session.execute(statement)
     user = result.scalar_one_or_none()
 
     if not user or not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect phone or password",
+            detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
     
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": user.phone}, expires_delta=access_token_expires
+        data={"sub": user.email}, expires_delta=access_token_expires
     )
     return {"access_token": access_token, "token_type": "bearer"}
 
