@@ -1,0 +1,14 @@
+[project]
+name = "rasa-ec-bot"
+version = "0.1.0"
+description = "基于 FastAPI 和 Rasa CALM 的电商智能客服系统后端"
+authors = [
+    { name = "zhangfeng Qian", email = "fzq2061627258@gmail.com" }
+]
+readme = "README.md"
+# 严格锁定 Python 版本在 3.10 到 3.11 之间，避开 3.12+ 的 AI 库兼容性问题
+requires-python = ">=3.10, <3.12"
+
+dependencies = [
+
+]
