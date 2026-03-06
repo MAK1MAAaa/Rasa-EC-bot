@@ -22,4 +22,5 @@ dependencies = [
     "pydantic[email]",
     "aioredis",
     "httpx",
+    "bcrypt==3.2.0",
 ]

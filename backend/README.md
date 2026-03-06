@@ -9,36 +9,42 @@
 - **端口**: `5432`
 - **用户名**: `postgres`
 - **密码**: `postgres`
-- **数据库名**: `postgres` (默认) 或 `rasa_ec_bot` (建议创建)
+- **数据库名**: `rasa_ec_bot`
 
 ### 2. 初始化数据库表结构与数据
 
-#### 在 PowerShell (Windows) 中运行：
+#### 第一步：创建数据库
+在终端运行以下命令创建 `rasa_ec_bot` 数据库：
+```bash
+docker exec -it rasa-postgres psql -U postgres -c "CREATE DATABASE rasa_ec_bot;"
+```
+
+#### 第二步：导入表结构与数据 (PowerShell)
 > **注意**: 为了彻底解决中文乱码，请务必先执行第一行设置编码的命令。
 ```powershell
 # 设置 PowerShell 管道输出编码为 UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
 # 创建表结构
-Get-Content -Raw -Encoding UTF8 db/init_db.sql | docker exec -i -e PGCLIENTENCODING=UTF8 rasa-postgres psql -U postgres -d postgres
+Get-Content -Raw -Encoding UTF8 db/init_db.sql | docker exec -i -e PGCLIENTENCODING=UTF8 rasa-postgres psql -U postgres -d rasa_ec_bot
 
 # 插入测试数据
-Get-Content -Raw -Encoding UTF8 db/seed_data.sql | docker exec -i -e PGCLIENTENCODING=UTF8 rasa-postgres psql -U postgres -d postgres
+Get-Content -Raw -Encoding UTF8 db/seed_data.sql | docker exec -i -e PGCLIENTENCODING=UTF8 rasa-postgres psql -U postgres -d rasa_ec_bot
 ```
 
-#### 在 Bash (Linux/macOS/Git Bash) 中运行：
+#### 第二步：导入表结构与数据 (Bash/Git Bash)
 ```bash
 # 创建表结构
-docker exec -i -e PGCLIENTENCODING=UTF8 rasa-postgres psql -U postgres -d postgres < db/init_db.sql
+docker exec -i -e PGCLIENTENCODING=UTF8 rasa-postgres psql -U postgres -d rasa_ec_bot < db/init_db.sql
 
 # 插入测试数据
-docker exec -i -e PGCLIENTENCODING=UTF8 rasa-postgres psql -U postgres -d postgres < db/seed_data.sql
+docker exec -i -e PGCLIENTENCODING=UTF8 rasa-postgres psql -U postgres -d rasa_ec_bot < db/seed_data.sql
 ```
 
 ### 3. 环境变量配置
 在 `backend` 目录下创建 `.env` 文件，并配置数据库连接字符串：
 ```env
-DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/postgres
+DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/rasa_ec_bot
 ```
 
 ## 运行后端服务

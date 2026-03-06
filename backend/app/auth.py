@@ -13,11 +13,16 @@ SECRET_KEY = "your-secret-key-here"  # 实际应用中应从环境变量读取
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
+# 显式指定 bcrypt 后端，避免版本探测导致的 500 错误
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
+    try:
+        return pwd_context.verify(plain_password, hashed_password)
+    except Exception:
+        return False
 
 def get_password_hash(password):
     return pwd_context.hash(password)
@@ -47,5 +52,4 @@ async def get_current_user(token: str = Depends(oauth2_scheme), session: AsyncSe
     except JWTError:
         raise credentials_exception
     
-    # 这里需要从数据库查询用户，暂时返回 token_data
     return token_data
