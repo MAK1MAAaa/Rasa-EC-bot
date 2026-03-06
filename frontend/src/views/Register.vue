@@ -5,7 +5,7 @@ import axios from 'axios'
 
 const router = useRouter()
 const username = ref('')
-const phone = ref('')
+const email = ref('')
 const password = ref('')
 const error = ref('')
 const loading = ref(false)
@@ -17,7 +17,7 @@ const handleRegister = async () => {
   try {
     await axios.post('/api/v1/auth/register', {
       username: username.value,
-      phone: phone.value,
+      email: email.value,
       password: password.value
     })
 
@@ -51,15 +51,14 @@ const handleRegister = async () => {
       </div>
 
       <div class="flex-column">
-        <label>手机号</label>
+        <label>邮箱</label>
       </div>
       <div class="inputForm">
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" viewBox="0 0 32 32" height="20">
-          <g data-name="Layer 3" id="Layer_3">
-            <path d="m30.853 13.87a15 15 0 0 0 -29.729 4.082 15.1 15.1 0 0 0 12.876 12.918 15.6 15.6 0 0 0 2.016.13 14.85 14.85 0 0 0 7.715-2.145 1 1 0 1 0 -1.031-1.711 13.007 13.007 0 1 1 5.458-6.529 2.149 2.149 0 0 1 -4.158-.759v-10.856a1 1 0 0 0 -2 0v1.726a8 8 0 1 0 .2 10.325 4.135 4.135 0 0 0 7.83.274 15.2 15.2 0 0 0 .823-7.455zm-14.853 8.13a6 6 0 1 1 6-6 6.006 6.006 0 0 1 -6 6z"></path>
-          </g>
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+          <polyline points="22,6 12,13 2,6"></polyline>
         </svg>
-        <input v-model="phone" placeholder="请输入手机号" class="input" type="text" required>
+        <input v-model="email" placeholder="请输入邮箱" class="input" type="email" required>
       </div>
 
       <div class="flex-column">
