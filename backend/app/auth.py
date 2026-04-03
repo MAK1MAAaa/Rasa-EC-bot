@@ -4,9 +4,7 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from sqlmodel import select
-from sqlmodel.ext.asyncio.session import AsyncSession
-from .models import User, TokenData
+from .models import TokenData
 
 # 配置
 SECRET_KEY = "your-secret-key-here"  # 实际应用中应从环境变量读取
@@ -16,7 +14,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 30
 # 显式指定 bcrypt 后端，避免版本探测导致的 500 错误
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
 def verify_password(plain_password, hashed_password):
     try:
@@ -37,7 +35,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
-async def get_current_user(token: str = Depends(oauth2_scheme), session: AsyncSession = None):
+async def get_current_user(token: str = Depends(oauth2_scheme)):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
