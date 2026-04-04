@@ -11,6 +11,8 @@ interface OrderListItem {
   total_amount: number
   item_count: number
   created_at: string
+  shop_id: string
+  shop_name: string
 }
 
 interface OrderDetailItem {
@@ -20,6 +22,15 @@ interface OrderDetailItem {
   unit_price: number
   quantity: number
   subtotal: number
+  product_link: string
+}
+
+interface OrderLogistics {
+  tracking_no?: string | null
+  status: string
+  current_location?: string | null
+  estimated_delivery_at?: string | null
+  route_plan: string[]
 }
 
 interface OrderDetail {
@@ -29,7 +40,10 @@ interface OrderDetail {
   contact_email: string
   total_amount: number
   created_at: string
+  shop_id: string
+  shop_name: string
   items: OrderDetailItem[]
+  logistics?: OrderLogistics | null
 }
 
 const route = useRoute()
@@ -77,8 +91,8 @@ onMounted(loadOrders)
 
     <p v-if="error" class="error">{{ error }}</p>
 
-    <div v-if="loading" class="state-card">正在加载订单...</div>
-    <div v-else-if="orders.length === 0" class="state-card">还没有订单，先去下单吧。</div>
+    <div v-if="loading" class="state-card">加载中...</div>
+    <div v-else-if="orders.length === 0" class="state-card">暂无订单</div>
 
     <div v-else class="orders-layout">
       <div class="order-list">
@@ -94,7 +108,10 @@ onMounted(loadOrders)
           </div>
           <div class="row muted">
             <span>{{ new Date(order.created_at).toLocaleString() }}</span>
-            <span>{{ order.item_count }} 件商品</span>
+            <span>{{ order.item_count }} 件</span>
+          </div>
+          <div class="row muted">
+            <span>{{ order.shop_name }}</span>
           </div>
           <div class="row">
             <span class="addr">{{ order.address }}</span>
@@ -106,22 +123,35 @@ onMounted(loadOrders)
       <aside class="detail-card" v-if="selectedOrder">
         <h2>订单详情</h2>
         <p><strong>订单号：</strong>{{ selectedOrder.id }}</p>
+        <p><strong>店铺：</strong>{{ selectedOrder.shop_name }}</p>
         <p><strong>状态：</strong>{{ selectedOrder.status }}</p>
         <p><strong>地址：</strong>{{ selectedOrder.address }}</p>
-        <p><strong>联系邮箱：</strong>{{ selectedOrder.contact_email }}</p>
 
-        <h3>商品明细</h3>
+        <h3>商品</h3>
         <ul>
           <li v-for="item in selectedOrder.items" :key="item.id">
-            <span>{{ item.product_name }} × {{ item.quantity }}</span>
+            <a :href="`/products/${item.product_id}`" target="_blank">{{ item.product_name }}</a>
+            <span>x {{ item.quantity }}</span>
             <strong>¥ {{ item.subtotal.toFixed(2) }}</strong>
           </li>
         </ul>
 
-        <div class="total">订单总额 ¥ {{ selectedOrder.total_amount.toFixed(2) }}</div>
+        <div v-if="selectedOrder.logistics" class="logistics">
+          <h3>物流</h3>
+          <p><strong>运单号：</strong>{{ selectedOrder.logistics.tracking_no || '-' }}</p>
+          <p><strong>状态：</strong>{{ selectedOrder.logistics.status }}</p>
+          <p><strong>当前位置：</strong>{{ selectedOrder.logistics.current_location || '-' }}</p>
+          <p>
+            <strong>预计送达：</strong>
+            {{ selectedOrder.logistics.estimated_delivery_at ? new Date(selectedOrder.logistics.estimated_delivery_at).toLocaleString() : '-' }}
+          </p>
+          <p><strong>途径：</strong>{{ (selectedOrder.logistics.route_plan || []).join(' -> ') || '-' }}</p>
+        </div>
+
+        <div class="total">合计 ¥ {{ selectedOrder.total_amount.toFixed(2) }}</div>
       </aside>
       <aside class="detail-card" v-else>
-        请选择左侧订单查看详情。
+        请选择订单
       </aside>
     </div>
   </section>
@@ -136,25 +166,25 @@ onMounted(loadOrders)
 
 .orders-page h1 {
   margin: 0 0 14px;
-  color: #16395f;
+  color: #312819;
 }
 
 .error {
-  color: #dc2626;
+  color: var(--danger);
 }
 
 .state-card {
-  background: #fff;
-  border: 1px dashed #bfd2e6;
+  background: var(--surface-strong);
+  border: 1px dashed #d8cbb5;
   border-radius: 16px;
   padding: 30px;
   text-align: center;
-  color: #5c738c;
+  color: #6f6658;
 }
 
 .orders-layout {
   display: grid;
-  grid-template-columns: 1fr 400px;
+  grid-template-columns: 1fr 420px;
   gap: 16px;
 }
 
@@ -164,8 +194,8 @@ onMounted(loadOrders)
 }
 
 .order-card {
-  background: #fff;
-  border: 1px solid #d8e5f1;
+  background: var(--surface-strong);
+  border: 1px solid var(--line);
   border-radius: 14px;
   padding: 14px;
   cursor: pointer;
@@ -174,8 +204,8 @@ onMounted(loadOrders)
 }
 
 .order-card.active {
-  border-color: #0ea5e9;
-  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.14);
+  border-color: #b6863e;
+  box-shadow: 0 0 0 3px rgba(182, 134, 62, 0.18);
 }
 
 .row {
@@ -186,38 +216,38 @@ onMounted(loadOrders)
 }
 
 .row.muted {
-  color: #5f7691;
+  color: #706759;
   font-size: 13px;
 }
 
 .status {
-  background: #dff2ff;
-  color: #0b5aa6;
+  background: #f1dfbd;
+  color: #54401f;
   border-radius: 999px;
   font-size: 12px;
   padding: 4px 10px;
 }
 
 .addr {
-  color: #4f6680;
+  color: #4f463a;
 }
 
 .price {
-  color: #0b5aa6;
+  color: #3f2d12;
 }
 
 .detail-card {
-  background: #fff;
-  border: 1px solid #d8e5f1;
+  background: var(--surface-strong);
+  border: 1px solid var(--line);
   border-radius: 14px;
   padding: 16px;
   height: fit-content;
-  color: #36526f;
+  color: #4d4438;
 }
 
 .detail-card h2 {
   margin: 0 0 12px;
-  color: #17395f;
+  color: #32291a;
 }
 
 .detail-card h3 {
@@ -233,18 +263,29 @@ onMounted(loadOrders)
 }
 
 .detail-card li {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 10px;
+}
+
+.detail-card a {
+  color: #5a421d;
+  text-decoration: none;
+}
+
+.logistics {
+  margin-top: 10px;
+  border-top: 1px dashed #d6c8ad;
+  padding-top: 10px;
 }
 
 .total {
   margin-top: 10px;
-  border-top: 1px dashed #c6d8eb;
+  border-top: 1px dashed #d6c8ad;
   padding-top: 10px;
   font-size: 18px;
   font-weight: 700;
-  color: #0b5aa6;
+  color: #3f2b10;
 }
 
 @media (max-width: 980px) {

@@ -7,6 +7,7 @@ import Cart from '@/views/Cart.vue'
 import Checkout from '@/views/Checkout.vue'
 import Orders from '@/views/Orders.vue'
 import ChatSupport from '@/views/ChatSupport.vue'
+import MerchantCenter from '@/views/MerchantCenter.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -24,6 +25,12 @@ const router = createRouter({
       meta: { hideHeader: true, guestOnly: true }
     },
     {
+      path: '/merchant',
+      name: 'MerchantCenter',
+      component: MerchantCenter,
+      meta: { requiresAuth: true, merchantOnly: true }
+    },
+    {
       path: '/products',
       name: 'Products',
       component: Products
@@ -38,19 +45,19 @@ const router = createRouter({
       path: '/cart',
       name: 'Cart',
       component: Cart,
-      meta: { requiresAuth: true }
+      meta: { requiresAuth: true, customerOnly: true }
     },
     {
       path: '/checkout',
       name: 'Checkout',
       component: Checkout,
-      meta: { requiresAuth: true }
+      meta: { requiresAuth: true, customerOnly: true }
     },
     {
       path: '/orders',
       name: 'Orders',
       component: Orders,
-      meta: { requiresAuth: true }
+      meta: { requiresAuth: true, customerOnly: true }
     },
     {
       path: '/chat',
@@ -66,15 +73,27 @@ const router = createRouter({
 
 router.beforeEach((to) => {
   const token = localStorage.getItem('token')
+  const role = localStorage.getItem('user_role')
+
   if (to.meta.requiresAuth && !token) {
     return {
       path: '/login',
       query: { redirect: to.fullPath }
     }
   }
-  if (to.meta.guestOnly && token) {
-    return '/products'
+
+  if (to.meta.merchantOnly && role !== 'merchant') {
+    return role === 'customer' ? '/products' : '/login'
   }
+
+  if (to.meta.customerOnly && role === 'merchant') {
+    return '/merchant'
+  }
+
+  if (to.meta.guestOnly && token) {
+    return role === 'merchant' ? '/merchant' : '/products'
+  }
+
   return true
 })
 

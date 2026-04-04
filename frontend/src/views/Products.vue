@@ -1,12 +1,14 @@
-<script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+﻿<script setup lang="ts">
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import api from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 import { useCartStore } from '@/stores/cart'
 
 interface Product {
   id: string
+  shop_id: string
+  shop_name: string
   name: string
   description?: string
   image_url?: string
@@ -23,6 +25,7 @@ interface ProductFilterMetaResponse {
 
 type SortBy = 'newest' | 'price_asc' | 'price_desc'
 
+const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
 const cartStore = useCartStore()
@@ -37,7 +40,7 @@ const total = ref(0)
 const keywordInput = ref('')
 const keyword = ref('')
 
-const fallbackCategories = ['手机', '音频', '电脑', '外设', '显示器', '穿戴']
+const fallbackCategories = ['手机', '电脑', '音频', '外设', '显示器', '穿戴']
 const availableCategories = ref<string[]>([...fallbackCategories])
 const selectedCategory = ref('')
 const appliedCategory = ref('')
@@ -50,6 +53,9 @@ const appliedMaxPrice = ref<number | null>(null)
 const onlyInStock = ref(false)
 const sortBy = ref<SortBy>('newest')
 
+const appliedShopId = ref('')
+const appliedShopName = ref('')
+
 const priceRange = ref({ min: 0, max: 0 })
 
 const categoryOptions = computed(() => ['全部', ...availableCategories.value])
@@ -60,27 +66,9 @@ const hasActiveFilters = computed(
     appliedMinPrice.value !== null ||
     appliedMaxPrice.value !== null ||
     onlyInStock.value ||
-    sortBy.value !== 'newest'
+    sortBy.value !== 'newest' ||
+    !!appliedShopId.value
 )
-const filterSummary = computed(() => {
-  const chips: string[] = []
-  if (appliedCategory.value) {
-    chips.push(`分类:${appliedCategory.value}`)
-  }
-  if (appliedMinPrice.value !== null || appliedMaxPrice.value !== null) {
-    chips.push(`价格:¥${appliedMinPrice.value ?? 0}-¥${appliedMaxPrice.value ?? '不限'}`)
-  }
-  if (onlyInStock.value) {
-    chips.push('仅看有库存')
-  }
-  if (sortBy.value === 'price_asc') {
-    chips.push('价格升序')
-  }
-  if (sortBy.value === 'price_desc') {
-    chips.push('价格降序')
-  }
-  return chips.join(' / ')
-})
 
 const parsePrice = (value: string): number | null | 'invalid' => {
   const trimmed = value.trim()
@@ -130,6 +118,9 @@ const loadProducts = async () => {
     }
     if (appliedMaxPrice.value !== null) {
       params.max_price = appliedMaxPrice.value
+    }
+    if (appliedShopId.value) {
+      params.shop_id = appliedShopId.value
     }
 
     const response = await api.get('/products', { params })
@@ -181,14 +172,29 @@ const resetFilters = () => {
   appliedMaxPrice.value = null
   onlyInStock.value = false
   sortBy.value = 'newest'
+  appliedShopId.value = ''
+  appliedShopName.value = ''
   page.value = 1
   error.value = ''
+  router.replace({ path: '/products' })
+  loadProducts()
+}
+
+const filterByShop = (shopId: string, shopName: string) => {
+  appliedShopId.value = shopId
+  appliedShopName.value = shopName
+  page.value = 1
+  router.replace({ path: '/products', query: { shop_id: shopId } })
   loadProducts()
 }
 
 const addCart = async (productId: string) => {
   if (!authStore.isLoggedIn) {
     router.push('/login')
+    return
+  }
+  if (!authStore.isCustomer) {
+    error.value = '商家账号不能加入购物车，请切换用户账号'
     return
   }
   try {
@@ -206,9 +212,26 @@ const jumpPage = (value: number) => {
   loadProducts()
 }
 
+watch(
+  () => route.query.shop_id,
+  (shopId) => {
+    if (typeof shopId === 'string' && shopId.trim()) {
+      appliedShopId.value = shopId
+      page.value = 1
+      loadProducts()
+    }
+  }
+)
+
 onMounted(async () => {
   await loadFilterMeta()
   selectedCategory.value = appliedCategory.value
+
+  const queryShopId = typeof route.query.shop_id === 'string' ? route.query.shop_id : ''
+  if (queryShopId) {
+    appliedShopId.value = queryShopId
+  }
+
   await loadProducts()
 })
 </script>
@@ -216,25 +239,23 @@ onMounted(async () => {
 <template>
   <section class="page-wrap">
     <div class="hero">
-      <h1>发现你的下一件心动好物</h1>
-      <p>精选数码、办公与生活科技产品，支持一键加购与快速下单。</p>
-      <button class="chat-link" type="button" @click="router.push('/chat')">去智能客服咨询</button>
+      <h1>本周热卖</h1>
+      <div class="hero-actions">
+        <button class="chat-link" type="button" @click="router.push('/chat')">问客服</button>
+        <button class="ghost-link" type="button" @click="showFilters = !showFilters">{{ showFilters ? '收起筛选' : '筛选' }}</button>
+      </div>
     </div>
 
     <div class="toolbar">
       <div class="search-box">
-        <input v-model="keywordInput" type="text" placeholder="搜索商品名称或描述" @keyup.enter="search">
+        <input v-model="keywordInput" type="text" placeholder="搜商品 / 品牌" @keyup.enter="search">
         <button type="button" @click="search">搜索</button>
       </div>
-      <button type="button" :class="showFilters ? 'filter-toggle active' : 'filter-toggle'" @click="showFilters = !showFilters">
-        {{ showFilters ? '收起筛选' : '筛选商品' }}
-      </button>
     </div>
 
     <transition name="expand">
       <div v-if="showFilters" class="filter-panel">
         <div class="filter-group">
-          <p class="group-title">商品分类</p>
           <div class="categories">
             <button
               v-for="item in categoryOptions"
@@ -256,7 +277,7 @@ onMounted(async () => {
               type="number"
               min="0"
               step="0.01"
-              :placeholder="`最低 ¥${priceRange.min.toFixed(2)}`"
+              :placeholder="`¥${priceRange.min.toFixed(0)}`"
             >
           </label>
           <label>
@@ -266,39 +287,40 @@ onMounted(async () => {
               type="number"
               min="0"
               step="0.01"
-              :placeholder="`最高 ¥${priceRange.max.toFixed(2)}`"
+              :placeholder="`¥${priceRange.max.toFixed(0)}`"
             >
           </label>
           <label>
             <span>排序</span>
             <select v-model="sortBy">
-              <option value="newest">最新上架</option>
-              <option value="price_asc">价格从低到高</option>
-              <option value="price_desc">价格从高到低</option>
+              <option value="newest">最新</option>
+              <option value="price_asc">价格低到高</option>
+              <option value="price_desc">价格高到低</option>
             </select>
           </label>
         </div>
 
         <label class="stock-check">
           <input v-model="onlyInStock" type="checkbox">
-          <span>仅看有库存商品</span>
+          <span>仅看有货</span>
         </label>
 
         <div class="filter-actions">
-          <button type="button" class="apply" @click="applyFilters">应用筛选</button>
-          <button type="button" class="reset" @click="resetFilters">重置筛选</button>
+          <button type="button" class="apply" @click="applyFilters">应用</button>
+          <button type="button" class="reset" @click="resetFilters">重置</button>
         </div>
       </div>
     </transition>
 
     <p v-if="error" class="error">{{ error }}</p>
     <p v-else class="result-text">
-      共 {{ total }} 件商品
-      <span v-if="hasActiveFilters"> · {{ filterSummary }}</span>
+      {{ total }} 件商品
+      <span v-if="hasActiveFilters"> · 已筛选</span>
+      <span v-if="appliedShopName"> · {{ appliedShopName }}</span>
     </p>
 
-    <div v-if="loading" class="state-card">正在加载商品...</div>
-    <div v-else-if="products.length === 0" class="state-card">暂无符合条件的商品</div>
+    <div v-if="loading" class="state-card">加载中...</div>
+    <div v-else-if="products.length === 0" class="state-card">暂无商品</div>
 
     <div v-else class="grid-list">
       <article v-for="product in products" :key="product.id" class="product-card">
@@ -306,15 +328,17 @@ onMounted(async () => {
         <div class="content">
           <span class="category">{{ product.category || '未分类' }}</span>
           <h3>{{ product.name }}</h3>
-          <p>{{ product.description || '这款商品暂时没有详细描述。' }}</p>
+          <button class="shop-link" type="button" @click="filterByShop(product.shop_id, product.shop_name)">
+            {{ product.shop_name }}
+          </button>
           <div class="bottom-row">
             <span class="price">¥ {{ product.price.toFixed(2) }}</span>
             <span class="stock">库存 {{ product.stock }}</span>
           </div>
           <div class="actions">
-            <button type="button" class="ghost" @click="router.push(`/products/${product.id}`)">查看详情</button>
+            <button type="button" class="ghost" @click="router.push(`/products/${product.id}`)">详情</button>
             <button type="button" :disabled="product.stock <= 0" @click="addCart(product.id)">
-              {{ product.stock <= 0 ? '已售罄' : '加入购物车' }}
+              {{ product.stock <= 0 ? '售罄' : '加购' }}
             </button>
           </div>
         </div>
@@ -323,7 +347,7 @@ onMounted(async () => {
 
     <div class="pager">
       <button type="button" :disabled="page <= 1" @click="jumpPage(page - 1)">上一页</button>
-      <span>第 {{ page }} / {{ totalPages }} 页</span>
+      <span>{{ page }} / {{ totalPages }}</span>
       <button type="button" :disabled="page >= totalPages" @click="jumpPage(page + 1)">下一页</button>
     </div>
   </section>
@@ -337,11 +361,18 @@ onMounted(async () => {
 }
 
 .hero {
-  background: linear-gradient(120deg, #0b5aa6, #0f766e);
-  color: #fff;
-  border-radius: 20px;
-  padding: 28px;
-  box-shadow: 0 18px 34px rgba(11, 90, 166, 0.24);
+  background:
+    linear-gradient(135deg, rgba(50, 39, 24, 0.95), rgba(114, 82, 38, 0.93)),
+    radial-gradient(circle at 80% 0%, rgba(255, 255, 255, 0.14), transparent 42%);
+  color: #fff6ea;
+  border-radius: 22px;
+  padding: 24px;
+  box-shadow: 0 20px 40px rgba(66, 46, 18, 0.2);
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
 }
 
 .hero h1 {
@@ -349,26 +380,32 @@ onMounted(async () => {
   font-size: 30px;
 }
 
-.hero p {
-  margin: 10px 0 0;
-  color: rgba(255, 255, 255, 0.9);
-  max-width: 560px;
+.hero-actions {
+  display: inline-flex;
+  gap: 8px;
+}
+
+.chat-link,
+.ghost-link {
+  border: none;
+  border-radius: 999px;
+  padding: 10px 16px;
+  font-weight: 600;
 }
 
 .chat-link {
-  margin-top: 16px;
-  border: none;
-  border-radius: 10px;
-  padding: 10px 14px;
-  background: rgba(255, 255, 255, 0.18);
-  color: #fff;
+  background: #f6e2be;
+  color: #3f2b10;
+}
+
+.ghost-link {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fffaf2;
+  border: 1px solid rgba(255, 255, 255, 0.35);
 }
 
 .toolbar {
-  margin-top: 20px;
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 10px;
+  margin-top: 18px;
 }
 
 .search-box {
@@ -378,54 +415,29 @@ onMounted(async () => {
 }
 
 .search-box input {
-  border: 1px solid #c5d8ee;
-  border-radius: 12px;
+  border: 1px solid #d8ccb5;
+  border-radius: 14px;
   padding: 12px 14px;
   font-size: 14px;
+  background: #fffdf7;
 }
 
 .search-box button {
   border: none;
-  border-radius: 12px;
-  background: #0b5aa6;
-  color: #fff;
-  padding: 0 16px;
-}
-
-.filter-toggle {
-  border: 1px solid #b9d3ec;
-  background: #f0f7ff;
-  color: #20507f;
-  border-radius: 12px;
-  padding: 0 16px;
-  font-weight: 600;
-}
-
-.filter-toggle.active {
-  border-color: #0ea5e9;
-  background: #dff2ff;
-  color: #0b5aa6;
+  border-radius: 999px;
+  background: #2e2313;
+  color: #fff6e8;
+  padding: 0 18px;
 }
 
 .filter-panel {
   margin-top: 12px;
-  background: #fff;
-  border: 1px solid #d6e4f2;
+  background: var(--surface-strong);
+  border: 1px solid var(--line);
   border-radius: 16px;
   padding: 14px;
   display: grid;
   gap: 14px;
-}
-
-.filter-group {
-  display: grid;
-  gap: 8px;
-}
-
-.group-title {
-  margin: 0;
-  color: #214e7a;
-  font-weight: 700;
 }
 
 .categories {
@@ -435,17 +447,17 @@ onMounted(async () => {
 }
 
 .pill {
-  border: 1px solid #bfd5ea;
-  background: #f8fbff;
-  color: #365879;
+  border: 1px solid #d8cab2;
+  background: #fff8eb;
+  color: #5d523f;
   border-radius: 999px;
   padding: 8px 12px;
 }
 
 .pill.active {
-  border-color: #0ea5e9;
-  color: #0b5aa6;
-  background: #dff2ff;
+  border-color: #b6863e;
+  color: #3d2c14;
+  background: #f4dfbd;
 }
 
 .filter-grid {
@@ -457,24 +469,24 @@ onMounted(async () => {
 .filter-grid label {
   display: grid;
   gap: 6px;
-  color: #365879;
+  color: #5a5143;
   font-size: 13px;
 }
 
 .filter-grid input,
 .filter-grid select {
-  border: 1px solid #c5d8ee;
+  border: 1px solid #d8ccb5;
   border-radius: 10px;
   padding: 10px 12px;
   font-size: 14px;
-  background: #fff;
+  background: #fffdf7;
 }
 
 .stock-check {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  color: #365879;
+  color: #5a5143;
   font-size: 14px;
 }
 
@@ -485,19 +497,18 @@ onMounted(async () => {
 
 .filter-actions button {
   border: none;
-  border-radius: 10px;
-  padding: 10px 14px;
-  cursor: pointer;
+  border-radius: 999px;
+  padding: 10px 16px;
 }
 
 .filter-actions .apply {
-  background: #0b5aa6;
-  color: #fff;
+  background: #2f2413;
+  color: #fff4e6;
 }
 
 .filter-actions .reset {
-  background: #eaf2fb;
-  color: #20507f;
+  background: #efdfc2;
+  color: #4a3a1e;
 }
 
 .result-text,
@@ -505,17 +516,21 @@ onMounted(async () => {
   margin: 14px 0;
 }
 
+.result-text {
+  color: #655c4f;
+}
+
 .error {
-  color: #dc2626;
+  color: var(--danger);
 }
 
 .state-card {
-  background: #fff;
-  border: 1px dashed #c8d7e8;
+  background: var(--surface-strong);
+  border: 1px dashed #d9cdb7;
   border-radius: 16px;
   padding: 30px;
   text-align: center;
-  color: #5f7690;
+  color: #756a58;
 }
 
 .grid-list {
@@ -525,12 +540,18 @@ onMounted(async () => {
 }
 
 .product-card {
-  background: #fff;
-  border: 1px solid #d8e5f1;
+  background: var(--surface-strong);
+  border: 1px solid var(--line);
   border-radius: 16px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.product-card:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-soft);
 }
 
 .thumb {
@@ -546,21 +567,25 @@ onMounted(async () => {
 }
 
 .category {
-  color: #0f766e;
+  color: #826d46;
   font-size: 12px;
   font-weight: 600;
 }
 
 .content h3 {
   margin: 0;
-  color: #17395f;
+  color: #2b2317;
+  font-size: 18px;
 }
 
-.content p {
-  margin: 0;
-  color: #5a718b;
-  font-size: 14px;
-  min-height: 42px;
+.shop-link {
+  border: none;
+  background: #efe2c9;
+  color: #544427;
+  border-radius: 8px;
+  width: fit-content;
+  padding: 4px 8px;
+  font-size: 12px;
 }
 
 .bottom-row {
@@ -570,12 +595,12 @@ onMounted(async () => {
 }
 
 .price {
-  color: #0b5aa6;
+  color: #3f2b10;
   font-weight: 700;
 }
 
 .stock {
-  color: #6d8099;
+  color: #7c7466;
   font-size: 13px;
 }
 
@@ -587,20 +612,20 @@ onMounted(async () => {
 
 .actions button {
   border: none;
-  border-radius: 10px;
-  padding: 10px 0;
+  border-radius: 999px;
+  padding: 9px 0;
   cursor: pointer;
-  background: #0b5aa6;
-  color: #fff;
+  background: #2f2413;
+  color: #fff5e8;
 }
 
 .actions button:disabled {
-  background: #94a3b8;
+  background: #b8b0a4;
 }
 
 .actions .ghost {
-  background: #eaf2fb;
-  color: #20507f;
+  background: #efe2c9;
+  color: #4f3f26;
 }
 
 .pager {
@@ -613,10 +638,10 @@ onMounted(async () => {
 
 .pager button {
   border: none;
-  background: #0f2d53;
-  color: #fff;
-  border-radius: 10px;
-  padding: 8px 12px;
+  background: #2f2413;
+  color: #fff5e8;
+  border-radius: 999px;
+  padding: 8px 14px;
 }
 
 .pager button:disabled {
@@ -636,15 +661,11 @@ onMounted(async () => {
 }
 
 @media (max-width: 860px) {
-  .toolbar {
+  .filter-grid {
     grid-template-columns: 1fr;
   }
 
-  .filter-toggle {
-    min-height: 44px;
-  }
-
-  .filter-grid {
+  .search-box {
     grid-template-columns: 1fr;
   }
 }
@@ -663,4 +684,3 @@ onMounted(async () => {
   }
 }
 </style>
-

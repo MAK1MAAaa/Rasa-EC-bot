@@ -58,34 +58,34 @@ onMounted(loadPage)
 
 <template>
   <section class="checkout-page">
-    <h1>确认订单</h1>
+    <h1>提交订单</h1>
 
-    <div v-if="loading" class="state-card">正在加载结算信息...</div>
+    <div v-if="loading" class="state-card">加载中...</div>
 
     <div v-else-if="cartStore.items.length === 0" class="state-card">
-      购物车为空，暂时无法结算。
-      <button type="button" @click="router.push('/products')">去选购商品</button>
+      购物车为空
+      <button type="button" @click="router.push('/products')">去选购</button>
     </div>
 
     <div v-else class="checkout-layout">
       <div class="form-card">
         <h2>收货信息</h2>
 
-        <label>收货地址</label>
+        <label>地址</label>
         <textarea v-model="address" rows="4" placeholder="请输入详细地址"></textarea>
 
-        <label>联系邮箱</label>
+        <label>邮箱</label>
         <input v-model="contactEmail" type="email" placeholder="you@example.com">
 
         <p v-if="error" class="error">{{ error }}</p>
 
         <button type="button" :disabled="submitting" @click="submitOrder">
-          {{ submitting ? '提交中...' : '提交订单（模拟支付）' }}
+          {{ submitting ? '提交中...' : '确认下单' }}
         </button>
       </div>
 
       <aside class="summary-card">
-        <h2>商品清单</h2>
+        <h2>商品</h2>
         <ul>
           <li v-for="item in cartStore.items" :key="item.id">
             <span>{{ item.product_name }} x {{ item.quantity }}</span>
@@ -107,25 +107,25 @@ onMounted(loadPage)
 
 .checkout-page h1 {
   margin: 0 0 14px;
-  color: #16395f;
+  color: #2f2618;
 }
 
 .state-card {
-  background: #fff;
-  border: 1px dashed #bfd2e6;
+  background: var(--surface-strong);
+  border: 1px dashed #d8ccb6;
   border-radius: 16px;
   padding: 30px;
   text-align: center;
-  color: #5c738c;
+  color: #6b6153;
 }
 
 .state-card button {
   margin-top: 12px;
   border: none;
-  border-radius: 10px;
-  background: #0b5aa6;
-  color: white;
-  padding: 10px 12px;
+  border-radius: 999px;
+  background: #2f2413;
+  color: #fff6e8;
+  padding: 10px 14px;
 }
 
 .checkout-layout {
@@ -136,8 +136,8 @@ onMounted(loadPage)
 
 .form-card,
 .summary-card {
-  background: #fff;
-  border: 1px solid #d8e5f1;
+  background: var(--surface-strong);
+  border: 1px solid var(--line);
   border-radius: 14px;
   padding: 18px;
 }
@@ -150,31 +150,32 @@ onMounted(loadPage)
 .form-card h2,
 .summary-card h2 {
   margin: 0 0 8px;
-  color: #17395f;
+  color: #312819;
 }
 
 label {
-  font-size: 14px;
-  color: #2f4f6f;
+  font-size: 13px;
+  color: #61584b;
   font-weight: 600;
 }
 
 textarea,
 input {
-  border: 1px solid #c5d8ee;
+  border: 1px solid #d8ccb5;
   border-radius: 12px;
   padding: 11px 12px;
   font-size: 14px;
+  background: #fffcf5;
 }
 
 button {
   width: fit-content;
   border: none;
-  border-radius: 10px;
-  background: linear-gradient(135deg, #0b5aa6, #0f766e);
-  color: white;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #2f2413, #765322);
+  color: #fff7ea;
   font-weight: 600;
-  padding: 10px 14px;
+  padding: 10px 16px;
 }
 
 button:disabled {
@@ -183,7 +184,7 @@ button:disabled {
 
 .error {
   margin: 0;
-  color: #dc2626;
+  color: var(--danger);
   font-size: 14px;
 }
 
@@ -199,16 +200,16 @@ button:disabled {
   display: flex;
   justify-content: space-between;
   gap: 10px;
-  color: #4e6580;
+  color: #5b5244;
 }
 
 .total {
   margin-top: 12px;
-  border-top: 1px dashed #c6d8eb;
+  border-top: 1px dashed #d6c8ae;
   padding-top: 10px;
   font-size: 20px;
   font-weight: 700;
-  color: #0b5aa6;
+  color: #3e2c12;
 }
 
 @media (max-width: 920px) {

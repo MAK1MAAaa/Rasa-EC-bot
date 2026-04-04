@@ -47,13 +47,13 @@ onMounted(loadCart)
   <section class="cart-page">
     <div class="header-row">
       <h1>购物车</h1>
-      <button type="button" class="ghost" @click="router.push('/products')">继续逛逛</button>
+      <button type="button" class="ghost" @click="router.push('/products')">继续购物</button>
     </div>
 
-    <div v-if="loading" class="state-card">正在加载购物车...</div>
+    <div v-if="loading" class="state-card">加载中...</div>
 
     <div v-else-if="cartStore.items.length === 0" class="state-card">
-      购物车还是空的，快去挑选心仪商品。
+      购物车为空
     </div>
 
     <div v-else class="cart-layout">
@@ -62,7 +62,7 @@ onMounted(loadCart)
           <img :src="item.product_image_url || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=400&q=80'" :alt="item.product_name">
           <div class="item-main">
             <h3>{{ item.product_name }}</h3>
-            <p>单价 ¥ {{ item.unit_price.toFixed(2) }}</p>
+            <p>¥ {{ item.unit_price.toFixed(2) }}</p>
           </div>
           <div class="qty-box">
             <button @click="decrease(item.id, item.quantity)">-</button>
@@ -77,8 +77,8 @@ onMounted(loadCart)
       </div>
 
       <aside class="summary-card">
-        <h2>订单汇总</h2>
-        <div class="sum-row"><span>商品件数</span><span>{{ cartStore.totalItems }}</span></div>
+        <h2>结算</h2>
+        <div class="sum-row"><span>件数</span><span>{{ cartStore.totalItems }}</span></div>
         <div class="sum-row total"><span>合计</span><span>¥ {{ cartStore.totalAmount.toFixed(2) }}</span></div>
         <button type="button" @click="router.push('/checkout')">去结算</button>
       </aside>
@@ -102,24 +102,24 @@ onMounted(loadCart)
 
 .header-row h1 {
   margin: 0;
-  color: #16395f;
+  color: #2d2517;
 }
 
 .ghost {
-  border: 1px solid #bdd3e8;
-  background: #eff6fd;
-  color: #1c4a76;
-  border-radius: 10px;
-  padding: 8px 12px;
+  border: 1px solid #d5c7ad;
+  background: #f3e6cf;
+  color: #4a3b20;
+  border-radius: 999px;
+  padding: 8px 14px;
 }
 
 .state-card {
-  background: #fff;
-  border: 1px dashed #bfd2e6;
+  background: var(--surface-strong);
+  border: 1px dashed #d8ccb6;
   border-radius: 16px;
   padding: 28px;
   text-align: center;
-  color: #5c738c;
+  color: #6b6254;
 }
 
 .cart-layout {
@@ -134,8 +134,8 @@ onMounted(loadCart)
 }
 
 .item-card {
-  background: #fff;
-  border: 1px solid #d8e5f1;
+  background: var(--surface-strong);
+  border: 1px solid var(--line);
   border-radius: 14px;
   padding: 12px;
   display: grid;
@@ -153,28 +153,28 @@ onMounted(loadCart)
 
 .item-main h3 {
   margin: 0;
-  color: #17395f;
+  color: #2e2517;
 }
 
 .item-main p {
   margin: 6px 0 0;
-  color: #60748d;
+  color: #746b5c;
 }
 
 .qty-box {
   display: inline-flex;
   align-items: center;
-  border: 1px solid #c5d8ee;
-  border-radius: 10px;
+  border: 1px solid #d8cab2;
+  border-radius: 999px;
   overflow: hidden;
 }
 
 .qty-box button {
   border: none;
-  width: 30px;
-  height: 30px;
-  background: #f0f7ff;
-  color: #194874;
+  width: 32px;
+  height: 32px;
+  background: #f2e4cb;
+  color: #513f24;
 }
 
 .qty-box span {
@@ -189,19 +189,19 @@ onMounted(loadCart)
 }
 
 .right-col strong {
-  color: #0b5aa6;
+  color: #3f2d12;
 }
 
 .text-btn {
   border: none;
   background: transparent;
-  color: #dc2626;
+  color: var(--danger);
   cursor: pointer;
 }
 
 .summary-card {
-  background: #fff;
-  border: 1px solid #d8e5f1;
+  background: var(--surface-strong);
+  border: 1px solid var(--line);
   border-radius: 14px;
   padding: 16px;
   height: fit-content;
@@ -209,7 +209,7 @@ onMounted(loadCart)
 
 .summary-card h2 {
   margin: 0 0 14px;
-  color: #16395f;
+  color: #2f2618;
   font-size: 18px;
 }
 
@@ -217,14 +217,14 @@ onMounted(loadCart)
   display: flex;
   justify-content: space-between;
   margin-bottom: 10px;
-  color: #4c6178;
+  color: #5e5547;
 }
 
 .sum-row.total {
   font-size: 18px;
   font-weight: 700;
-  color: #0b5aa6;
-  border-top: 1px dashed #c6d8eb;
+  color: #3d2b11;
+  border-top: 1px dashed #d6c8ae;
   padding-top: 10px;
 }
 
@@ -232,9 +232,9 @@ onMounted(loadCart)
   width: 100%;
   margin-top: 12px;
   border: none;
-  border-radius: 10px;
-  background: linear-gradient(135deg, #0b5aa6, #0f766e);
-  color: white;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #2f2413, #765322);
+  color: #fff6ea;
   padding: 11px;
   font-weight: 600;
 }

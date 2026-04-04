@@ -7,6 +7,8 @@ import { useCartStore } from '@/stores/cart'
 
 interface Product {
   id: string
+  shop_id: string
+  shop_name: string
   name: string
   description?: string
   image_url?: string
@@ -26,7 +28,7 @@ const error = ref('')
 const product = ref<Product | null>(null)
 const quantity = ref(1)
 
-const canBuy = computed(() => Boolean(product.value && product.value.stock > 0))
+const canBuy = computed(() => Boolean(product.value && product.value.stock > 0 && authStore.isCustomer))
 
 const loadProduct = async () => {
   loading.value = true
@@ -47,6 +49,10 @@ const addToCart = async () => {
     router.push('/login')
     return
   }
+  if (!authStore.isCustomer) {
+    error.value = '商家账号不能加入购物车'
+    return
+  }
 
   const safeQuantity = Math.min(Math.max(1, Number(quantity.value) || 1), product.value.stock)
   quantity.value = safeQuantity
@@ -59,6 +65,11 @@ const addToCart = async () => {
   }
 }
 
+const jumpToShop = () => {
+  if (!product.value) return
+  router.push({ path: '/products', query: { shop_id: product.value.shop_id } })
+}
+
 onMounted(loadProduct)
 </script>
 
@@ -66,7 +77,7 @@ onMounted(loadProduct)
   <section class="detail-page">
     <button class="back-btn" type="button" @click="router.back()">← 返回</button>
 
-    <div v-if="loading" class="state-card">正在加载商品详情...</div>
+    <div v-if="loading" class="state-card">加载中...</div>
     <div v-else-if="error" class="state-card error">{{ error }}</div>
 
     <article v-else-if="product" class="detail-card">
@@ -75,7 +86,7 @@ onMounted(loadProduct)
       <div class="info">
         <span class="category">{{ product.category || '未分类' }}</span>
         <h1>{{ product.name }}</h1>
-        <p class="desc">{{ product.description || '暂无商品描述。' }}</p>
+        <button class="shop-btn" type="button" @click="jumpToShop">{{ product.shop_name }}</button>
 
         <div class="price-row">
           <span class="price">¥ {{ product.price.toFixed(2) }}</span>
@@ -83,10 +94,10 @@ onMounted(loadProduct)
         </div>
 
         <div class="buy-box">
-          <label>购买数量</label>
+          <label>数量</label>
           <input v-model.number="quantity" type="number" min="1" :max="product.stock" class="qty">
           <button type="button" :disabled="!canBuy" @click="addToCart">
-            {{ canBuy ? '加入购物车' : '已售罄' }}
+            {{ canBuy ? '加入购物车' : authStore.isMerchant ? '商家账号不可购买' : '已售罄' }}
           </button>
         </div>
       </div>
@@ -103,28 +114,28 @@ onMounted(loadProduct)
 
 .back-btn {
   border: none;
-  background: #e2edf8;
-  color: #23476f;
-  border-radius: 10px;
-  padding: 8px 12px;
+  background: #efe0c3;
+  color: #4b3a20;
+  border-radius: 999px;
+  padding: 8px 14px;
   margin-bottom: 14px;
 }
 
 .state-card {
-  background: #fff;
-  border: 1px dashed #bfd2e6;
+  background: var(--surface-strong);
+  border: 1px dashed #d8cbb5;
   border-radius: 16px;
   padding: 30px;
   text-align: center;
 }
 
 .state-card.error {
-  color: #b91c1c;
+  color: var(--danger);
 }
 
 .detail-card {
-  background: #fff;
-  border: 1px solid #d8e5f1;
+  background: var(--surface-strong);
+  border: 1px solid var(--line);
   border-radius: 18px;
   overflow: hidden;
   display: grid;
@@ -145,20 +156,23 @@ onMounted(loadProduct)
 }
 
 .category {
-  color: #0f766e;
+  color: #836e47;
   font-weight: 700;
   font-size: 13px;
 }
 
 .info h1 {
   margin: 0;
-  color: #16395f;
+  color: #2c2316;
 }
 
-.desc {
-  margin: 0;
-  color: #586f89;
-  line-height: 1.7;
+.shop-btn {
+  width: fit-content;
+  border: none;
+  border-radius: 999px;
+  background: #efe2c9;
+  color: #4a3a20;
+  padding: 6px 10px;
 }
 
 .price-row {
@@ -169,12 +183,12 @@ onMounted(loadProduct)
 
 .price {
   font-size: 30px;
-  color: #0b5aa6;
+  color: #3f2b10;
   font-weight: 700;
 }
 
 .stock {
-  color: #6e8097;
+  color: #756b5d;
 }
 
 .buy-box {
@@ -184,29 +198,30 @@ onMounted(loadProduct)
 }
 
 .buy-box label {
-  color: #2f4f6f;
+  color: #534a3d;
   font-weight: 600;
 }
 
 .qty {
   width: 130px;
-  border: 1px solid #c5d8ee;
+  border: 1px solid #d8ccb5;
   border-radius: 10px;
   padding: 10px 12px;
+  background: #fffcf5;
 }
 
 .buy-box button {
-  width: 180px;
+  width: 220px;
   border: none;
-  border-radius: 10px;
-  background: linear-gradient(135deg, #0b5aa6, #0f766e);
-  color: #fff;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #2f2413, #765322);
+  color: #fff7ea;
   font-weight: 600;
   padding: 10px 12px;
 }
 
 .buy-box button:disabled {
-  background: #9aa8b8;
+  background: #b3aa9d;
 }
 
 @media (max-width: 860px) {

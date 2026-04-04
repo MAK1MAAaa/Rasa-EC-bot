@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
 import api from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
@@ -18,18 +18,13 @@ const sending = ref(false)
 const inputText = ref('')
 const chatLogRef = ref<HTMLElement | null>(null)
 
-const quickPrompts = [
-  '查询我的订单',
-  '推荐几款手机',
-  '推荐一些高性价比电脑',
-  '帮我看下物流要怎么查'
-]
+const quickPrompts = ['查我的订单', '推荐几款手机', '推荐高性价比电脑', '物流怎么查']
 
 const bubbles = ref<ChatBubble[]>([
   {
     id: 'welcome',
     role: 'bot',
-    text: '你好，我是智能客服。你可以咨询订单、物流、商品推荐，或直接闲聊。'
+    text: '你好，我是商城客服。'
   }
 ])
 
@@ -92,7 +87,7 @@ const sendMessage = async (overrideText?: string) => {
     })
     const replies = Array.isArray(response.data.messages) ? response.data.messages : []
     if (replies.length === 0) {
-      pushBubble('bot', '我暂时没有生成回复，请稍后再试。')
+      pushBubble('bot', '暂时没有回复，请稍后重试。')
     } else {
       replies.forEach((item) => {
         if (typeof item.text === 'string' && item.text.trim()) {
@@ -101,7 +96,7 @@ const sendMessage = async (overrideText?: string) => {
       })
     }
   } catch (err: any) {
-    pushBubble('system', err.response?.data?.detail || '客服服务暂时不可用，请稍后再试。')
+    pushBubble('system', err.response?.data?.detail || '客服服务暂不可用，请稍后再试。')
   } finally {
     sending.value = false
     await scrollToBottom()
@@ -117,10 +112,9 @@ const sendQuickPrompt = async (prompt: string) => {
   <section class="chat-page">
     <div class="hero">
       <div class="hero-head">
-        <h1>智能客服中心</h1>
-        <span class="user-chip">当前会话：{{ userLabel }}</span>
+        <h1>在线客服</h1>
+        <span class="user-chip">{{ userLabel }}</span>
       </div>
-      <p>订单查询、商品推荐、物流咨询一站式处理。回复里的链接可直接跳转到对应页面。</p>
       <div class="quick-actions">
         <button v-for="item in quickPrompts" :key="item" type="button" @click="sendQuickPrompt(item)">
           {{ item }}
@@ -131,7 +125,7 @@ const sendQuickPrompt = async (prompt: string) => {
     <div class="chat-panel">
       <div ref="chatLogRef" class="chat-log" role="log" aria-live="polite">
         <article v-for="item in bubbles" :key="item.id" :class="`bubble ${item.role}`">
-          <span class="tag">{{ item.role === 'user' ? '你' : item.role === 'bot' ? '客服' : '系统' }}</span>
+          <span class="tag">{{ item.role === 'user' ? '我' : item.role === 'bot' ? '客服' : '系统' }}</span>
           <p v-html="renderMessageHtml(item.text)"></p>
         </article>
       </div>
@@ -140,7 +134,7 @@ const sendQuickPrompt = async (prompt: string) => {
         <input
           v-model="inputText"
           type="text"
-          placeholder="输入你的问题，例如：查询我的订单 / 推荐几款手机"
+          placeholder="输入问题..."
           @keyup.enter="sendMessage"
         >
         <button type="button" :disabled="sending || !inputText.trim()" @click="sendMessage()">
@@ -153,7 +147,7 @@ const sendQuickPrompt = async (prompt: string) => {
 
 <style scoped>
 .chat-page {
-  max-width: 1040px;
+  max-width: 1180px;
   margin: 0 auto;
   padding: 24px 18px 40px;
   display: grid;
@@ -162,12 +156,10 @@ const sendQuickPrompt = async (prompt: string) => {
 
 .hero {
   border-radius: 20px;
-  padding: 22px;
-  color: #fff;
-  background:
-    radial-gradient(circle at 85% 0%, rgba(255, 255, 255, 0.24), transparent 40%),
-    linear-gradient(130deg, #0f2d53 0%, #0b5aa6 48%, #0f766e 100%);
-  box-shadow: 0 18px 34px rgba(11, 76, 142, 0.22);
+  padding: 20px;
+  color: #fff7ea;
+  background: linear-gradient(130deg, #2f2413 0%, #765322 52%, #315f58 100%);
+  box-shadow: 0 18px 34px rgba(56, 39, 15, 0.25);
   display: grid;
   gap: 10px;
 }
@@ -182,12 +174,7 @@ const sendQuickPrompt = async (prompt: string) => {
 
 .hero h1 {
   margin: 0;
-  font-size: 30px;
-}
-
-.hero p {
-  margin: 0;
-  color: rgba(255, 255, 255, 0.92);
+  font-size: 28px;
 }
 
 .user-chip {
@@ -199,7 +186,7 @@ const sendQuickPrompt = async (prompt: string) => {
 }
 
 .quick-actions {
-  margin-top: 6px;
+  margin-top: 2px;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -216,29 +203,55 @@ const sendQuickPrompt = async (prompt: string) => {
 }
 
 .chat-panel {
-  background: #fff;
-  border: 1px solid #d8e5f1;
+  background:
+    radial-gradient(circle at 0% 0%, rgba(238, 219, 184, 0.44), transparent 36%),
+    linear-gradient(180deg, #fffbf3 0%, #f8f2e6 100%);
+  border: 1px solid var(--line);
   border-radius: 18px;
   overflow: hidden;
-  display: grid;
-  grid-template-rows: 1fr auto;
-  min-height: 560px;
+  display: flex;
+  flex-direction: column;
+  min-height: clamp(640px, 76vh, 860px);
 }
 
 .chat-log {
-  padding: 16px;
+  padding: 18px 16px 0;
+  flex: 1 1 auto;
+  min-height: 0;
+  align-items: start;
   overflow-y: auto;
-  background:
-    radial-gradient(circle at 0% 0%, rgba(207, 231, 255, 0.42), transparent 36%),
-    linear-gradient(180deg, #f8fbff 0%, #f3f8fd 100%);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(87, 64, 31, 0.42) rgba(112, 92, 56, 0.12);
+  background: transparent;
   display: grid;
-  gap: 10px;
+  gap: 2px;
+}
+
+.chat-log::-webkit-scrollbar {
+  width: 10px;
+}
+
+.chat-log::-webkit-scrollbar-track {
+  background: rgba(112, 92, 56, 0.12);
+  border-radius: 999px;
+}
+
+.chat-log::-webkit-scrollbar-thumb {
+  background: rgba(87, 64, 31, 0.42);
+  border-radius: 999px;
+}
+
+.chat-log::-webkit-scrollbar-thumb:hover {
+  background: rgba(87, 64, 31, 0.62);
 }
 
 .bubble {
-  max-width: 84%;
+  width: fit-content;
+  max-width: min(84%, 720px);
+  height: fit-content;
   border-radius: 14px;
   padding: 10px 12px;
+  margin: 6px 0;
   line-height: 1.65;
   white-space: pre-wrap;
   display: grid;
@@ -246,8 +259,14 @@ const sendQuickPrompt = async (prompt: string) => {
   border: 1px solid transparent;
 }
 
+.chat-log .bubble:last-child {
+  margin-bottom: 0;
+}
+
 .bubble p {
   margin: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .tag {
@@ -257,48 +276,50 @@ const sendQuickPrompt = async (prompt: string) => {
 
 .bubble.user {
   justify-self: end;
-  background: #0b5aa6;
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.16);
+  background: #2f2413;
+  color: #fff7eb;
 }
 
 .bubble.bot {
   justify-self: start;
-  background: #eaf4ff;
-  color: #1a3657;
-  border-color: #cfe3f7;
+  align-self: flex-start;
+  background: #f1e3ca;
+  color: #433721;
+  border-color: #e1cfb0;
 }
 
 .bubble.system {
   justify-self: center;
   background: #fff1f2;
   color: #be123c;
-  max-width: 92%;
+  max-width: min(92%, 760px);
   border-color: #fecdd3;
 }
 
 .input-row {
-  border-top: 1px solid #e0eaf5;
-  padding: 12px;
+  border-top: 1px solid rgba(0, 0, 0, 0.05);
+  margin-top: 0;
+  padding: 10px 12px 12px;
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 10px;
-  background: #fff;
+  background: transparent;
 }
 
 .input-row input {
-  border: 1px solid #c5d8ee;
+  border: 1px solid #d8cbb4;
   border-radius: 12px;
   padding: 11px 12px;
   font-size: 14px;
+  background: #fffef9;
 }
 
 .input-row button {
   border: none;
-  border-radius: 12px;
+  border-radius: 999px;
   padding: 0 18px;
-  background: #0b5aa6;
-  color: #fff;
+  background: #2f2413;
+  color: #fff7ea;
   font-weight: 600;
   cursor: pointer;
 }
@@ -314,17 +335,13 @@ const sendQuickPrompt = async (prompt: string) => {
   word-break: break-all;
 }
 
-:deep(.bubble.user a) {
-  color: #dff2ff;
-}
-
 @media (max-width: 760px) {
   .hero h1 {
-    font-size: 26px;
+    font-size: 24px;
   }
 
   .chat-panel {
-    min-height: 72vh;
+    min-height: 78vh;
   }
 
   .bubble {

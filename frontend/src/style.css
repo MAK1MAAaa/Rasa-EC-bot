@@ -1,12 +1,27 @@
-﻿@tailwind base;
+﻿@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@500;600;700&family=Outfit:wght@400;500;600;700&display=swap');
+
+@tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  font-family: 'Poppins', 'Noto Sans SC', 'Segoe UI', sans-serif;
+  --bg: #f6f1e7;
+  --surface: #fffaf0;
+  --surface-strong: #fffdf7;
+  --text: #1f2532;
+  --text-muted: #7b7366;
+  --line: #e5dcc9;
+  --brand: #b6863e;
+  --brand-strong: #8f6426;
+  --accent: #315f58;
+  --danger: #c2403a;
+  --radius-lg: 18px;
+  --radius-md: 12px;
+  --shadow-soft: 0 12px 30px rgba(73, 53, 21, 0.08);
+  font-family: 'Outfit', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   line-height: 1.5;
   font-weight: 400;
-  color: #203b57;
+  color: var(--text);
 }
 
 * {
@@ -15,6 +30,12 @@
 
 body {
   margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 8% 0%, rgba(182, 134, 62, 0.17), transparent 28%),
+    radial-gradient(circle at 88% 16%, rgba(49, 95, 88, 0.13), transparent 30%),
+    var(--bg);
+  color: var(--text);
 }
 
 button,
@@ -22,3 +43,15 @@ input,
 textarea {
   font-family: inherit;
 }
+
+h1,
+h2,
+h3 {
+  font-family: 'Noto Serif SC', 'Songti SC', serif;
+  letter-spacing: 0.02em;
+}
+
+a {
+  color: inherit;
+}
+

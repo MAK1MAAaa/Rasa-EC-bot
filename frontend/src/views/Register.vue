@@ -33,8 +33,7 @@ const handleRegister = async () => {
 <template>
   <div class="auth-page">
     <form class="auth-card" @submit.prevent="handleRegister">
-      <h1>创建账户</h1>
-      <p class="subtitle">注册后即可添加商品到购物车并下单</p>
+      <h1>创建账号</h1>
 
       <label>用户名</label>
       <input v-model="username" type="text" placeholder="请输入用户名" required>
@@ -68,51 +67,47 @@ const handleRegister = async () => {
 
 .auth-card {
   width: 100%;
-  max-width: 420px;
-  background: rgba(255, 255, 255, 0.95);
-  border: 1px solid #d7e5f4;
-  border-radius: 18px;
-  box-shadow: 0 22px 48px rgba(15, 45, 83, 0.12);
-  padding: 32px;
+  max-width: 440px;
+  background: var(--surface-strong);
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  box-shadow: var(--shadow-soft);
+  padding: 34px;
   display: grid;
   gap: 12px;
 }
 
 .auth-card h1 {
-  margin: 0;
-  color: #0f2d53;
-}
-
-.subtitle {
-  margin: 0 0 8px 0;
-  color: #60758f;
+  margin: 0 0 8px;
+  color: #2f2516;
 }
 
 label {
-  font-size: 14px;
-  color: #2f4f6f;
+  font-size: 13px;
+  color: #625a4f;
   font-weight: 600;
 }
 
 input {
-  border: 1px solid #c9d9ea;
+  border: 1px solid #d6ccb8;
   border-radius: 12px;
   padding: 12px 14px;
   font-size: 14px;
+  background: #fffcf5;
 }
 
 input:focus {
   outline: none;
-  border-color: #0ea5e9;
-  box-shadow: 0 0 0 4px rgba(14, 165, 233, 0.16);
+  border-color: var(--brand);
+  box-shadow: 0 0 0 4px rgba(182, 134, 62, 0.15);
 }
 
 button {
   margin-top: 6px;
   border: none;
-  border-radius: 12px;
-  background: linear-gradient(135deg, #0b5aa6, #0f766e);
-  color: white;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #2f2413, #765322);
+  color: #fff;
   font-weight: 600;
   padding: 12px;
   cursor: pointer;
@@ -125,19 +120,19 @@ button:disabled {
 
 .error {
   margin: 0;
-  color: #dc2626;
+  color: var(--danger);
   font-size: 14px;
 }
 
 .switch-link {
   margin: 4px 0 0;
   font-size: 14px;
-  color: #4d637b;
+  color: var(--text-muted);
   text-align: center;
 }
 
 .switch-link a {
-  color: #0b5aa6;
+  color: var(--brand-strong);
   text-decoration: none;
   font-weight: 600;
 }

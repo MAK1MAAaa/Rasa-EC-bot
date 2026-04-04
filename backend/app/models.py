@@ -1,8 +1,15 @@
-from datetime import datetime
-from typing import Optional, List
+﻿from datetime import datetime
+from typing import List, Optional
 from uuid import UUID, uuid4
 
+from sqlalchemy import Column
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
+
+
+class ShopBrief(SQLModel):
+    id: UUID
+    name: str
 
 
 class UserBase(SQLModel):
@@ -15,6 +22,7 @@ class User(UserBase, table=True):
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     hashed_password: str
+    role: str = Field(default="customer")
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
@@ -24,12 +32,93 @@ class UserCreate(UserBase):
 
 class UserRead(UserBase):
     id: UUID
+    role: str
     created_at: datetime
+    shop: Optional[ShopBrief] = None
 
 
 class LoginRequest(SQLModel):
     email: str
     password: str
+
+
+class Shop(SQLModel, table=True):
+    __tablename__ = "shops"
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    owner_user_id: UUID = Field(foreign_key="users.id", index=True)
+    name: str
+    description: Optional[str] = None
+    contact_email: Optional[str] = None
+    contact_phone: Optional[str] = None
+    is_active: bool = True
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ShopRead(SQLModel):
+    id: UUID
+    name: str
+    description: Optional[str] = None
+    contact_email: Optional[str] = None
+    contact_phone: Optional[str] = None
+    is_active: bool
+    created_at: datetime
+
+
+class ShopAddress(SQLModel, table=True):
+    __tablename__ = "shop_addresses"
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    shop_id: UUID = Field(foreign_key="shops.id", index=True)
+    label: str
+    contact_name: str
+    contact_phone: str
+    province: str
+    city: str
+    district: str
+    address_line: str
+    postal_code: Optional[str] = None
+    is_default: bool = False
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ShopAddressCreate(SQLModel):
+    label: str
+    contact_name: str
+    contact_phone: str
+    province: str
+    city: str
+    district: str
+    address_line: str
+    postal_code: Optional[str] = None
+    is_default: bool = False
+
+
+class ShopAddressUpdate(SQLModel):
+    label: Optional[str] = None
+    contact_name: Optional[str] = None
+    contact_phone: Optional[str] = None
+    province: Optional[str] = None
+    city: Optional[str] = None
+    district: Optional[str] = None
+    address_line: Optional[str] = None
+    postal_code: Optional[str] = None
+    is_default: Optional[bool] = None
+
+
+class ShopAddressRead(SQLModel):
+    id: UUID
+    shop_id: UUID
+    label: str
+    contact_name: str
+    contact_phone: str
+    province: str
+    city: str
+    district: str
+    address_line: str
+    postal_code: Optional[str] = None
+    is_default: bool
+    created_at: datetime
 
 
 class ProductBase(SQLModel):
@@ -45,12 +134,15 @@ class Product(ProductBase, table=True):
     __tablename__ = "products"
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
+    shop_id: UUID = Field(foreign_key="shops.id", index=True)
     stock: int = Field(default=0, ge=0)
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 class ProductRead(ProductBase):
     id: UUID
+    shop_id: UUID
+    shop_name: str
     stock: int
     created_at: datetime
 
@@ -66,6 +158,20 @@ class ProductFilterMetaResponse(SQLModel):
     categories: List[str]
     price_min: float
     price_max: float
+
+
+class MerchantProductCreate(ProductBase):
+    stock: int = Field(default=0, ge=0)
+
+
+class MerchantProductUpdate(SQLModel):
+    name: Optional[str] = None
+    price: Optional[float] = Field(default=None, ge=0)
+    description: Optional[str] = None
+    image_url: Optional[str] = None
+    category: Optional[str] = None
+    stock: Optional[int] = Field(default=None, ge=0)
+    is_active: Optional[bool] = None
 
 
 class ChatSendRequest(SQLModel):
@@ -135,6 +241,7 @@ class Order(SQLModel, table=True):
 
     id: str = Field(primary_key=True)
     user_id: UUID = Field(foreign_key="users.id", index=True)
+    shop_id: UUID = Field(foreign_key="shops.id", index=True)
     status: str
     address: str
     contact_email: str
@@ -154,6 +261,21 @@ class OrderItem(SQLModel, table=True):
     subtotal: float
 
 
+class Logistics(SQLModel, table=True):
+    __tablename__ = "logistics"
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    order_id: str = Field(foreign_key="orders.id", index=True)
+    shipped_from_address_id: Optional[UUID] = Field(default=None, foreign_key="shop_addresses.id")
+    tracking_no: Optional[str] = None
+    status: str
+    current_location: Optional[str] = None
+    estimated_delivery_at: Optional[datetime] = None
+    route_plan: List[str] = Field(default_factory=list, sa_column=Column(JSONB, nullable=False))
+    llm_raw_text: Optional[str] = None
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class CreateOrderRequest(SQLModel):
     address: str
     contact_email: str
@@ -166,6 +288,16 @@ class OrderItemRead(SQLModel):
     unit_price: float
     quantity: int
     subtotal: float
+    product_link: str
+
+
+class LogisticsRead(SQLModel):
+    tracking_no: Optional[str] = None
+    status: str
+    current_location: Optional[str] = None
+    estimated_delivery_at: Optional[datetime] = None
+    route_plan: List[str] = Field(default_factory=list)
+    updated_at: datetime
 
 
 class OrderListItem(SQLModel):
@@ -176,6 +308,8 @@ class OrderListItem(SQLModel):
     total_amount: float
     item_count: int
     created_at: datetime
+    shop_id: UUID
+    shop_name: str
 
 
 class OrderListResponse(SQLModel):
@@ -189,7 +323,19 @@ class OrderRead(SQLModel):
     contact_email: str
     total_amount: float
     created_at: datetime
+    shop_id: UUID
+    shop_name: str
     items: List[OrderItemRead]
+    logistics: Optional[LogisticsRead] = None
+
+
+class MerchantOrderShipRequest(SQLModel):
+    ship_from_address_id: Optional[UUID] = None
+    current_location: Optional[str] = None
+
+
+class MerchantOrderListResponse(SQLModel):
+    items: List[OrderRead]
 
 
 class Token(SQLModel):

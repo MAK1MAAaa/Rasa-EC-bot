@@ -6,6 +6,11 @@ interface AuthUser {
   id: string
   username: string
   email: string
+  role: 'customer' | 'merchant'
+  shop?: {
+    id: string
+    name: string
+  } | null
 }
 
 export const useAuthStore = defineStore('auth', () => {
@@ -14,25 +19,36 @@ export const useAuthStore = defineStore('auth', () => {
   const initialized = ref(false)
 
   const isLoggedIn = computed(() => Boolean(token.value))
+  const isMerchant = computed(() => user.value?.role === 'merchant')
+  const isCustomer = computed(() => user.value?.role === 'customer')
 
   const setToken = (value: string) => {
     token.value = value
     localStorage.setItem('token', value)
   }
 
+  const setUser = (payload: AuthUser | null) => {
+    user.value = payload
+    if (payload?.role) {
+      localStorage.setItem('user_role', payload.role)
+    } else {
+      localStorage.removeItem('user_role')
+    }
+  }
+
   const clearAuth = () => {
     token.value = null
-    user.value = null
+    setUser(null)
     localStorage.removeItem('token')
   }
 
   const fetchMe = async () => {
     if (!token.value) {
-      user.value = null
+      setUser(null)
       return null
     }
     const response = await api.get('/auth/me')
-    user.value = response.data
+    setUser(response.data)
     return user.value
   }
 
@@ -55,7 +71,10 @@ export const useAuthStore = defineStore('auth', () => {
     token,
     user,
     isLoggedIn,
+    isMerchant,
+    isCustomer,
     setToken,
+    setUser,
     clearAuth,
     fetchMe,
     initialize

@@ -13,7 +13,7 @@ const showHeader = computed(() => !route.meta.hideHeader)
 
 onMounted(async () => {
   await authStore.initialize()
-  if (authStore.isLoggedIn) {
+  if (authStore.isLoggedIn && authStore.isCustomer) {
     try {
       await cartStore.refreshCart()
     } catch {
@@ -37,17 +37,26 @@ onMounted(async () => {
 <style>
 .app-shell {
   min-height: 100vh;
-  background:
-    radial-gradient(circle at 10% 10%, rgba(14, 165, 233, 0.14), transparent 26%),
-    radial-gradient(circle at 90% 0%, rgba(15, 118, 110, 0.12), transparent 30%),
-    #f4f8fd;
+  position: relative;
+}
+
+.app-shell::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image: radial-gradient(rgba(62, 42, 19, 0.04) 0.8px, transparent 0.8px);
+  background-size: 3px 3px;
+  opacity: 0.42;
 }
 
 .page-body {
   min-height: 100vh;
+  position: relative;
+  z-index: 1;
 }
 
 .page-body.with-header {
-  min-height: calc(100vh - 66px);
+  min-height: calc(100vh - 74px);
 }
 </style>
