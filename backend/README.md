@@ -1,4 +1,4 @@
-﻿# Rasa-EC-bot 后端服务（FastAPI）
+# Rasa-EC-bot 后端服务（FastAPI）
 
 本文档覆盖后端当前完整能力：认证、商品、购物车、模拟下单与订单查询。
 
@@ -8,6 +8,7 @@
 - SQLModel + SQLAlchemy Async
 - PostgreSQL 15
 - JWT（Bearer Token）
+- HTTPX（转发 Chat 请求到 Rasa）
 
 ## 2. 数据库运行与初始化
 
@@ -53,6 +54,11 @@ docker exec -i -e PGCLIENTENCODING=UTF8 rasa-postgres psql -U postgres -d rasa_e
 
 ```env
 DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/rasa_ec_bot
+RASA_SERVER_URL=http://127.0.0.1:5005
+RASA_REST_WEBHOOK_PATH=/webhooks/rest/webhook
+RASA_REQUEST_TIMEOUT_SEC=30
+FRONTEND_BASE_URL=http://localhost:5173
+RASA_INTERNAL_TOKEN=change-me-in-production
 ```
 
 ## 4. 启动后端
@@ -92,22 +98,27 @@ uv run uvicorn app.main:app --reload
 
 ## 6. API 清单（MVP）
 
-### 6.1 认证
+### 6.1 客服 Chat（公开）
+- `POST /api/v1/chat/send`，Body: `{ "message": "推荐几款手机", "sender_id": "web_user_1" }`
+- `GET /api/v1/chat/internal/orders-summary`（内部接口，供 Rasa Action 调用，需 `X-Rasa-Token`）
+
+### 6.2 认证
 - `POST /api/v1/auth/register` 注册
 - `POST /api/v1/auth/login` 登录
 - `GET /api/v1/auth/me` 获取当前用户
 
-### 6.2 商品（公开）
+### 6.3 商品（公开）
 - `GET /api/v1/products?page=1&page_size=12&keyword=&category=`
+- `GET /api/v1/products/filters`（分类与价格区间筛选信息）
 - `GET /api/v1/products/{product_id}`
 
-### 6.3 购物车（需 Bearer Token）
+### 6.4 购物车（需 Bearer Token）
 - `GET /api/v1/cart`
 - `POST /api/v1/cart/items`，Body: `{ "product_id": "...", "quantity": 1 }`
 - `PATCH /api/v1/cart/items/{item_id}`，Body: `{ "quantity": 2 }`（0 表示删除）
 - `DELETE /api/v1/cart/items/{item_id}`
 
-### 6.4 订单（需 Bearer Token）
+### 6.5 订单（需 Bearer Token）
 - `POST /api/v1/orders`，Body: `{ "address": "...", "contact_email": "..." }`
 - `GET /api/v1/orders`
 - `GET /api/v1/orders/{order_id}`
@@ -139,3 +150,16 @@ uv run uvicorn app.main:app --reload
 - 前端默认通过 Vite 代理 `/api -> http://localhost:8000`
 - 认证头为：`Authorization: Bearer <token>`
 - 若返回 401，前端会自动清理 token 并跳转登录
+
+## 10. Rasa + Ollama 联调
+
+1. 启动本地 Ollama，并确保模型可用：
+   - `ollama pull qwen3.5:9b`
+2. 训练并启动 Rasa Server（`5005`）与 Action Server（`5055`）：
+   - 参考 [`rasa/README.md`](../rasa/README.md)
+3. 启动当前 FastAPI 服务（`8000`）。
+4. 调试 Chat 接口：
+   - `POST /api/v1/chat/send`，例如：
+   - `{ "message": "推荐几款手机", "sender_id": "debug-user-1" }`
+
+

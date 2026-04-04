@@ -1,6 +1,6 @@
-﻿# Rasa-EC-bot 前端商城（Vue 3）
+# Rasa-EC-bot 前端商城（Vue 3）
 
-当前前端已实现电商 MVP 全流程页面：商品浏览、商品详情、购物车、结算、订单查询。
+当前前端已实现电商 MVP 全流程页面：商品浏览、商品详情、购物车、结算、订单查询、智能客服对话。
 
 ## 1. 技术栈
 
@@ -35,6 +35,7 @@ pnpm build
 ### 3.1 公开页面
 - `/products` 商品列表
 - `/products/:id` 商品详情
+- `/chat` 智能客服（Rasa + Ollama）
 - `/login` 登录
 - `/register` 注册
 
@@ -58,14 +59,20 @@ pnpm build
 - 商品列表分页展示
 - 关键词搜索、分类筛选
 - 商品详情页（图片、描述、库存、价格）
+- 商品页可一键跳转“智能客服咨询”
 
-### 4.3 购物车模块
+### 4.3 客服模块
+- 独立智能客服页面（多轮对话）
+- 前端调用后端 `/api/v1/chat/send`，由后端转发 Rasa
+- 支持订单咨询、物流咨询、商品推荐与开放问答（Ollama）
+
+### 4.4 购物车模块
 - 加入购物车
 - 调整商品数量
 - 删除商品
 - 动态汇总总件数与总金额
 
-### 4.4 结算与订单
+### 4.5 结算与订单
 - 结算页填写收货地址与联系邮箱
 - 提交订单（模拟支付）
 - 我的订单列表与订单详情（含明细）
@@ -90,8 +97,9 @@ pnpm build
 ## 7. 联调前提
 
 1. 后端已启动：`http://localhost:8000`
-2. 数据库已按 `backend/db/init_db.sql` 与 `backend/db/seed_data.sql` 初始化
-3. 可用测试账号：`test1@example.com / password123`
+2. Rasa 与 Action Server 已启动（默认 `5005/5055`）
+3. 数据库已按 `backend/db/init_db.sql` 与 `backend/db/seed_data.sql` 初始化
+4. 可用测试账号：`test1@example.com / password123`
 
 ## 8. 推荐验证路径
 
@@ -100,10 +108,11 @@ pnpm build
 3. 加入购物车并调整数量
 4. 去结算页提交订单
 5. 在订单页查看新订单及明细
+6. 进入 `/chat` 验证客服对话与推荐回复
 
 ## 9. 目录结构（关键）
 
-- `src/views/`：页面组件（Login/Register/Products/ProductDetail/Cart/Checkout/Orders）
+- `src/views/`：页面组件（Login/Register/Products/ProductDetail/Cart/Checkout/Orders/ChatSupport）
 - `src/stores/`：Pinia 状态（`auth.ts`、`cart.ts`）
 - `src/api/`：Axios 客户端与拦截器
 - `src/components/`：公共组件（当前含顶部导航）

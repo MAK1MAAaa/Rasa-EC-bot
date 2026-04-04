@@ -68,6 +68,32 @@ class ProductFilterMetaResponse(SQLModel):
     price_max: float
 
 
+class ChatSendRequest(SQLModel):
+    message: str = Field(min_length=1, max_length=2000)
+    sender_id: Optional[str] = None
+
+
+class ChatReplyMessage(SQLModel):
+    text: str
+
+
+class ChatSendResponse(SQLModel):
+    messages: List[ChatReplyMessage]
+
+
+class ChatOrderSummaryItem(SQLModel):
+    id: str
+    status: str
+    total_amount: float
+    item_count: int
+    created_at: datetime
+    order_link: str
+
+
+class ChatOrderSummaryResponse(SQLModel):
+    items: List[ChatOrderSummaryItem]
+
+
 class CartItem(SQLModel, table=True):
     __tablename__ = "cart_items"
 

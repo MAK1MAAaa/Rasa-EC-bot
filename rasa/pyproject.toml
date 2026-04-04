@@ -1,0 +1,16 @@
+﻿[project]
+name = "rasa-ec-bot-rasa"
+version = "0.1.0"
+description = "Rasa assistant runtime for Rasa-EC-bot"
+readme = "README.md"
+requires-python = ">=3.10,<3.11"
+dependencies = [
+  "rasa>=3.6,<3.8",
+  "rasa-sdk>=3.6,<3.8",
+  "requests>=2.31,<3",
+  "python-dotenv>=1.0,<2",
+  "jieba>=0.42,<1",
+]
+
+[tool.uv]
+package = false

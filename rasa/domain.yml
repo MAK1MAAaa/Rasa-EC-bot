@@ -1,0 +1,47 @@
+version: "3.1"
+
+intents:
+  - greet
+  - goodbye
+  - thanks
+  - ask_order_help
+  - ask_shipping_help
+  - ask_product_recommendation
+  - chitchat
+  - bot_challenge
+  - nlu_fallback
+
+entities:
+  - category
+
+slots:
+  category:
+    type: text
+    mappings:
+      - type: from_entity
+        entity: category
+
+responses:
+  utter_greet:
+    - text: "你好，我是电商智能客服。你可以问我订单、物流或商品推荐问题。"
+
+  utter_goodbye:
+    - text: "好的，随时找我，我会继续帮你处理购物问题。"
+
+  utter_you_are_welcome:
+    - text: "不客气，很高兴帮到你。"
+
+  utter_shipping_help:
+    - text: "你可以提供订单号，我可以协助你查询物流进度和当前节点。"
+
+  utter_iamabot:
+    - text: "我是 Rasa + 本地 Ollama 驱动的智能客服助手。"
+
+actions:
+  - action_ollama_reply
+  - action_recommend_products
+  - action_query_my_orders
+
+session_config:
+  session_expiration_time: 60
+  carry_over_slots_to_new_session: true

@@ -37,3 +37,5 @@ database/pgdata/
 database/redisdata/
 backend/app/__pycache__/
 frontend/temp.html
+rasa/models/
+rasa/.rasa/

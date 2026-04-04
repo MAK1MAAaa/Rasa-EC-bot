@@ -1,4 +1,4 @@
-﻿# Rasa-EC-bot
+# Rasa-EC-bot
 
 基于 **Rasa CALM + LLM** 的电商智能客服项目，当前已完成一套可运行的电商 MVP 闭环：
 
@@ -30,16 +30,22 @@
 
 ### 3. 前端体验增强
 - 新增应用壳（顶部导航、购物车角标、登录态入口）
-- 新增页面：商品列表、商品详情、购物车、结算、我的订单
+- 新增页面：商品列表、商品详情、购物车、结算、我的订单、智能客服
 - 路由守卫：公开页面与受保护页面分离
 - Axios 拦截器：自动附带 Token，401 自动回登录页
+
+### 4. 智能客服链路接入
+- 新增 `POST /api/v1/chat/send`：前端统一调用后端网关，再转发给 Rasa REST Channel
+- 新增 `rasa/` 子工程：包含意图样本、规则与 Action Server
+- Action Server 接入本地 Ollama，模型默认 `qwen3.5:9b`
+- 支持商品推荐场景：Rasa Action 会读取后端商品接口给出推荐结果
 
 ## 技术架构
 
 - **Frontend**: Vue 3 + Vite + Pinia + Vue Router + Axios + Tailwind CSS
 - **Backend**: FastAPI + SQLModel + SQLAlchemy Async + JWT
 - **Database**: PostgreSQL（主库）+ Redis（预留）
-- **AI Layer**: Rasa CALM + 本地 LLM（当前电商页面未做深度联动，仅保留入口）
+- **AI Layer**: Rasa + 本地 LLM（Ollama / `qwen3.5:9b`）
 
 ## 快速开始
 
@@ -67,7 +73,32 @@ uv run uvicorn app.main:app --reload
 
 后端地址：`http://127.0.0.1:8000`
 
-### 4. 启动前端
+### 4. 启动 Ollama 与 Rasa
+
+```bash
+# 1) 本地模型
+ollama pull qwen3.5:9b
+
+# 2) 进入 Rasa 子目录
+cd rasa
+
+# 3) 复制环境变量模板
+cp .env.sample .env
+
+# 4) 安装 Rasa 依赖（uv）
+uv sync
+
+# 5) 训练模型
+uv run rasa train --config config.yml --domain domain.yml --data data
+
+# 6) 启动 Rasa Server
+uv run rasa run --enable-api --cors "*" --credentials credentials.yml --endpoints endpoints.yml --port 5005
+
+# 7) 新终端启动 Action Server
+uv run rasa run actions --actions actions --port 5055
+```
+
+### 5. 启动前端
 
 ```bash
 cd frontend
@@ -94,6 +125,7 @@ pnpm dev
 
 - `backend/`: FastAPI 后端服务
 - `frontend/`: Vue 3 前端商城界面
+- `rasa/`: Rasa 对话引擎与 Action Server
 - `backend/db/`: 数据库初始化与种子 SQL
 - `database/`: 本地数据库持久化目录（git 忽略）
 - `requirement.md`: 需求文档
@@ -102,3 +134,5 @@ pnpm dev
 
 - 后端文档：[`backend/README.md`](backend/README.md)
 - 前端文档：[`frontend/README.md`](frontend/README.md)
+- Rasa 文档：[`rasa/README.md`](rasa/README.md)
+

@@ -218,7 +218,7 @@ onMounted(async () => {
     <div class="hero">
       <h1>发现你的下一件心动好物</h1>
       <p>精选数码、办公与生活科技产品，支持一键加购与快速下单。</p>
-      <button class="chat-link" type="button">去智能客服咨询</button>
+      <button class="chat-link" type="button" @click="router.push('/chat')">去智能客服咨询</button>
     </div>
 
     <div class="toolbar">
@@ -663,3 +663,4 @@ onMounted(async () => {
   }
 }
 </style>
+

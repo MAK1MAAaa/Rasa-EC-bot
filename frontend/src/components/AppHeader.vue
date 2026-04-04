@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
@@ -33,6 +33,7 @@ const logout = () => {
 
       <nav class="header-nav">
         <router-link :class="navClass('/products')" to="/products">商品</router-link>
+        <router-link :class="navClass('/chat')" to="/chat">智能客服</router-link>
         <router-link :class="navClass('/cart')" to="/cart">
           购物车
           <span v-if="cartStore.totalItems > 0" class="badge">{{ cartStore.totalItems }}</span>
@@ -174,3 +175,4 @@ const logout = () => {
   }
 }
 </style>
+

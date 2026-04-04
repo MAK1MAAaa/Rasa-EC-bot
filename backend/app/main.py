@@ -1,8 +1,10 @@
 from datetime import timedelta, datetime
+import os
 from random import randint
 from uuid import UUID
 
-from fastapi import FastAPI, Depends, HTTPException, status, Query, Path
+import httpx
+from fastapi import FastAPI, Depends, HTTPException, status, Query, Path, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func, or_
 from sqlmodel import select
@@ -20,6 +22,11 @@ from .models import (
     ProductRead,
     ProductListResponse,
     ProductFilterMetaResponse,
+    ChatSendRequest,
+    ChatSendResponse,
+    ChatReplyMessage,
+    ChatOrderSummaryItem,
+    ChatOrderSummaryResponse,
     CartItem,
     AddCartItemRequest,
     UpdateCartItemRequest,
@@ -43,6 +50,12 @@ from .auth import (
 from .database import get_session
 
 app = FastAPI(title="Rasa-EC-bot Backend", version="0.2.0")
+
+RASA_SERVER_URL = os.getenv("RASA_SERVER_URL", "http://127.0.0.1:5005")
+RASA_REST_WEBHOOK_PATH = os.getenv("RASA_REST_WEBHOOK_PATH", "/webhooks/rest/webhook")
+RASA_REQUEST_TIMEOUT_SEC = float(os.getenv("RASA_REQUEST_TIMEOUT_SEC", "30"))
+FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "http://localhost:5173")
+RASA_INTERNAL_TOKEN = os.getenv("RASA_INTERNAL_TOKEN", "")
 
 
 def normalize_email(email: str) -> str:
@@ -132,6 +145,29 @@ async def get_current_db_user(
     return user
 
 
+async def get_current_db_user_optional(request: Request, session: AsyncSession) -> User | None:
+    authorization = (request.headers.get("Authorization") or "").strip()
+    if not authorization.lower().startswith("bearer "):
+        return None
+
+    token = authorization[7:].strip()
+    if not token:
+        return None
+
+    try:
+        token_data = await get_current_user(token)
+    except HTTPException:
+        return None
+
+    email = normalize_email(token_data.email or "")
+    if not email:
+        return None
+
+    statement = select(User).where(func.lower(User.email) == email)
+    result = await session.execute(statement)
+    return result.scalar_one_or_none()
+
+
 async def get_active_product_or_404(session: AsyncSession, product_id: UUID) -> Product:
     product = await session.get(Product, product_id)
     if not product or not product.is_active:
@@ -184,6 +220,115 @@ app.add_middleware(
 @app.get("/")
 async def root():
     return {"message": "Welcome to Rasa-EC-bot API"}
+
+
+@app.post("/api/v1/chat/send", response_model=ChatSendResponse)
+async def chat_send(
+    payload: ChatSendRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    message = payload.message.strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="message cannot be empty")
+
+    current_user = await get_current_db_user_optional(request, session)
+    sender_id = (payload.sender_id or "").strip() or (
+        f"user-{current_user.id}" if current_user else "web_user"
+    )
+    metadata = {
+        "is_authenticated": bool(current_user),
+        "user_id": str(current_user.id) if current_user else "",
+        "user_email": current_user.email if current_user else "",
+        "username": current_user.username if current_user else "",
+        "frontend_base_url": FRONTEND_BASE_URL,
+    }
+
+    webhook_url = f"{RASA_SERVER_URL.rstrip('/')}{RASA_REST_WEBHOOK_PATH}"
+
+    try:
+        async with httpx.AsyncClient(timeout=RASA_REQUEST_TIMEOUT_SEC) as client:
+            response = await client.post(
+                webhook_url,
+                json={
+                    "sender": sender_id,
+                    "message": message,
+                    "metadata": metadata,
+                },
+            )
+        response.raise_for_status()
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Rasa response timeout")
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Rasa request failed with status {exc.response.status_code}",
+        )
+    except httpx.HTTPError:
+        raise HTTPException(status_code=503, detail="Rasa service unavailable")
+
+    data = response.json()
+    if not isinstance(data, list):
+        raise HTTPException(status_code=502, detail="Invalid response from Rasa")
+
+    messages: list[ChatReplyMessage] = []
+    for item in data:
+        if isinstance(item, dict):
+            text = item.get("text")
+            if isinstance(text, str) and text.strip():
+                messages.append(ChatReplyMessage(text=text.strip()))
+
+    if not messages:
+        messages.append(ChatReplyMessage(text="抱歉，我暂时没有生成回复，请稍后重试。"))
+    return ChatSendResponse(messages=messages)
+
+
+@app.get("/api/v1/chat/internal/orders-summary", response_model=ChatOrderSummaryResponse)
+async def chat_internal_orders_summary(
+    user_id: UUID = Query(...),
+    limit: int = Query(default=5, ge=1, le=10),
+    x_rasa_token: str | None = Header(default=None, alias="X-Rasa-Token"),
+    session: AsyncSession = Depends(get_session),
+):
+    expected_token = (RASA_INTERNAL_TOKEN or "").strip()
+    provided_token = (x_rasa_token or "").strip()
+    if expected_token and provided_token != expected_token:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    statement = (
+        select(Order)
+        .where(Order.user_id == user_id)
+        .order_by(Order.created_at.desc())
+        .limit(limit)
+    )
+    result = await session.execute(statement)
+    orders = result.scalars().all()
+
+    if not orders:
+        return ChatOrderSummaryResponse(items=[])
+
+    order_ids = [order.id for order in orders]
+    count_statement = (
+        select(OrderItem.order_id, func.count(OrderItem.id))
+        .where(OrderItem.order_id.in_(order_ids))
+        .group_by(OrderItem.order_id)
+    )
+    count_result = await session.execute(count_statement)
+    item_count_map = {order_id: int(count) for order_id, count in count_result.all()}
+
+    base_url = FRONTEND_BASE_URL.rstrip("/")
+    items = [
+        ChatOrderSummaryItem(
+            id=order.id,
+            status=order.status,
+            total_amount=float(order.total_amount),
+            item_count=int(item_count_map.get(order.id, 0)),
+            created_at=order.created_at,
+            order_link=f"{base_url}/orders?orderId={order.id}",
+        )
+        for order in orders
+    ]
+    return ChatOrderSummaryResponse(items=items)
 
 
 @app.post("/api/v1/auth/register", response_model=UserRead)

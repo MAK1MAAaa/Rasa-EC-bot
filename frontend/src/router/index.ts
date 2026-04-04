@@ -6,6 +6,7 @@ import ProductDetail from '@/views/ProductDetail.vue'
 import Cart from '@/views/Cart.vue'
 import Checkout from '@/views/Checkout.vue'
 import Orders from '@/views/Orders.vue'
+import ChatSupport from '@/views/ChatSupport.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -50,6 +51,11 @@ const router = createRouter({
       name: 'Orders',
       component: Orders,
       meta: { requiresAuth: true }
+    },
+    {
+      path: '/chat',
+      name: 'ChatSupport',
+      component: ChatSupport
     },
     {
       path: '/',

@@ -1,0 +1,66 @@
+version: "3.1"
+
+nlu:
+  - intent: greet
+    examples: |
+      - 你好
+      - 您好
+      - hello
+      - hi
+      - 在吗
+      - 客服你好
+
+  - intent: goodbye
+    examples: |
+      - 再见
+      - 拜拜
+      - 先这样
+      - 不用了
+      - 下次再聊
+
+  - intent: thanks
+    examples: |
+      - 谢谢
+      - 多谢
+      - 感谢你
+      - 你帮大忙了
+
+  - intent: ask_order_help
+    examples: |
+      - 我想查订单
+      - 帮我看看我的订单状态
+      - 订单现在是什么状态
+      - 查询我的订单
+      - 列出我最近的订单
+      - 看看我账号下有什么订单
+
+  - intent: ask_shipping_help
+    examples: |
+      - 帮我查物流
+      - 物流到哪里了
+      - 快递什么时候到
+      - 订单配送进度
+      - 看下我的包裹
+
+  - intent: ask_product_recommendation
+    examples: |
+      - 推荐一些商品
+      - 有什么值得买的
+      - 给我推荐几款热门商品
+      - 推荐一些[手机](category)
+      - 我想看[电脑](category)推荐
+      - 有没有[显示器](category)推荐
+
+  - intent: bot_challenge
+    examples: |
+      - 你是机器人吗
+      - 你是谁
+      - 你是人工客服吗
+
+  - intent: chitchat
+    examples: |
+      - 你今天心情怎么样
+      - 最近有什么新鲜事
+      - 我有点纠结买什么
+      - 你觉得我该怎么选
+      - 给我一点建议
