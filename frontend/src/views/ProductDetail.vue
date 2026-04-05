@@ -29,6 +29,7 @@ const product = ref<Product | null>(null)
 const quantity = ref(1)
 
 const canBuy = computed(() => Boolean(product.value && product.value.stock > 0 && authStore.isCustomer))
+const fromSource = computed(() => (typeof route.query.from === 'string' ? route.query.from.trim() : ''))
 
 const loadProduct = async () => {
   loading.value = true
@@ -70,12 +71,24 @@ const jumpToShop = () => {
   router.push({ path: '/products', query: { shop_id: product.value.shop_id } })
 }
 
+const handleBack = () => {
+  if (fromSource.value === 'chat') {
+    router.push('/chat')
+    return
+  }
+  if (window.history.length > 1) {
+    router.back()
+    return
+  }
+  router.push('/products')
+}
+
 onMounted(loadProduct)
 </script>
 
 <template>
   <section class="detail-page">
-    <button class="back-btn" type="button" @click="router.back()">← 返回</button>
+    <button class="back-btn" type="button" @click="handleBack()">← 返回</button>
 
     <div v-if="loading" class="state-card">加载中...</div>
     <div v-else-if="error" class="state-card error">{{ error }}</div>
@@ -234,3 +247,5 @@ onMounted(loadProduct)
   }
 }
 </style>
+
+

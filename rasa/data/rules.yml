@@ -1,4 +1,4 @@
-version: "3.1"
+﻿version: "3.1"
 
 rules:
   - rule: greet user
@@ -21,10 +21,15 @@ rules:
       - intent: ask_order_help
       - action: action_query_my_orders
 
-  - rule: shipping help
+  - rule: query logistics
     steps:
       - intent: ask_shipping_help
-      - action: utter_shipping_help
+      - action: action_query_order_logistics
+
+  - rule: query after sales
+    steps:
+      - intent: ask_after_sales_help
+      - action: action_query_after_sales
 
   - rule: recommend products
     steps:

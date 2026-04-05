@@ -24,8 +24,15 @@ from .auth import (
     get_password_hash,
     verify_password,
 )
+from .cache import RedisCache
 from .database import get_session
 from .models import (
+    ChatAfterSalesSummaryItem,
+    ChatAfterSalesSummaryResponse,
+    ChatOrderLogisticsSummaryItem,
+    ChatOrderLogisticsSummaryResponse,
+    AfterSales,
+    AfterSalesRead,
     AddCartItemRequest,
     CartItem,
     CartItemRead,
@@ -35,10 +42,14 @@ from .models import (
     ChatReplyMessage,
     ChatSendRequest,
     ChatSendResponse,
+    CreateAfterSalesRequest,
     CreateOrderRequest,
     Logistics,
     LogisticsRead,
     LoginRequest,
+    MerchantAfterSalesItem,
+    MerchantAfterSalesListResponse,
+    MerchantAfterSalesUpdateRequest,
     MerchantOrderListResponse,
     MerchantOrderShipRequest,
     MerchantProductCreate,
@@ -81,8 +92,28 @@ OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3.5:9b")
 OLLAMA_TIMEOUT_SEC = float(os.getenv("OLLAMA_TIMEOUT_SEC", "45"))
 LOGISTICS_LLM_MAX_WAIT_SEC = float(os.getenv("LOGISTICS_LLM_MAX_WAIT_SEC", "12"))
 
+REDIS_URL = os.getenv("REDIS_URL", "")
+REDIS_CACHE_TTL_SEC = int(os.getenv("REDIS_CACHE_TTL_SEC", "180"))
+
 ORDER_STATUS_PENDING_SHIPMENT = "pending_shipment"
 ORDER_STATUS_SHIPPED = "shipped"
+
+AFTER_SALES_TYPE_RETURN = "return"
+AFTER_SALES_TYPE_EXCHANGE = "exchange"
+AFTER_SALES_ALLOWED_TYPES = {AFTER_SALES_TYPE_RETURN, AFTER_SALES_TYPE_EXCHANGE}
+
+AFTER_SALES_STATUS_SUBMITTED = "submitted"
+AFTER_SALES_STATUS_MERCHANT_APPROVED = "merchant_approved"
+AFTER_SALES_STATUS_PROCESSING = "processing"
+AFTER_SALES_STATUS_MERCHANT_REJECTED = "merchant_rejected"
+AFTER_SALES_STATUS_COMPLETED = "completed"
+AFTER_SALES_STATUS_CANCELLED = "cancelled"
+
+AFTER_SALES_TERMINAL_STATUSES = {
+    AFTER_SALES_STATUS_MERCHANT_REJECTED,
+    AFTER_SALES_STATUS_COMPLETED,
+    AFTER_SALES_STATUS_CANCELLED,
+}
 
 origins = [
     "http://localhost:5173",
@@ -97,6 +128,76 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+cache = RedisCache(redis_url=REDIS_URL, default_ttl_sec=REDIS_CACHE_TTL_SEC)
+
+PRODUCT_FILTER_CACHE_KEY = "products:filters:v1"
+
+
+@app.on_event("startup")
+async def on_startup() -> None:
+    await cache.connect()
+
+
+@app.on_event("shutdown")
+async def on_shutdown() -> None:
+    await cache.close()
+
+
+def dump_response_model(model: object) -> dict:
+    if hasattr(model, "model_dump"):
+        return model.model_dump(mode="json")  # type: ignore[attr-defined]
+    return json.loads(model.json())  # type: ignore[attr-defined]
+
+
+def parse_response_model(model_cls, payload: dict):
+    if hasattr(model_cls, "model_validate"):
+        return model_cls.model_validate(payload)  # type: ignore[attr-defined]
+    return model_cls.parse_obj(payload)
+
+
+def chat_orders_summary_cache_prefix(user_id: UUID) -> str:
+    return f"chat:orders-summary:{user_id}:"
+
+
+def chat_orders_summary_cache_key(user_id: UUID, limit: int) -> str:
+    return f"{chat_orders_summary_cache_prefix(user_id)}{limit}"
+
+
+def chat_logistics_summary_cache_prefix(user_id: UUID) -> str:
+    return f"chat:orders-logistics-summary:{user_id}:"
+
+
+def chat_logistics_summary_cache_key(user_id: UUID, limit: int, order_id: str | None) -> str:
+    order_segment = (order_id or "").strip() or "all"
+    return f"{chat_logistics_summary_cache_prefix(user_id)}{limit}:{order_segment}"
+
+
+def chat_after_sales_summary_cache_prefix(user_id: UUID) -> str:
+    return f"chat:after-sales-summary:{user_id}:"
+
+
+def chat_after_sales_summary_cache_key(user_id: UUID, limit: int) -> str:
+    return f"{chat_after_sales_summary_cache_prefix(user_id)}{limit}"
+
+
+async def invalidate_product_filter_cache() -> None:
+    await cache.delete_keys(PRODUCT_FILTER_CACHE_KEY)
+
+
+async def invalidate_chat_cache_for_user(
+    user_id: UUID,
+    *,
+    orders: bool = False,
+    logistics: bool = False,
+    after_sales: bool = False,
+) -> None:
+    if orders:
+        await cache.delete_prefix(chat_orders_summary_cache_prefix(user_id))
+    if logistics:
+        await cache.delete_prefix(chat_logistics_summary_cache_prefix(user_id))
+    if after_sales:
+        await cache.delete_prefix(chat_after_sales_summary_cache_prefix(user_id))
 
 
 def normalize_email(email: str) -> str:
@@ -337,6 +438,42 @@ async def get_logistics_by_order(session: AsyncSession, order_id: str) -> Logist
     return result.scalar_one_or_none()
 
 
+async def get_after_sales_by_order(session: AsyncSession, order_id: str) -> list[AfterSales]:
+    statement = (
+        select(AfterSales)
+        .where(AfterSales.order_id == order_id)
+        .order_by(AfterSales.created_at.desc())
+    )
+    result = await session.execute(statement)
+    return result.scalars().all()
+
+
+def to_after_sales_read(item: AfterSales) -> AfterSalesRead:
+    return AfterSalesRead(
+        id=item.id,
+        order_id=item.order_id,
+        type=item.type,
+        reason=item.reason,
+        status=item.status,
+        created_at=item.created_at,
+    )
+
+
+def to_merchant_after_sales_item(item: AfterSales, order: Order) -> MerchantAfterSalesItem:
+    base_url = FRONTEND_BASE_URL.rstrip("/")
+    return MerchantAfterSalesItem(
+        id=item.id,
+        order_id=item.order_id,
+        type=item.type,
+        reason=item.reason,
+        status=item.status,
+        created_at=item.created_at,
+        order_status=order.status,
+        contact_email=order.contact_email,
+        order_link=f"{base_url}/orders?orderId={item.order_id}",
+    )
+
+
 async def build_order_detail(session: AsyncSession, order: Order) -> OrderRead:
     items_stmt = select(OrderItem).where(OrderItem.order_id == order.id).order_by(OrderItem.id)
     items_result = await session.execute(items_stmt)
@@ -348,6 +485,7 @@ async def build_order_detail(session: AsyncSession, order: Order) -> OrderRead:
 
     base_url = FRONTEND_BASE_URL.rstrip("/")
     logistics = await get_logistics_by_order(session, order.id)
+    after_sales = await get_after_sales_by_order(session, order.id)
     logistics_read = None
     if logistics:
         logistics_read = LogisticsRead(
@@ -381,6 +519,7 @@ async def build_order_detail(session: AsyncSession, order: Order) -> OrderRead:
             for item in order_items
         ],
         logistics=logistics_read,
+        after_sales=[to_after_sales_read(item) for item in after_sales],
     )
 
 
@@ -507,6 +646,42 @@ def to_shop_address_read(address: ShopAddress) -> ShopAddressRead:
     )
 
 
+def normalize_after_sales_type(raw: str) -> str:
+    return (raw or "").strip().lower()
+
+
+def normalize_after_sales_action(raw: str) -> str:
+    return (raw or "").strip().lower()
+
+
+def resolve_after_sales_next_status(current_status: str, action: str) -> str | None:
+    transition_map: dict[str, dict[str, str]] = {
+        AFTER_SALES_STATUS_SUBMITTED: {
+            "approve": AFTER_SALES_STATUS_MERCHANT_APPROVED,
+            "reject": AFTER_SALES_STATUS_MERCHANT_REJECTED,
+        },
+        AFTER_SALES_STATUS_MERCHANT_APPROVED: {
+            "processing": AFTER_SALES_STATUS_PROCESSING,
+            "complete": AFTER_SALES_STATUS_COMPLETED,
+            "reject": AFTER_SALES_STATUS_MERCHANT_REJECTED,
+        },
+        AFTER_SALES_STATUS_PROCESSING: {
+            "complete": AFTER_SALES_STATUS_COMPLETED,
+        },
+    }
+    return transition_map.get(current_status, {}).get(action)
+
+
+def append_merchant_note(reason: str | None, note: str) -> str:
+    cleaned_note = note.strip()
+    if not cleaned_note:
+        return (reason or "").strip()
+
+    prefix = (reason or "").strip()
+    stamped = f"[merchant_note {datetime.utcnow().isoformat(timespec='seconds')} UTC] {cleaned_note}"
+    return f"{prefix}\n{stamped}".strip() if prefix else stamped
+
+
 @app.get("/")
 async def root():
     return {"message": "Welcome to Rasa-EC-bot API"}
@@ -579,11 +754,21 @@ async def chat_internal_orders_summary(
     if expected_token and provided_token != expected_token:
         raise HTTPException(status_code=403, detail="Forbidden")
 
+    cache_key = chat_orders_summary_cache_key(user_id, limit)
+    cached_payload = await cache.get_json(cache_key)
+    if isinstance(cached_payload, dict):
+        try:
+            return parse_response_model(ChatOrderSummaryResponse, cached_payload)
+        except Exception:
+            pass
+
     statement = select(Order).where(Order.user_id == user_id).order_by(Order.created_at.desc()).limit(limit)
     result = await session.execute(statement)
     orders = result.scalars().all()
     if not orders:
-        return ChatOrderSummaryResponse(items=[])
+        response = ChatOrderSummaryResponse(items=[])
+        await cache.set_json(cache_key, dump_response_model(response))
+        return response
 
     order_ids = [order.id for order in orders]
     count_statement = (
@@ -606,7 +791,121 @@ async def chat_internal_orders_summary(
         )
         for order in orders
     ]
-    return ChatOrderSummaryResponse(items=items)
+    response = ChatOrderSummaryResponse(items=items)
+    await cache.set_json(cache_key, dump_response_model(response))
+    return response
+
+
+@app.get("/api/v1/chat/internal/orders-logistics-summary", response_model=ChatOrderLogisticsSummaryResponse)
+async def chat_internal_orders_logistics_summary(
+    user_id: UUID = Query(...),
+    order_id: str | None = Query(default=None),
+    limit: int = Query(default=5, ge=1, le=10),
+    x_rasa_token: str | None = Header(default=None, alias="X-Rasa-Token"),
+    session: AsyncSession = Depends(get_session),
+):
+    expected_token = (RASA_INTERNAL_TOKEN or "").strip()
+    provided_token = (x_rasa_token or "").strip()
+    if expected_token and provided_token != expected_token:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    cleaned_order_id = (order_id or "").strip()
+    cache_key = chat_logistics_summary_cache_key(user_id, limit, cleaned_order_id)
+    cached_payload = await cache.get_json(cache_key)
+    if isinstance(cached_payload, dict):
+        try:
+            return parse_response_model(ChatOrderLogisticsSummaryResponse, cached_payload)
+        except Exception:
+            pass
+
+    statement = (
+        select(Order, Logistics)
+        .join(Logistics, Logistics.order_id == Order.id, isouter=True)
+        .where(Order.user_id == user_id)
+        .order_by(Order.created_at.desc())
+    )
+
+    if cleaned_order_id:
+        statement = statement.where(Order.id == cleaned_order_id).limit(1)
+    else:
+        statement = statement.limit(limit)
+
+    result = await session.execute(statement)
+    rows = result.all()
+    if not rows:
+        response = ChatOrderLogisticsSummaryResponse(items=[])
+        await cache.set_json(cache_key, dump_response_model(response))
+        return response
+
+    base_url = FRONTEND_BASE_URL.rstrip("/")
+    items = [
+        ChatOrderLogisticsSummaryItem(
+            id=order.id,
+            status=order.status,
+            created_at=order.created_at,
+            order_link=f"{base_url}/orders?orderId={order.id}",
+            tracking_no=(logistics.tracking_no if logistics else None),
+            current_location=(logistics.current_location if logistics else None),
+            estimated_delivery_at=(logistics.estimated_delivery_at if logistics else None),
+            route_plan=(list(logistics.route_plan or []) if logistics else []),
+        )
+        for order, logistics in rows
+    ]
+    response = ChatOrderLogisticsSummaryResponse(items=items)
+    await cache.set_json(cache_key, dump_response_model(response))
+    return response
+
+
+@app.get("/api/v1/chat/internal/after-sales-summary", response_model=ChatAfterSalesSummaryResponse)
+async def chat_internal_after_sales_summary(
+    user_id: UUID = Query(...),
+    limit: int = Query(default=5, ge=1, le=10),
+    x_rasa_token: str | None = Header(default=None, alias="X-Rasa-Token"),
+    session: AsyncSession = Depends(get_session),
+):
+    expected_token = (RASA_INTERNAL_TOKEN or "").strip()
+    provided_token = (x_rasa_token or "").strip()
+    if expected_token and provided_token != expected_token:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    cache_key = chat_after_sales_summary_cache_key(user_id, limit)
+    cached_payload = await cache.get_json(cache_key)
+    if isinstance(cached_payload, dict):
+        try:
+            return parse_response_model(ChatAfterSalesSummaryResponse, cached_payload)
+        except Exception:
+            pass
+
+    statement = (
+        select(AfterSales, Order)
+        .join(Order, AfterSales.order_id == Order.id)
+        .where(Order.user_id == user_id)
+        .order_by(AfterSales.created_at.desc())
+        .limit(limit)
+    )
+    result = await session.execute(statement)
+    rows = result.all()
+    if not rows:
+        response = ChatAfterSalesSummaryResponse(items=[])
+        await cache.set_json(cache_key, dump_response_model(response))
+        return response
+
+    base_url = FRONTEND_BASE_URL.rstrip("/")
+    items = [
+        ChatAfterSalesSummaryItem(
+            id=item.id,
+            order_id=item.order_id,
+            type=item.type,
+            status=item.status,
+            created_at=item.created_at,
+            reason=item.reason,
+            order_link=f"{base_url}/orders?orderId={item.order_id}",
+        )
+        for item, _order in rows
+    ]
+    response = ChatAfterSalesSummaryResponse(items=items)
+    await cache.set_json(cache_key, dump_response_model(response))
+    return response
 
 
 @app.post("/api/v1/auth/register", response_model=UserRead)
@@ -663,6 +962,13 @@ async def me(
 
 @app.get("/api/v1/products/filters", response_model=ProductFilterMetaResponse)
 async def get_product_filter_meta(session: AsyncSession = Depends(get_session)):
+    cached_payload = await cache.get_json(PRODUCT_FILTER_CACHE_KEY)
+    if isinstance(cached_payload, dict):
+        try:
+            return parse_response_model(ProductFilterMetaResponse, cached_payload)
+        except Exception:
+            pass
+
     active_filters = [Product.is_active == True]  # noqa: E712
 
     categories_statement = (
@@ -678,11 +984,13 @@ async def get_product_filter_meta(session: AsyncSession = Depends(get_session)):
     price_range_result = await session.execute(price_range_statement)
     price_min, price_max = price_range_result.one()
 
-    return ProductFilterMetaResponse(
+    response = ProductFilterMetaResponse(
         categories=categories,
         price_min=float(price_min or 0),
         price_max=float(price_max or 0),
     )
+    await cache.set_json(PRODUCT_FILTER_CACHE_KEY, dump_response_model(response))
+    return response
 
 
 @app.get("/api/v1/products", response_model=ProductListResponse)
@@ -924,6 +1232,8 @@ async def create_order(
         await session.rollback()
         raise HTTPException(status_code=500, detail="Failed to create order")
 
+    await invalidate_product_filter_cache()
+    await invalidate_chat_cache_for_user(current_user.id, orders=True, logistics=True)
     return await build_order_detail(session, new_order)
 
 
@@ -977,6 +1287,135 @@ async def get_order_detail(
     if order.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Forbidden")
     return await build_order_detail(session, order)
+
+
+@app.get("/api/v1/orders/{order_id}/after-sales", response_model=list[AfterSalesRead])
+async def list_order_after_sales(
+    order_id: str = Path(...),
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_db_user),
+):
+    order = await get_order_or_404(session, order_id)
+    if order.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    items = await get_after_sales_by_order(session, order.id)
+    return [to_after_sales_read(item) for item in items]
+
+
+@app.post("/api/v1/orders/{order_id}/after-sales", response_model=AfterSalesRead, status_code=201)
+async def create_after_sales_request(
+    payload: CreateAfterSalesRequest,
+    order_id: str = Path(...),
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_db_user),
+):
+    if normalize_role(current_user.role) != "customer":
+        raise HTTPException(status_code=403, detail="Only customer accounts can create after-sales requests")
+
+    order = await get_order_or_404(session, order_id)
+    if order.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if order.status != ORDER_STATUS_SHIPPED:
+        raise HTTPException(status_code=400, detail="After-sales is available after shipment")
+
+    request_type = normalize_after_sales_type(payload.type)
+    if request_type not in AFTER_SALES_ALLOWED_TYPES:
+        raise HTTPException(status_code=400, detail="type must be return or exchange")
+
+    reason = (payload.reason or "").strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail="reason is required")
+
+    active_stmt = (
+        select(AfterSales)
+        .where(
+            AfterSales.order_id == order.id,
+            ~AfterSales.status.in_(tuple(AFTER_SALES_TERMINAL_STATUSES)),
+        )
+        .limit(1)
+    )
+    active_result = await session.execute(active_stmt)
+    active_request = active_result.scalar_one_or_none()
+    if active_request:
+        raise HTTPException(status_code=409, detail="There is already an active after-sales request for this order")
+
+    item = AfterSales(
+        order_id=order.id,
+        type=request_type,
+        reason=reason,
+        status=AFTER_SALES_STATUS_SUBMITTED,
+    )
+    session.add(item)
+    await session.commit()
+    await session.refresh(item)
+    await invalidate_chat_cache_for_user(current_user.id, after_sales=True)
+    return to_after_sales_read(item)
+
+
+@app.get("/api/v1/merchant/after-sales", response_model=MerchantAfterSalesListResponse)
+async def merchant_list_after_sales(
+    status_filter: str = Query(default="open"),
+    shop: Shop = Depends(get_current_merchant_shop),
+    session: AsyncSession = Depends(get_session),
+):
+    normalized_filter = status_filter.strip().lower() or "open"
+
+    statement = (
+        select(AfterSales, Order)
+        .join(Order, AfterSales.order_id == Order.id)
+        .where(Order.shop_id == shop.id)
+    )
+
+    if normalized_filter == "open":
+        statement = statement.where(
+            AfterSales.status.in_(
+                (
+                    AFTER_SALES_STATUS_SUBMITTED,
+                    AFTER_SALES_STATUS_MERCHANT_APPROVED,
+                    AFTER_SALES_STATUS_PROCESSING,
+                )
+            )
+        )
+    elif normalized_filter != "all":
+        statement = statement.where(AfterSales.status == normalized_filter)
+
+    statement = statement.order_by(AfterSales.created_at.desc())
+    result = await session.execute(statement)
+    rows = result.all()
+
+    return MerchantAfterSalesListResponse(
+        items=[to_merchant_after_sales_item(after_sales, order) for after_sales, order in rows]
+    )
+
+
+@app.patch("/api/v1/merchant/after-sales/{after_sales_id}", response_model=MerchantAfterSalesItem)
+async def merchant_update_after_sales(
+    payload: MerchantAfterSalesUpdateRequest,
+    after_sales_id: UUID = Path(...),
+    shop: Shop = Depends(get_current_merchant_shop),
+    session: AsyncSession = Depends(get_session),
+):
+    item = await session.get(AfterSales, after_sales_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="After-sales request not found")
+
+    order = await get_order_or_404(session, item.order_id)
+    if order.shop_id != shop.id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    action = normalize_after_sales_action(payload.action)
+    next_status = resolve_after_sales_next_status(item.status, action)
+    if not next_status:
+        raise HTTPException(status_code=400, detail="Invalid action for current after-sales status")
+
+    item.status = next_status
+    if payload.note:
+        item.reason = append_merchant_note(item.reason, payload.note)
+
+    await session.commit()
+    await session.refresh(item)
+    await invalidate_chat_cache_for_user(order.user_id, after_sales=True)
+    return to_merchant_after_sales_item(item, order)
 
 
 @app.get("/api/v1/merchant/shop", response_model=ShopRead)
@@ -1140,6 +1579,7 @@ async def merchant_create_product(
     session.add(product)
     await session.commit()
     await session.refresh(product)
+    await invalidate_product_filter_cache()
     return to_product_read(product, shop.name)
 
 
@@ -1173,6 +1613,7 @@ async def merchant_update_product(
 
     await session.commit()
     await session.refresh(product)
+    await invalidate_product_filter_cache()
     return to_product_read(product, shop.name)
 
 
@@ -1273,8 +1714,10 @@ async def merchant_ship_order(
         # Handle duplicated concurrent shipping attempts as idempotent success.
         await session.rollback()
         latest_order = await get_order_or_404(session, order_id)
+        await invalidate_chat_cache_for_user(latest_order.user_id, orders=True, logistics=True)
         return await build_order_detail(session, latest_order)
     await session.refresh(order)
+    await invalidate_chat_cache_for_user(order.user_id, orders=True, logistics=True)
 
     return await build_order_detail(session, order)
 

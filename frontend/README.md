@@ -1,119 +1,62 @@
-# Rasa-EC-bot 前端商城（Vue 3）
+﻿# Rasa-EC-bot Frontend (Vue 3)
 
-当前前端已实现电商 MVP 全流程页面：商品浏览、商品详情、购物车、结算、订单查询、智能客服对话。
+前端已覆盖用户商城、商家中心、客服对话三个场景，并与后端/客服系统联通。
 
 ## 1. 技术栈
-
-- Vue 3（Composition API）
+- Vue 3 + Composition API
 - Vite
 - Pinia
 - Vue Router
-- Axios（请求/响应拦截器）
-- Tailwind CSS + 自定义样式
+- Axios
+- Tailwind CSS
 
-## 2. 快速开始
+## 2. 页面与路由
+- `/products`：商品列表（分类/价格/库存筛选，支持展开筛选面板）
+- `/products/:id`：商品详情
+- `/cart`：购物车
+- `/checkout`：结算
+- `/orders`：订单列表、物流信息、售后申请（退货/换货）
+- `/chat`：智能客服
+- `/login` / `/register`：登录注册
+- `/merchant`：商家中心（商家角色可访问）
 
-### 2.1 安装依赖
+## 3. 已实现前端功能
+### 3.1 用户端
+- 商品搜索、分类筛选、价格区间筛选、仅看有货
+- 下单后查看订单、物流路线与预计送达
+- 在订单页发起售后并查看售后状态
+
+### 3.2 商家端
+- 订单分页与发货操作
+- 发货地址管理（新增、默认地址）
+- 商品上架与编辑
+- 售后请求处理（状态流转）
+- 发货成功/失败浮窗提示
+
+### 3.3 客服页
+- 对话区布局优化（消息气泡自适应高度）
+- 消息区滚动条与历史消息浏览
+- 自动识别并渲染消息中的订单/商品链接
+- 快捷提问入口（查订单、查物流、查售后、商品推荐）
+
+## 4. 启动
 ```bash
 pnpm install
-```
-
-### 2.2 启动开发服务
-```bash
 pnpm dev
 ```
+默认地址：`http://localhost:5173`
 
-访问：`http://localhost:5173`
-
-### 2.3 生产构建
+## 5. 构建
 ```bash
 pnpm build
 ```
 
-## 3. 页面与路由
+## 6. 联调要求
+- 后端启动：`http://127.0.0.1:8000`
+- Rasa Server：`http://127.0.0.1:5005`
+- Action Server：`http://127.0.0.1:5055`
 
-### 3.1 公开页面
-- `/products` 商品列表
-- `/products/:id` 商品详情
-- `/chat` 智能客服（Rasa + Ollama）
-- `/login` 登录
-- `/register` 注册
-
-### 3.2 受保护页面（需登录）
-- `/cart` 购物车
-- `/checkout` 结算
-- `/orders` 我的订单
-
-### 3.3 路由守卫
-- 未登录访问受保护页面会跳转 `/login`
-- 已登录访问 `/login` / `/register` 会跳转 `/products`
-
-## 4. 本次新增功能（完整）
-
-### 4.1 应用壳
-- 顶部导航（品牌、商品、购物车、我的订单）
-- 购物车角标实时显示数量
-- 登录态下显示用户名与退出按钮
-
-### 4.2 商品模块
-- 商品列表分页展示
-- 关键词搜索、分类筛选
-- 商品详情页（图片、描述、库存、价格）
-- 商品页可一键跳转“智能客服咨询”
-
-### 4.3 客服模块
-- 独立智能客服页面（多轮对话）
-- 前端调用后端 `/api/v1/chat/send`，由后端转发 Rasa
-- 支持订单咨询、物流咨询、商品推荐与开放问答（Ollama）
-
-### 4.4 购物车模块
-- 加入购物车
-- 调整商品数量
-- 删除商品
-- 动态汇总总件数与总金额
-
-### 4.5 结算与订单
-- 结算页填写收货地址与联系邮箱
-- 提交订单（模拟支付）
-- 我的订单列表与订单详情（含明细）
-
-## 5. 状态管理（Pinia）
-
-### 5.1 `auth` store
-- 保存 token 与用户信息
-- 启动时恢复登录态
-- 提供 `initialize/fetchMe/clearAuth`
-
-### 5.2 `cart` store
-- 保存购物车条目、总件数、总金额
-- 提供 `refreshCart/addToCart/updateItem/removeItem`
-
-## 6. 网络层说明
-
-- Axios 基础路径：`/api/v1`
-- 请求拦截器：自动注入 Bearer Token
-- 响应拦截器：遇到 401 自动清理 token 并跳转登录页
-
-## 7. 联调前提
-
-1. 后端已启动：`http://localhost:8000`
-2. Rasa 与 Action Server 已启动（默认 `5005/5055`）
-3. 数据库已按 `backend/db/init_db.sql` 与 `backend/db/seed_data.sql` 初始化
-4. 可用测试账号：`test1@example.com / password123`
-
-## 8. 推荐验证路径
-
-1. 登录账号后进入商品页
-2. 搜索商品并进入详情页
-3. 加入购物车并调整数量
-4. 去结算页提交订单
-5. 在订单页查看新订单及明细
-6. 进入 `/chat` 验证客服对话与推荐回复
-
-## 9. 目录结构（关键）
-
-- `src/views/`：页面组件（Login/Register/Products/ProductDetail/Cart/Checkout/Orders/ChatSupport）
-- `src/stores/`：Pinia 状态（`auth.ts`、`cart.ts`）
-- `src/api/`：Axios 客户端与拦截器
-- `src/components/`：公共组件（当前含顶部导航）
-- `src/router/`：路由与路由守卫
+## 7. 权限说明
+- 未登录可访问：`/products`、`/products/:id`、`/chat`、`/login`、`/register`
+- 用户登录后可访问：`/cart`、`/checkout`、`/orders`
+- 商家登录后可访问：`/merchant`

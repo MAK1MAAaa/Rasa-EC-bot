@@ -10,7 +10,7 @@ const router = useRouter()
 const route = useRoute()
 
 const navClass = (target: string) => {
-  const active = route.path.startsWith(target)
+  const active = route.path.startsWith(target) || (target === '/orders' && route.path.startsWith('/order/'))
   return active ? 'nav-link active' : 'nav-link'
 }
 
@@ -196,3 +196,4 @@ const logout = () => {
   }
 }
 </style>
+

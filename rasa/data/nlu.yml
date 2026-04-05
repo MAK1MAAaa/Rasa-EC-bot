@@ -1,4 +1,4 @@
-version: "3.1"
+﻿version: "3.1"
 
 nlu:
   - intent: greet
@@ -41,6 +41,18 @@ nlu:
       - 快递什么时候到
       - 订单配送进度
       - 看下我的包裹
+      - 查询订单 ORD202603300002 的物流
+      - 帮我看 ORD202603300002 现在到哪了
+
+  - intent: ask_after_sales_help
+    examples: |
+      - 我想查售后进度
+      - 帮我看下退货处理到哪一步了
+      - 我的换货申请状态是什么
+      - 如何申请退货
+      - 怎么发起换货
+      - 售后在哪里看
+      - 查询我的售后记录
 
   - intent: ask_product_recommendation
     examples: |

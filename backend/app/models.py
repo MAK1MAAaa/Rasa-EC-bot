@@ -200,6 +200,35 @@ class ChatOrderSummaryResponse(SQLModel):
     items: List[ChatOrderSummaryItem]
 
 
+class ChatOrderLogisticsSummaryItem(SQLModel):
+    id: str
+    status: str
+    created_at: datetime
+    order_link: str
+    tracking_no: Optional[str] = None
+    current_location: Optional[str] = None
+    estimated_delivery_at: Optional[datetime] = None
+    route_plan: List[str] = Field(default_factory=list)
+
+
+class ChatOrderLogisticsSummaryResponse(SQLModel):
+    items: List[ChatOrderLogisticsSummaryItem]
+
+
+class ChatAfterSalesSummaryItem(SQLModel):
+    id: UUID
+    order_id: str
+    type: str
+    status: str
+    created_at: datetime
+    reason: Optional[str] = None
+    order_link: str
+
+
+class ChatAfterSalesSummaryResponse(SQLModel):
+    items: List[ChatAfterSalesSummaryItem]
+
+
 class CartItem(SQLModel, table=True):
     __tablename__ = "cart_items"
 
@@ -276,6 +305,17 @@ class Logistics(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class AfterSales(SQLModel, table=True):
+    __tablename__ = "after_sales"
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    order_id: str = Field(foreign_key="orders.id", index=True)
+    type: str
+    reason: Optional[str] = None
+    status: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class CreateOrderRequest(SQLModel):
     address: str
     contact_email: str
@@ -298,6 +338,15 @@ class LogisticsRead(SQLModel):
     estimated_delivery_at: Optional[datetime] = None
     route_plan: List[str] = Field(default_factory=list)
     updated_at: datetime
+
+
+class AfterSalesRead(SQLModel):
+    id: UUID
+    order_id: str
+    type: str
+    reason: Optional[str] = None
+    status: str
+    created_at: datetime
 
 
 class OrderListItem(SQLModel):
@@ -327,6 +376,7 @@ class OrderRead(SQLModel):
     shop_name: str
     items: List[OrderItemRead]
     logistics: Optional[LogisticsRead] = None
+    after_sales: List[AfterSalesRead] = Field(default_factory=list)
 
 
 class MerchantOrderShipRequest(SQLModel):
@@ -336,6 +386,32 @@ class MerchantOrderShipRequest(SQLModel):
 
 class MerchantOrderListResponse(SQLModel):
     items: List[OrderRead]
+
+
+class CreateAfterSalesRequest(SQLModel):
+    type: str
+    reason: str
+
+
+class MerchantAfterSalesUpdateRequest(SQLModel):
+    action: str
+    note: Optional[str] = None
+
+
+class MerchantAfterSalesItem(SQLModel):
+    id: UUID
+    order_id: str
+    type: str
+    reason: Optional[str] = None
+    status: str
+    created_at: datetime
+    order_status: str
+    contact_email: str
+    order_link: str
+
+
+class MerchantAfterSalesListResponse(SQLModel):
+    items: List[MerchantAfterSalesItem]
 
 
 class Token(SQLModel):

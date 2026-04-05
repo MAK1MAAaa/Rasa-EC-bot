@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import api from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
@@ -55,6 +55,15 @@ interface MerchantLogistics {
   route_plan: string[]
 }
 
+interface MerchantAfterSalesBrief {
+  id: string
+  order_id: string
+  type: string
+  reason?: string | null
+  status: string
+  created_at: string
+}
+
 interface MerchantOrder {
   id: string
   status: string
@@ -64,10 +73,24 @@ interface MerchantOrder {
   created_at: string
   items: MerchantOrderItem[]
   logistics?: MerchantLogistics | null
+  after_sales: MerchantAfterSalesBrief[]
 }
 
-type TabKey = 'orders' | 'products' | 'addresses'
+interface MerchantAfterSalesItem {
+  id: string
+  order_id: string
+  type: string
+  reason?: string | null
+  status: string
+  created_at: string
+  order_status: string
+  contact_email: string
+  order_link: string
+}
+
+type TabKey = 'orders' | 'products' | 'addresses' | 'afterSales'
 type ToastKind = 'success' | 'error'
+type AfterSalesFilter = 'open' | 'submitted' | 'merchant_approved' | 'processing' | 'merchant_rejected' | 'completed' | 'all'
 
 const authStore = useAuthStore()
 const activeTab = ref<TabKey>('orders')
@@ -83,12 +106,17 @@ const orders = ref<MerchantOrder[]>([])
 const orderFilter = ref<'pending_shipment' | 'shipped' | 'all'>('pending_shipment')
 const shipAddressByOrder = ref<Record<string, string>>({})
 const shippingOrderState = ref<Record<string, boolean>>({})
-const shipToast = ref<{ visible: boolean; type: ToastKind; message: string }>({
+
+const afterSalesItems = ref<MerchantAfterSalesItem[]>([])
+const afterSalesFilter = ref<AfterSalesFilter>('open')
+const afterSalesActionState = ref<Record<string, boolean>>({})
+
+const pageToast = ref<{ visible: boolean; type: ToastKind; message: string }>({
   visible: false,
   type: 'success',
   message: ''
 })
-let shipToastTimer: ReturnType<typeof setTimeout> | null = null
+let pageToastTimer: ReturnType<typeof setTimeout> | null = null
 
 const productForm = reactive({
   name: '',
@@ -113,17 +141,18 @@ const addressForm = reactive({
 
 const shopDisplay = computed(() => shop.value?.name || authStore.user?.shop?.name || '商家店铺')
 
-const showShipToast = (type: ToastKind, message: string) => {
-  if (shipToastTimer) {
-    clearTimeout(shipToastTimer)
+const showToast = (type: ToastKind, message: string) => {
+  if (pageToastTimer) {
+    clearTimeout(pageToastTimer)
   }
-  shipToast.value = { visible: true, type, message }
-  shipToastTimer = setTimeout(() => {
-    shipToast.value.visible = false
+  pageToast.value = { visible: true, type, message }
+  pageToastTimer = setTimeout(() => {
+    pageToast.value.visible = false
   }, 2600)
 }
 
 const isShippingOrder = (orderId: string) => !!shippingOrderState.value[orderId]
+const isAfterSalesActing = (requestId: string) => !!afterSalesActionState.value[requestId]
 
 const clearNotice = () => {
   error.value = ''
@@ -144,6 +173,47 @@ const parseErr = (err: any, fallback: string) => {
       .join('；')
   }
   return JSON.stringify(detail)
+}
+
+const orderStatusLabel = (status: string) => {
+  if (status === 'pending_shipment') return '待发货'
+  if (status === 'shipped') return '已发货'
+  return status
+}
+
+const afterSalesTypeLabel = (type: string) => {
+  if (type === 'return') return '退货'
+  if (type === 'exchange') return '换货'
+  return type
+}
+
+const afterSalesStatusLabel = (status: string) => {
+  if (status === 'submitted') return '待处理'
+  if (status === 'merchant_approved') return '已同意'
+  if (status === 'processing') return '处理中'
+  if (status === 'merchant_rejected') return '已拒绝'
+  if (status === 'completed') return '已完成'
+  if (status === 'cancelled') return '已取消'
+  return status
+}
+
+const afterSalesActions = (item: MerchantAfterSalesItem) => {
+  if (item.status === 'submitted') {
+    return [
+      { key: 'approve', label: '同意' },
+      { key: 'reject', label: '驳回' }
+    ]
+  }
+  if (item.status === 'merchant_approved') {
+    return [
+      { key: 'processing', label: '处理中' },
+      { key: 'complete', label: '完成' }
+    ]
+  }
+  if (item.status === 'processing') {
+    return [{ key: 'complete', label: '完成' }]
+  }
+  return []
 }
 
 const loadShop = async () => {
@@ -182,7 +252,7 @@ const loadOrders = async () => {
   const response = await api.get('/merchant/orders', {
     params: { status_filter: orderFilter.value }
   })
-  orders.value = response.data.items
+  orders.value = response.data.items || []
 
   const map: Record<string, string> = {}
   for (const order of orders.value) {
@@ -194,6 +264,13 @@ const loadOrders = async () => {
   shipAddressByOrder.value = { ...shipAddressByOrder.value, ...map }
 }
 
+const loadAfterSales = async () => {
+  const response = await api.get('/merchant/after-sales', {
+    params: { status_filter: afterSalesFilter.value }
+  })
+  afterSalesItems.value = response.data.items || []
+}
+
 const loadAll = async () => {
   loading.value = true
   clearNotice()
@@ -202,6 +279,7 @@ const loadAll = async () => {
     await loadAddresses()
     await loadProducts()
     await loadOrders()
+    await loadAfterSales()
   } catch (err: any) {
     error.value = parseErr(err, '商家控制台加载失败')
   } finally {
@@ -313,19 +391,36 @@ const shipOrder = async (order: MerchantOrder) => {
         timeout: 60000
       }
     )
-    showShipToast('success', '订单 ' + order.id + ' 已发货')
+    showToast('success', `订单 ${order.id} 已发货`)
     await loadOrders()
   } catch (err: any) {
-    showShipToast('error', parseErr(err, '发货失败'))
+    showToast('error', parseErr(err, '发货失败'))
   } finally {
     shippingOrderState.value[order.id] = false
   }
 }
 
+const handleAfterSales = async (item: MerchantAfterSalesItem, action: string) => {
+  if (isAfterSalesActing(item.id)) {
+    return
+  }
+  afterSalesActionState.value[item.id] = true
+  try {
+    await api.patch(`/merchant/after-sales/${item.id}`, { action })
+    showToast('success', `售后 ${item.order_id} 已更新`)
+    await loadAfterSales()
+    await loadOrders()
+  } catch (err: any) {
+    showToast('error', parseErr(err, '售后处理失败'))
+  } finally {
+    afterSalesActionState.value[item.id] = false
+  }
+}
+
 onMounted(loadAll)
 onBeforeUnmount(() => {
-  if (shipToastTimer) {
-    clearTimeout(shipToastTimer)
+  if (pageToastTimer) {
+    clearTimeout(pageToastTimer)
   }
 })
 </script>
@@ -333,8 +428,8 @@ onBeforeUnmount(() => {
 <template>
   <section class="merchant-page">
     <transition name="toast-fade">
-      <div v-if="shipToast.visible" class="ship-toast" :class="shipToast.type">
-        {{ shipToast.message }}
+      <div v-if="pageToast.visible" class="ship-toast" :class="pageToast.type">
+        {{ pageToast.message }}
       </div>
     </transition>
 
@@ -347,6 +442,7 @@ onBeforeUnmount(() => {
       <button :class="activeTab === 'orders' ? 'active' : ''" @click="activeTab = 'orders'">订单</button>
       <button :class="activeTab === 'products' ? 'active' : ''" @click="activeTab = 'products'">商品</button>
       <button :class="activeTab === 'addresses' ? 'active' : ''" @click="activeTab = 'addresses'">地址</button>
+      <button :class="activeTab === 'afterSales' ? 'active' : ''" @click="activeTab = 'afterSales'">售后</button>
     </div>
 
     <p v-if="error" class="error">{{ error }}</p>
@@ -373,9 +469,10 @@ onBeforeUnmount(() => {
         <article v-for="order in orders" :key="order.id" class="order-card">
           <div class="row">
             <strong>{{ order.id }}</strong>
-            <span class="status">{{ order.status }}</span>
+            <span class="status">{{ orderStatusLabel(order.status) }}</span>
           </div>
           <p class="muted">收货地址：{{ order.address }}</p>
+          <p class="muted">售后申请：{{ order.after_sales?.length || 0 }} 条</p>
 
           <ul class="items">
             <li v-for="item in order.items" :key="item.id">
@@ -384,6 +481,12 @@ onBeforeUnmount(() => {
               <strong>¥ {{ item.subtotal.toFixed(2) }}</strong>
             </li>
           </ul>
+
+          <div class="chips" v-if="order.after_sales && order.after_sales.length > 0">
+            <span class="badge" v-for="asItem in order.after_sales" :key="asItem.id">
+              {{ afterSalesTypeLabel(asItem.type) }} · {{ afterSalesStatusLabel(asItem.status) }}
+            </span>
+          </div>
 
           <div class="ship-row" v-if="order.status === 'pending_shipment'">
             <select v-model="shipAddressByOrder[order.id]">
@@ -402,6 +505,48 @@ onBeforeUnmount(() => {
             <p><strong>当前位置：</strong>{{ order.logistics.current_location || '-' }}</p>
             <p><strong>预计送达：</strong>{{ order.logistics.estimated_delivery_at ? new Date(order.logistics.estimated_delivery_at).toLocaleString() : '-' }}</p>
             <p><strong>途径：</strong>{{ (order.logistics.route_plan || []).join(' -> ') || '-' }}</p>
+          </div>
+        </article>
+      </section>
+
+      <section v-if="activeTab === 'afterSales'" class="panel">
+        <div class="panel-head">
+          <h2>售后处理</h2>
+          <div class="filter-row">
+            <select v-model="afterSalesFilter" @change="loadAfterSales">
+              <option value="open">进行中</option>
+              <option value="submitted">待处理</option>
+              <option value="merchant_approved">已同意</option>
+              <option value="processing">处理中</option>
+              <option value="merchant_rejected">已拒绝</option>
+              <option value="completed">已完成</option>
+              <option value="all">全部</option>
+            </select>
+            <button @click="loadAfterSales">刷新</button>
+          </div>
+        </div>
+
+        <div v-if="afterSalesItems.length === 0" class="state-card">暂无售后申请</div>
+
+        <article v-for="item in afterSalesItems" :key="item.id" class="after-sales-row">
+          <div class="row">
+            <strong>{{ item.order_id }}</strong>
+            <span class="status">{{ afterSalesStatusLabel(item.status) }}</span>
+          </div>
+          <p class="muted">{{ afterSalesTypeLabel(item.type) }} · 下单邮箱 {{ item.contact_email }}</p>
+          <p class="muted">{{ new Date(item.created_at).toLocaleString() }}</p>
+          <p class="reason">{{ item.reason || '无说明' }}</p>
+          <a class="order-link" :href="item.order_link" target="_blank">查看订单</a>
+
+          <div class="action-row" v-if="afterSalesActions(item).length > 0">
+            <button
+              v-for="action in afterSalesActions(item)"
+              :key="action.key"
+              :disabled="isAfterSalesActing(item.id)"
+              @click="handleAfterSales(item, action.key)"
+            >
+              {{ isAfterSalesActing(item.id) ? '处理中...' : action.label }}
+            </button>
           </div>
         </article>
       </section>
@@ -541,6 +686,7 @@ onBeforeUnmount(() => {
 .filter-row button,
 .ship-row select,
 .ship-row button,
+.action-row button,
 .grid-form input,
 .grid-form textarea,
 .grid-form button {
@@ -552,6 +698,7 @@ onBeforeUnmount(() => {
 
 .filter-row button,
 .ship-row button,
+.action-row button,
 .grid-form button,
 .product-row button,
 .address-row button {
@@ -580,6 +727,7 @@ onBeforeUnmount(() => {
 }
 
 .order-card,
+.after-sales-row,
 .product-row,
 .address-row {
   border: 1px solid var(--line);
@@ -594,6 +742,7 @@ onBeforeUnmount(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 8px;
 }
 
 .status,
@@ -619,9 +768,16 @@ onBeforeUnmount(() => {
   align-items: center;
 }
 
-.items a {
+.items a,
+.order-link {
   color: #60431a;
   text-decoration: none;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .ship-row {
@@ -634,6 +790,18 @@ onBeforeUnmount(() => {
   border-top: 1px dashed #d6c7ad;
   padding-top: 8px;
   color: #4f4538;
+}
+
+.reason {
+  margin: 0;
+  color: #4c4234;
+  white-space: pre-wrap;
+}
+
+.action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .table-list {
@@ -733,5 +901,3 @@ onBeforeUnmount(() => {
   }
 }
 </style>
-
-

@@ -1,76 +1,112 @@
 ﻿# Rasa-EC-bot Backend (FastAPI)
 
-后端已支持用户侧商城 + 商家侧控制台：
-- 用户登录、商品浏览、购物车、下单、订单查询
-- 商家登录（复用同一登录页）、商品上架/下架、发货地址管理、手动发货
-- 发货时接入本地 Ollama（`qwen3.5:9b`）自动生成物流预计送达时间与途径节点
+后端支持用户商城、商家中心、订单物流、售后流程与客服桥接接口，并已接入 Redis 缓存。
 
-## 1. 技术栈
-- FastAPI
-- SQLModel + SQLAlchemy Async
+## 1. 主要能力
+- 用户：注册登录、商品查询、购物车、下单、订单查询、申请退货/换货
+- 商家：店铺读取、发货地址管理、商品管理、订单发货、售后处理
+- 客服：提供订单/物流/售后内部查询接口给 Rasa Action 调用
+- 缓存：Redis 缓存商品筛选元数据与客服汇总数据
+
+## 2. 运行依赖
+- Python `>=3.10, <3.12`
 - PostgreSQL 15
-- JWT Bearer Token
-- HTTPX（转发 Rasa、调用 Ollama）
+- Redis 7（Docker）
 
-## 2. PostgreSQL 启动与初始化
+## 3. 环境变量
+先复制环境变量模板：
 
-### 2.1 启动容器
 ```powershell
-# 1) 先启动 PostgreSQL 容器（项目 README 里的命令）
+Copy-Item .env.sample .env
+```
+
+Redis 相关配置（在 `.env` 中）：
+
+```env
+REDIS_URL=redis://127.0.0.1:6379/0
+REDIS_CACHE_TTL_SEC=180
+REDIS_DOCKER_CONTAINER_NAME=rasa-redis
+REDIS_DOCKER_IMAGE=redis:7
+REDIS_DOCKER_HOST_PORT=6379
+REDIS_DOCKER_CONTAINER_PORT=6379
+REDIS_DOCKER_DATA_DIR=../database/redisdata
+REDIS_APPENDONLY=yes
+REDIS_INIT_MARKER_KEY=rasa_ec_bot:system:initialized_at
+REDIS_INIT_SCHEMA_KEY=rasa_ec_bot:system:schema_version
+REDIS_INIT_SCHEMA_VERSION=1
+```
+
+说明：
+- `REDIS_DOCKER_DATA_DIR` 决定 Redis 持久化目录（默认 `../database/redisdata`）。
+- `REDIS_URL` 是后端服务实际连接地址。
+
+## 4. 启动 PostgreSQL 与 Redis
+### 4.1 PostgreSQL
+```powershell
 docker run --name rasa-postgres -e POSTGRES_PASSWORD=postgres -p 5432:5432 -v D:/Github/Rasa-EC-bot/database/pgdata:/var/lib/postgresql/data -d postgres:15
 
-# 2) 确认容器在跑
 docker ps --filter name=rasa-postgres
 
-# 3) 创建数据库
 docker exec -it rasa-postgres psql -U postgres -c "CREATE DATABASE rasa_ec_bot;"
 ```
 
-### 2.2 导入表结构和种子数据
+### 4.2 Redis（持久化 + 初始化脚本）
+在 `backend` 目录执行：
+
+```powershell
+# 1) 创建/启动 Redis 容器（自动读取 .env，自动挂载持久化目录）
+powershell -ExecutionPolicy Bypass -File .\scripts\start_redis.ps1
+
+# 可选：强制重建容器
+# powershell -ExecutionPolicy Bypass -File .\scripts\start_redis.ps1 -Recreate
+
+# 2) 初始化 Redis（健康检查 + 初始化标记）
+powershell -ExecutionPolicy Bypass -File .\scripts\init_redis.ps1
+```
+
+初始化脚本会写入：
+- `REDIS_INIT_MARKER_KEY`（记录初始化时间）
+- `REDIS_INIT_SCHEMA_KEY`（仅首次写入 schema 版本）
+
+### 4.3 校验 Redis
+```powershell
+docker ps --filter name=rasa-redis
+docker exec -it rasa-redis redis-cli ping
+```
+
+## 5. 导入表结构与种子数据
 ```powershell
 $OutputEncoding = [System.Text.Encoding]::UTF8
 Get-Content -Raw -Encoding UTF8 db/init_db.sql | docker exec -i -e PGCLIENTENCODING=UTF8 rasa-postgres psql -U postgres -d rasa_ec_bot
 Get-Content -Raw -Encoding UTF8 db/seed_data.sql | docker exec -i -e PGCLIENTENCODING=UTF8 rasa-postgres psql -U postgres -d rasa_ec_bot
 ```
 
-## 3. 环境变量
-在 `backend` 目录创建 `.env`（可直接复制 `.env.sample`）：
-
-```env
-DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/rasa_ec_bot
-
-RASA_SERVER_URL=http://127.0.0.1:5005
-RASA_REST_WEBHOOK_PATH=/webhooks/rest/webhook
-RASA_REQUEST_TIMEOUT_SEC=30
-RASA_INTERNAL_TOKEN=change-me-in-production
-
-FRONTEND_BASE_URL=http://localhost:5173
-
-OLLAMA_BASE_URL=http://127.0.0.1:11434
-OLLAMA_MODEL=qwen3.5:9b
-OLLAMA_TIMEOUT_SEC=45
-```
-
-## 4. 启动后端
+## 6. 启动后端
 ```bash
 uv sync
 uv run uvicorn app.main:app --reload
 ```
-
 - API: `http://127.0.0.1:8000`
 - Swagger: `http://127.0.0.1:8000/docs`
 
-## 5. 主要数据结构变更
-- `users.role`: `customer | merchant`
-- `shops`: 商家店铺
-- `shop_addresses`: 商家发货地址（支持默认地址）
-- `products.shop_id`: 商品归属店铺
-- `orders.shop_id`: 订单归属店铺
-- `logistics`: 新增 `shipped_from_address_id / estimated_delivery_at / route_plan / llm_raw_text`
+## 7. Redis 缓存说明
+### 7.1 缓存接口
+- `GET /api/v1/products/filters`
+- `GET /api/v1/chat/internal/orders-summary`
+- `GET /api/v1/chat/internal/orders-logistics-summary`
+- `GET /api/v1/chat/internal/after-sales-summary`
 
-## 6. 主要 API
+### 7.2 失效触发
+- 商品新增/编辑后：失效商品筛选缓存
+- 用户下单后：失效该用户订单/物流汇总缓存
+- 商家发货后：失效该用户订单/物流汇总缓存
+- 创建/处理售后后：失效该用户售后汇总缓存
 
-### 6.1 用户侧
+### 7.3 降级策略
+- Redis 未配置或连接失败时，接口自动回退数据库查询，不影响功能。
+
+## 8. 核心 API
+### 8.1 用户侧
 - `POST /api/v1/auth/register`
 - `POST /api/v1/auth/login`
 - `GET /api/v1/auth/me`
@@ -84,8 +120,10 @@ uv run uvicorn app.main:app --reload
 - `POST /api/v1/orders`
 - `GET /api/v1/orders`
 - `GET /api/v1/orders/{order_id}`
+- `GET /api/v1/orders/{order_id}/after-sales`
+- `POST /api/v1/orders/{order_id}/after-sales`
 
-### 6.2 商家侧
+### 8.2 商家侧
 - `GET /api/v1/merchant/shop`
 - `GET /api/v1/merchant/addresses`
 - `POST /api/v1/merchant/addresses`
@@ -95,17 +133,23 @@ uv run uvicorn app.main:app --reload
 - `PATCH /api/v1/merchant/products/{product_id}`
 - `GET /api/v1/merchant/orders?status_filter=pending_shipment|shipped|all`
 - `POST /api/v1/merchant/orders/{order_id}/ship`
+- `GET /api/v1/merchant/after-sales?status_filter=open|all|...`
+- `PATCH /api/v1/merchant/after-sales/{after_sales_id}`
 
-## 7. 种子账号
-密码统一：`password123`
+### 8.3 客服内部接口（Rasa Action 专用）
+- `GET /api/v1/chat/internal/orders-summary`
+- `GET /api/v1/chat/internal/orders-logistics-summary`
+- `GET /api/v1/chat/internal/after-sales-summary`
 
+## 9. 种子账号
+统一密码：`password123`
 - 用户：`test1@example.com`
 - 用户：`test2@example.com`
 - 商家：`merchant1@example.com`（星河数码旗舰店）
 - 商家：`merchant2@example.com`（青禾智家生活馆）
 
-### 7.1 登录失败排查（旧数据）
-如果你之前已经导入过旧版 `seed_data.sql`，用户密码哈希可能不匹配。可执行以下 SQL 直接重置种子账号密码：
+### 9.1 老库密码不匹配排查
+如果历史种子数据密码哈希不一致，可执行：
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS pgcrypto;

@@ -1,77 +1,90 @@
-# Rasa + Ollama 客服子系统
+﻿# Rasa + Ollama 客服模块
 
-该目录提供一个最小可运行的客服链路：
-- Rasa NLU/Policy 负责意图识别与对话路由
-- Action Server 负责调用本地 Ollama (`qwen3.5:9b`) 和后端商品接口
-- FastAPI 通过 `/api/v1/chat/send` 转发前端消息到 Rasa REST channel
+本目录负责电商客服对话能力：
+- Rasa 负责 NLU + 对话策略
+- Action Server 调用后端接口读取订单/物流/售后数据
+- 本地 Ollama（`qwen3.5:9b`）提供闲聊与自然语言补充回复
 
-## 1. 准备 Ollama 模型
+## 1. 运行前准备
+- 已安装 Ollama，并可运行 `qwen3.5:9b`
+- 后端接口可访问：`http://127.0.0.1:8000/api/v1`
 
+先拉取模型：
 ```bash
 ollama pull qwen3.5:9b
-ollama run qwen3.5:9b
 ```
 
-## 2. 配置 `.env`
-
-在 `rasa` 目录下复制环境变量模板：
+## 2. 环境变量
+复制样例文件：
 
 ```bash
 cd rasa
-cp .env.sample .env
-```
-
-Windows PowerShell：
-
-```powershell
-cd rasa
+# Windows PowerShell
 Copy-Item .env.sample .env
+# Linux/macOS
+# cp .env.sample .env
 ```
 
-关键变量说明：
+关键变量：
 - `OLLAMA_BASE_URL`：Ollama 服务地址
-- `OLLAMA_CHAT_PATH`：Ollama chat 接口路径（默认 `/api/chat`）
+- `OLLAMA_CHAT_PATH`：聊天接口路径（默认 `/api/chat`）
 - `OLLAMA_MODEL`：模型名（默认 `qwen3.5:9b`）
-- `BACKEND_API_URL`：Action 访问后端商品接口的地址
-- `FRONTEND_BASE_URL`：前端地址，用于生成商品/订单跳转链接
-- `RASA_INTERNAL_TOKEN`：Rasa 调用后端内部订单接口的鉴权 token（需与 `backend/.env` 保持一致）
-- `ACTION_HTTP_TIMEOUT_SEC`：Action 请求超时秒数
+- `BACKEND_API_URL`：后端 API 根路径
+- `FRONTEND_BASE_URL`：前端地址（用于构造可点击链接）
+- `RASA_INTERNAL_TOKEN`：与后端内部接口鉴权一致
+- `ACTION_HTTP_TIMEOUT_SEC`：Action HTTP 超时
 
-## 3. 使用 uv 安装依赖
-
+## 3. 安装依赖（uv）
 ```bash
 cd rasa
 uv sync
 ```
 
-## 4. 训练并启动 Rasa（uv）
-
-在 `rasa` 目录执行：
-
+## 4. 训练与启动
+### 4.1 训练模型
 ```bash
 uv run rasa train --config config.yml --domain domain.yml --data data
+```
+
+### 4.2 启动 Rasa Server
+```bash
 uv run rasa run --enable-api --cors "*" --credentials credentials.yml --endpoints endpoints.yml --port 5005
 ```
 
-另开一个终端启动 Action Server：
-
+### 4.3 启动 Action Server
 ```bash
-cd rasa
 uv run rasa run actions --actions actions --port 5055
 ```
 
-## 5. 联调顺序
+## 5. 当前对话能力
+### 5.1 已支持意图
+- 问候、致谢、告别
+- 查询我的订单
+- 查询物流进度
+- 查询售后进度
+- 商品推荐
+- 闲聊兜底
 
+### 5.2 已实现 Action
+- `action_recommend_products`
+- `action_query_my_orders`
+- `action_query_order_logistics`
+- `action_query_after_sales`
+- `action_ollama_reply`
+
+### 5.3 与后端联动接口
+- `POST /api/v1/chat/send`（前端 -> 后端 -> Rasa）
+- `GET /api/v1/chat/internal/orders-summary`
+- `GET /api/v1/chat/internal/orders-logistics-summary`
+- `GET /api/v1/chat/internal/after-sales-summary`
+
+## 6. 联调顺序
 1. 启动 Ollama
-2. 启动 Rasa Server (`5005`) 与 Action Server (`5055`)
-3. 启动 FastAPI (`8000`)
-4. 启动前端 (`5173`)
-5. 在前端 `智能客服` 页面发消息验证
+2. 启动后端（`8000`）
+3. 启动 Rasa Server（`5005`）
+4. 启动 Action Server（`5055`）
+5. 启动前端并打开 `/chat`
 
-## 6. 兼容模式（非 uv）
-
-如果你不用 uv，也可执行：
-
-```bash
-pip install -r requirements.txt
-```
+## 7. 说明
+- 当前版本不包含 LoRA 微调流程。
+- 推荐先完成业务闭环与数据联调，再进入模型微调阶段。

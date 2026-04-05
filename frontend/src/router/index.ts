@@ -5,7 +5,8 @@ import Products from '@/views/Products.vue'
 import ProductDetail from '@/views/ProductDetail.vue'
 import Cart from '@/views/Cart.vue'
 import Checkout from '@/views/Checkout.vue'
-import Orders from '@/views/Orders.vue'
+import OrderList from '@/views/OrderList.vue'
+import OrderDetail from '@/views/OrderDetail.vue'
 import ChatSupport from '@/views/ChatSupport.vue'
 import MerchantCenter from '@/views/MerchantCenter.vue'
 
@@ -55,9 +56,20 @@ const router = createRouter({
     },
     {
       path: '/orders',
-      name: 'Orders',
-      component: Orders,
+      name: 'OrderList',
+      component: OrderList,
       meta: { requiresAuth: true, customerOnly: true }
+    },
+    {
+      path: '/order/:id',
+      name: 'OrderDetail',
+      component: OrderDetail,
+      props: true,
+      meta: { requiresAuth: true, customerOnly: true }
+    },
+    {
+      path: '/orders/:id',
+      redirect: (to) => `/order/${to.params.id}`
     },
     {
       path: '/chat',

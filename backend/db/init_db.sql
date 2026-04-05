@@ -123,11 +123,14 @@ CREATE TABLE logistics (
 
 CREATE TABLE after_sales (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    order_id VARCHAR(50) REFERENCES orders(id),
-    type VARCHAR(50) NOT NULL,
+    order_id VARCHAR(50) NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    type VARCHAR(50) NOT NULL CHECK (type IN ('return', 'exchange')),
     reason TEXT,
     status VARCHAR(50) NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE INDEX idx_after_sales_order_id ON after_sales(order_id);
+CREATE INDEX idx_after_sales_status_created_at ON after_sales(status, created_at DESC);
 
 

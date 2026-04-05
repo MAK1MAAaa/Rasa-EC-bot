@@ -76,3 +76,11 @@ INSERT INTO logistics (order_id, shipped_from_address_id, tracking_no, status, c
     '["广州中转中心", "杭州中转站", "上海分拨中心"]'::jsonb,
     '示例物流预测文本（种子数据）'
 );
+
+INSERT INTO after_sales (order_id, type, reason, status) VALUES
+(
+    'ORD202603300002',
+    'return',
+    '历史售后示例：外观轻微划痕，已完成退货处理',
+    'completed'
+);

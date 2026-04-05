@@ -45,7 +45,7 @@ const submitOrder = async () => {
       contact_email: contactEmail.value.trim().toLowerCase()
     })
     await cartStore.refreshCart()
-    router.push({ path: '/orders', query: { orderId: response.data.id } })
+    router.push({ path: `/order/${response.data.id}` })
   } catch (err: any) {
     error.value = err.response?.data?.detail || '下单失败，请稍后重试'
   } finally {
