@@ -158,3 +158,68 @@
 - 更精细的缓存分层与监控
 - 接入地图物流 API（如高德）提升物流节点地址真实性
 - 完整运营能力（优惠券、营销活动、评价体系）
+
+## 11. 本次同步变更（2026-04-08）：LoRA ReAct 数据合成能力
+
+### 11.1 范围说明
+- 本次新增为 LoRA 数据工程能力，不改变线上主业务接口与核心交易流程。
+- 目标是将现有 QA 数据转换为可用于 Agent 微调的 ReAct 风格样本。
+
+### 11.2 新增交付
+- 新增脚本：LoRA/scripts/synthesize_react_data.py
+- 新增 schema：LoRA/configs/react_action_schemas.json
+- 文档新增：LoRA/README.md 中 QA -> ReAct 合成章节
+
+### 11.3 功能要点
+- messages 结构保持不变，仅替换 ssistant 为五段体：
+  - Thought
+  - Action
+  - Action_Input
+  - Observation
+  - Response
+- Observation 由本地 schema 注入，不依赖 LLM 自由生成。
+- 默认动作分布目标：28/17/20/18/12/5（六动作）。
+
+### 11.4 接口对齐映射
+- query_order_status -> GET /api/v1/orders/{order_id}
+- query_logistics -> GET /api/v1/chat/internal/orders-logistics-summary
+- query_product_info -> GET /api/v1/products
+- create_return_request -> POST /api/v1/orders/{order_id}/after-sales
+- query_refund_status -> GET /api/v1/chat/internal/after-sales-summary
+- query_orders_summary -> GET /api/v1/chat/internal/orders-summary
+
+### 11.5 产物与验收
+- ReAct 子集：LoRA/data/processed/react_agent/{train,val,test}.jsonl
+- 合并子集：LoRA/data/processed/combined_react_agent/{train,val,test}.jsonl
+- 报告：LoRA/data/processed/react_agent/summary.json
+- 验收关注：
+  - 五段体格式完整
+  - Action_Input/Observation JSON 可解析
+  - Observation key 与 schema 对齐
+  - 动作分布偏差可控
+
+### 11.6 稳定性修复
+- 已处理 Ollama 超时与 500 场景：失败自动重试，必要时 fallback，不再中断整批。
+- 增加输入数据多编码回退，避免 UnicodeDecodeError 直接失败。
+
+## 12. 后续扩展方向（建议）
+
+### 12.1 架构范式升级：引入 ReAct 混合 Agent 架构
+- Rasa 作为 Fast Router 处理高频确定性任务。
+- 对复杂多轮问题切换到 ReAct Agent + Tool Calling。
+- 重点研究：步骤规划、工具选择与状态管理。
+
+### 12.2 检索增强与多模态扩展（Multi-modal RAG）
+- 引入向量检索覆盖政策文档、说明书等长文本知识。
+- 接入 VLM 处理图片售后（破损图、报错截图），联动售后 Action。
+- 目标：提升复杂咨询理解能力与响应准确率。
+
+### 12.3 模型部署与推理系统优化（SysML 视角）
+- 对比 Ollama 与 vLLM 在并发、吞吐、时延方面表现。
+- 研究 Prefix Caching 在多轮客服中的加速收益。
+- 输出硬件/显存调度与推理服务配置建议。
+
+### 12.4 严谨评测与对齐（Evaluation & Alignment）
+- 从规则评估升级到多维评测：业务准确率、同理心、安全性。
+- 引入 LLM-as-a-Judge 建立自动化评分机制。
+- 参考 OpenCompass 思路设计长上下文检索测试，量化关键信息提取能力。

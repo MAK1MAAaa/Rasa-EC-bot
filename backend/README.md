@@ -67,6 +67,15 @@ docker ps --filter name=rasa-postgres
 docker exec -it rasa-postgres psql -U postgres -c "CREATE DATABASE rasa_ec_bot;"
 ```
 
+如果提示容器名已存在（`Conflict. The container name ... is already in use`）：
+
+- 直接复用已有容器：
+  - `docker start rasa-postgres`
+- 如需按当前挂载路径重建：
+  - `docker stop rasa-postgres`
+  - `docker rm rasa-postgres`
+  - 再执行上面的 `docker run` 命令
+
 ### 4.2 Redis（持久化 + 初始化脚本）
 在 `backend` 目录执行。
 
@@ -114,6 +123,11 @@ chmod +x scripts/start_redis.sh scripts/init_redis.sh scripts/start_redis_fedora
 # 2) 初始化 Redis（健康检查 + 初始化标记）
 ./scripts/init_redis_fedora.sh
 ```
+
+若 Redis 容器名冲突，可先执行：
+
+- `docker start rasa-redis`（复用已有容器）
+- 或 `docker stop rasa-redis && docker rm rasa-redis` 后再运行启动脚本
 
 说明：
 - `start_redis_macos.sh` / `start_redis_fedora.sh` 是平台入口脚本，内部复用 `start_redis.sh`。

@@ -47,6 +47,15 @@ docker exec -it rasa-postgres psql -U postgres -c "CREATE DATABASE rasa_ec_bot;"
 docker run --name rasa-redis -p 6379:6379 -v "$(pwd)/database/redisdata:/data" -d redis:7 redis-server --appendonly yes
 ```
 
+如果提示容器名已存在（`Conflict. The container name ... is already in use`）：
+
+- 直接复用已有容器：
+  - `docker start rasa-postgres rasa-redis`
+- 如需按当前挂载路径重建：
+  - `docker stop rasa-postgres rasa-redis`
+  - `docker rm rasa-postgres rasa-redis`
+  - 再执行上面的 `docker run` 命令
+
 ### 3.2 初始化数据库
 ```powershell
 cd backend

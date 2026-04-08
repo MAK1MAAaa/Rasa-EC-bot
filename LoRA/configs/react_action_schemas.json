@@ -1,0 +1,170 @@
+{
+  "actions": {
+    "query_order_status": {
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/v1/orders/{order_id}"
+      },
+      "required_action_input_keys": [
+        "order_id"
+      ],
+      "observation_template": {
+        "id": "{{order_id}}",
+        "status": "{{order_status}}",
+        "address": "{{address}}",
+        "contact_email": "{{contact_email}}",
+        "total_amount": "{{total_amount}}",
+        "created_at": "{{created_at}}",
+        "shop_id": "{{shop_id}}",
+        "shop_name": "{{shop_name}}",
+        "items": [
+          {
+            "id": "{{order_item_id}}",
+            "product_id": "{{product_id}}",
+            "product_name": "{{product_name}}",
+            "unit_price": "{{unit_price}}",
+            "quantity": "{{quantity}}",
+            "subtotal": "{{subtotal}}",
+            "product_link": "{{product_link}}"
+          }
+        ],
+        "logistics": {
+          "tracking_no": "{{tracking_no}}",
+          "status": "{{logistics_status}}",
+          "current_location": "{{current_location}}",
+          "estimated_delivery_at": "{{estimated_delivery_at}}",
+          "route_plan": [
+            "{{route_step_1}}",
+            "{{route_step_2}}"
+          ],
+          "updated_at": "{{updated_at}}"
+        },
+        "after_sales": [
+          {
+            "id": "{{after_sales_id}}",
+            "order_id": "{{order_id}}",
+            "type": "{{after_sales_type}}",
+            "reason": "{{after_sales_reason}}",
+            "status": "{{after_sales_status}}",
+            "created_at": "{{after_sales_created_at}}"
+          }
+        ]
+      }
+    },
+    "query_logistics": {
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/v1/chat/internal/orders-logistics-summary"
+      },
+      "required_action_input_keys": [
+        "user_id"
+      ],
+      "observation_template": {
+        "items": [
+          {
+            "id": "{{order_id}}",
+            "status": "{{order_status}}",
+            "created_at": "{{created_at}}",
+            "order_link": "{{order_link}}",
+            "tracking_no": "{{tracking_no}}",
+            "current_location": "{{current_location}}",
+            "estimated_delivery_at": "{{estimated_delivery_at}}",
+            "route_plan": [
+              "{{route_step_1}}",
+              "{{route_step_2}}"
+            ]
+          }
+        ]
+      }
+    },
+    "query_product_info": {
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/v1/products"
+      },
+      "required_action_input_keys": [],
+      "observation_template": {
+        "items": [
+          {
+            "id": "{{product_id}}",
+            "shop_id": "{{shop_id}}",
+            "shop_name": "{{shop_name}}",
+            "name": "{{product_name}}",
+            "price": "{{price}}",
+            "description": "{{product_desc}}",
+            "image_url": "{{image_url}}",
+            "category": "{{product_category}}",
+            "is_active": "{{is_active}}",
+            "stock": "{{stock}}",
+            "created_at": "{{product_created_at}}"
+          }
+        ],
+        "total": "{{total}}",
+        "page": "{{page}}",
+        "page_size": "{{page_size}}"
+      }
+    },
+    "create_return_request": {
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/v1/orders/{order_id}/after-sales"
+      },
+      "required_action_input_keys": [
+        "order_id",
+        "type",
+        "reason"
+      ],
+      "observation_template": {
+        "id": "{{after_sales_id}}",
+        "order_id": "{{order_id}}",
+        "type": "{{after_sales_type}}",
+        "reason": "{{after_sales_reason}}",
+        "status": "{{after_sales_status}}",
+        "created_at": "{{after_sales_created_at}}"
+      }
+    },
+    "query_refund_status": {
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/v1/chat/internal/after-sales-summary"
+      },
+      "required_action_input_keys": [
+        "user_id"
+      ],
+      "observation_template": {
+        "items": [
+          {
+            "id": "{{after_sales_id}}",
+            "order_id": "{{order_id}}",
+            "type": "{{after_sales_type}}",
+            "status": "{{after_sales_status}}",
+            "created_at": "{{after_sales_created_at}}",
+            "reason": "{{after_sales_reason}}",
+            "order_link": "{{order_link}}"
+          }
+        ]
+      }
+    },
+    "query_orders_summary": {
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/v1/chat/internal/orders-summary"
+      },
+      "required_action_input_keys": [
+        "user_id"
+      ],
+      "observation_template": {
+        "items": [
+          {
+            "id": "{{order_id}}",
+            "status": "{{order_status}}",
+            "total_amount": "{{total_amount}}",
+            "item_count": "{{item_count}}",
+            "created_at": "{{created_at}}",
+            "order_link": "{{order_link}}"
+          }
+        ]
+      }
+    }
+  }
+}

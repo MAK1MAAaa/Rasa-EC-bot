@@ -335,3 +335,71 @@ uv run python scripts/eval_lora.py `
 - `data/Bitext_Sample_Customer_Support_Training_Dataset_27K_responses-v11.csv`
 
 è·¨è®¾å¤‡ä½¿ç”¨æ—¶ï¼Œè¯·æ‰‹åŠ¨å¤åˆ¶ä¸Šè¿°æ–‡ä»¶åˆ°ç›¸åŒè·¯å¾„ï¼Œå†æ‰§è¡Œé¢„å¤„ç†ä¸è®­ç»ƒå‘½ä»¤ã€‚
+
+## 16. QA -> ReAct Agent Êı¾İºÏ³É£¨½Ó¿ÚÇ¿¶ÔÆë + ·Ö²ã²ÉÑù£©
+
+### 16.1 Ä¿±ê
+- ±£³ÖÏÖÓĞ SFT `messages=[system,user,assistant]` ½á¹¹²»±ä¡£
+- ½« `assistant` ×ªÎªÎå¶ÎÌå£º`Thought/Action/Action_Input/Observation/Response`¡£
+- `Observation` ²»ÓÉÄ£ĞÍ×ÔÓÉÉú³É£¬¶øÊÇÓÉ±¾µØ schema Ä£°å×¢Èë£¬È·±£Óëºó¶ËÕæÊµ½Ó¿Ú×Ö¶ÎÒ»ÖÂ¡£
+
+### 16.2 ĞÂÔöÎÄ¼ş
+- `configs/react_action_schemas.json`
+- `scripts/synthesize_react_data.py`
+
+### 16.3 Action Óëºó¶Ë½Ó¿ÚÓ³Éä
+- `query_order_status` -> `GET /api/v1/orders/{order_id}` -> `OrderRead`
+- `query_logistics` -> `GET /api/v1/chat/internal/orders-logistics-summary` -> `ChatOrderLogisticsSummaryResponse`
+- `query_product_info` -> `GET /api/v1/products` -> `ProductListResponse`
+- `create_return_request` -> `POST /api/v1/orders/{order_id}/after-sales` -> `AfterSalesRead`
+- `query_refund_status` -> `GET /api/v1/chat/internal/after-sales-summary` -> `ChatAfterSalesSummaryResponse`
+- `query_orders_summary` -> `GET /api/v1/chat/internal/orders-summary` -> `ChatOrderSummaryResponse`
+
+### 16.4 Ä¬ÈÏ·Ö²¼²ßÂÔ
+- Ñù±¾×ÜÊı£º`1500`
+- ¶¯×÷¼¶Ä¿±êÕ¼±È£¨°´Ë³Ğò£©£º
+  - `query_order_status`: `28%`
+  - `query_logistics`: `17%`
+  - `query_product_info`: `20%`
+  - `create_return_request`: `18%`
+  - `query_refund_status`: `12%`
+  - `query_orders_summary`: `5%`
+- ×é¼¶²Î¿¼Õ¼±È£¨ÓÃÓÚÍ³¼Æ¶ÔÕÕ£©£º`¶©µ¥/ÎïÁ÷ 45%`£¬`ÊÛºó 35%`£¬`ÉÌÆ· 20%`
+
+### 16.5 ÔËĞĞÃüÁî
+```powershell
+cd LoRA
+uv run python scripts/synthesize_react_data.py `
+  --schema-config configs/react_action_schemas.json `
+  --sample-size 1500 `
+  --ollama-model qwen3.5:9b `
+  --ollama-base-url http://127.0.0.1:11434 `
+  --react-out-dir data/processed/react_agent `
+  --combined-out-dir data/processed/combined_react_agent
+```
+
+### 16.6 Ö÷Òª²ÎÊı
+- `--input-train/--input-val/--input-test`: »ù´¡ QA Êı¾İÊäÈë£¨Ä¬ÈÏ `data/processed/{train,val,test}.jsonl`£©
+- `--sample-size`: ºÏ³ÉÑù±¾×ÜÁ¿£¨Ä¬ÈÏ `1500`£©
+- `--schema-config`: Observation schema ÅäÖÃÎÄ¼şÂ·¾¶
+- `--max-retries`: µ¥ÌõÑù±¾ Ollama ×î´óÖØÊÔ´ÎÊı£¨Ä¬ÈÏ `4`£©
+- `--temperature`: Ollama ²ÉÑùÎÂ¶È£¨Ä¬ÈÏ `0.4`£©
+- `--dry-run`: ²»µ÷ÓÃ Ollama£¬½öÓÃ±¾µØ fallback Âß¼­Éú³É£¬ÓÃÓÚÁ÷Ë®ÏßÁªµ÷
+
+### 16.7 Êä³ö²úÎï
+- ReAct ×Ó¼¯£º
+  - `data/processed/react_agent/train.jsonl`
+  - `data/processed/react_agent/val.jsonl`
+  - `data/processed/react_agent/test.jsonl`
+- ºÏ²¢¼¯£¨base + react£©£º
+  - `data/processed/combined_react_agent/train.jsonl`
+  - `data/processed/combined_react_agent/val.jsonl`
+  - `data/processed/combined_react_agent/test.jsonl`
+- »ã×Ü±¨¸æ£º
+  - `data/processed/react_agent/summary.json`
+
+### 16.8 ÑéÊÕ½¨Òé
+1. ½á¹¹Ğ£Ñé£ºÈ·ÈÏÃ¿ÌõÑù±¾¾ùÎªÎå¶ÎÌå£¬ÇÒ `Action_Input/Observation` ¿É JSON ½âÎö¡£
+2. schema Ğ£Ñé£º`summary.json` ÖĞ `schema_validation_errors.num_errors` Ó¦½Ó½ü `0`¡£
+3. ·Ö²¼Ğ£Ñé£º¼ì²é `actual_action_counts` ÓëÄ¿±êÕ¼±ÈÆ«²î£¨½¨Òé¿ØÖÆÔÚ ¡À5%£©¡£
+4. ÑµÁ·¼æÈİ£º½« `train_lora.py` µÄ `train_file/eval_file` Ö¸Ïò `react_agent` »ò `combined_react_agent` ºó¿ÉÕı³£¿ªÊ¼ÑµÁ·¡£
