@@ -21,14 +21,30 @@
 
 ## 3. 快速启动
 ### 3.1 启动数据库与缓存
+Windows PowerShell（在项目根目录执行）：
 ```powershell
-# PostgreSQL
-docker run --name rasa-postgres -e POSTGRES_PASSWORD=postgres -p 5432:5432 -v D:/Github/Rasa-EC-bot/database/pgdata:/var/lib/postgresql/data -d postgres:15
+New-Item -ItemType Directory -Force .\database\pgdata, .\database\redisdata | Out-Null
+$PGDATA_PATH = (Resolve-Path .\database\pgdata).Path
+$REDISDATA_PATH = (Resolve-Path .\database\redisdata).Path
 
+# PostgreSQL
+docker run --name rasa-postgres -e POSTGRES_PASSWORD=postgres -p 5432:5432 -v "${PGDATA_PATH}:/var/lib/postgresql/data" -d postgres:15
 docker exec -it rasa-postgres psql -U postgres -c "CREATE DATABASE rasa_ec_bot;"
 
 # Redis
-docker run --name rasa-redis -p 6379:6379 -v D:/Github/Rasa-EC-bot/database/redisdata:/data -d redis:7 redis-server --appendonly yes
+docker run --name rasa-redis -p 6379:6379 -v "${REDISDATA_PATH}:/data" -d redis:7 redis-server --appendonly yes
+```
+
+Linux / macOS（在项目根目录执行）：
+```bash
+mkdir -p ./database/pgdata ./database/redisdata
+
+# PostgreSQL
+docker run --name rasa-postgres -e POSTGRES_PASSWORD=postgres -p 5432:5432 -v "$(pwd)/database/pgdata:/var/lib/postgresql/data" -d postgres:15
+docker exec -it rasa-postgres psql -U postgres -c "CREATE DATABASE rasa_ec_bot;"
+
+# Redis
+docker run --name rasa-redis -p 6379:6379 -v "$(pwd)/database/redisdata:/data" -d redis:7 redis-server --appendonly yes
 ```
 
 ### 3.2 初始化数据库

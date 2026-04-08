@@ -147,6 +147,16 @@ uv run python scripts/train_lora.py --config configs/full.yaml
 - 目标模块：`q/k/v/o + gate/up/down`
 - smoke：`max_seq_len=1024`，`epochs=1`，`batch=1`，`grad_accum=8`
 - full：`max_seq_len=2048`，`epochs=2`，`batch=1`，`grad_accum=16`，`lr=2e-4`
+- 评估加速默认值（已写入配置）：
+  - smoke：`eval_steps=1000`，`save_steps=1000`，`max_eval_samples=1000`，`per_device_eval_batch_size=4`
+  - full：`eval_steps=1000`，`save_steps=1000`，`max_eval_samples=2000`，`per_device_eval_batch_size=2`
+  - 预热：`warmup_steps=800`（优先于 `warmup_ratio`，避免新版 transformers 的弃用告警）
+
+训练脚本新增可调项（`train_lora.py`）：
+
+- `max_eval_samples`：限制每次评估使用的验证集样本数（>0 生效）
+- `warmup_steps`：若设置则优先使用，不再使用 `warmup_ratio`
+- `eval_steps<=0`：自动关闭周期评估（`evaluation_strategy=no`）
 
 ## 7. 离线评估（固定 20 条提示词）
 

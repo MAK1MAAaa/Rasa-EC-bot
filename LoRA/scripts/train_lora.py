@@ -161,6 +161,16 @@ def main() -> None:
         desc="Tokenizing",
     )
 
+    train_dataset = tokenized["train"]
+    eval_dataset = tokenized["validation"]
+    max_eval_samples = int(cfg.get("max_eval_samples", 0))
+    if max_eval_samples > 0 and len(eval_dataset) > max_eval_samples:
+        eval_dataset = eval_dataset.shuffle(seed=seed).select(range(max_eval_samples))
+        print(
+            f"Eval dataset capped to {len(eval_dataset)} samples "
+            f"(max_eval_samples={max_eval_samples})."
+        )
+
     data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
 
     requested_bf16 = bool(cfg.get("bf16", True))
@@ -178,6 +188,9 @@ def main() -> None:
     if effective_bf16 and effective_fp16:
         effective_fp16 = False
 
+    eval_steps = int(cfg.get("eval_steps", 100))
+    evaluation_enabled = eval_steps > 0 and len(eval_dataset) > 0
+
     training_kwargs: dict[str, Any] = {
         "output_dir": str(output_dir),
         "num_train_epochs": float(cfg.get("num_train_epochs", 1)),
@@ -186,10 +199,8 @@ def main() -> None:
         "gradient_accumulation_steps": int(cfg.get("gradient_accumulation_steps", 8)),
         "learning_rate": float(cfg.get("learning_rate", 2e-4)),
         "lr_scheduler_type": str(cfg.get("lr_scheduler_type", "cosine")),
-        "warmup_ratio": float(cfg.get("warmup_ratio", 0.03)),
         "logging_steps": int(cfg.get("logging_steps", 10)),
         "save_steps": int(cfg.get("save_steps", 100)),
-        "eval_steps": int(cfg.get("eval_steps", 100)),
         "save_total_limit": int(cfg.get("save_total_limit", 2)),
         "save_strategy": "steps",
         "bf16": effective_bf16,
@@ -201,22 +212,35 @@ def main() -> None:
         "dataloader_pin_memory": False,
         "seed": seed,
     }
+    warmup_steps = int(cfg.get("warmup_steps", 0))
+    if warmup_steps > 0:
+        training_kwargs["warmup_steps"] = warmup_steps
+    else:
+        training_kwargs["warmup_ratio"] = float(cfg.get("warmup_ratio", 0.03))
+    if evaluation_enabled:
+        training_kwargs["eval_steps"] = eval_steps
+
     ta_params = inspect.signature(TrainingArguments.__init__).parameters
     if "evaluation_strategy" in ta_params:
-        training_kwargs["evaluation_strategy"] = "steps"
+        training_kwargs["evaluation_strategy"] = "steps" if evaluation_enabled else "no"
     elif "eval_strategy" in ta_params:
-        training_kwargs["eval_strategy"] = "steps"
+        training_kwargs["eval_strategy"] = "steps" if evaluation_enabled else "no"
     else:
         raise RuntimeError(
             "Your transformers version does not expose evaluation strategy arg."
+        )
+    if not evaluation_enabled:
+        print(
+            "Evaluation disabled. Set eval_steps > 0 and keep a non-empty eval set "
+            "to enable periodic evaluation."
         )
     training_args = TrainingArguments(**training_kwargs)
 
     trainer = Trainer(
         model=model,
         args=training_args,
-        train_dataset=tokenized["train"],
-        eval_dataset=tokenized["validation"],
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset if evaluation_enabled else None,
         data_collator=data_collator,
     )
 
@@ -235,6 +259,9 @@ def main() -> None:
         "output_dir": str(output_dir),
         "adapter_dir": str(adapter_dir),
         "max_seq_len": max_seq_len,
+        "train_samples": len(train_dataset),
+        "eval_samples": len(eval_dataset),
+        "evaluation_enabled": evaluation_enabled,
         "seed": seed,
     }
     with (output_dir / "run_summary.json").open("w", encoding="utf-8") as f:

@@ -44,8 +44,23 @@ REDIS_INIT_SCHEMA_VERSION=1
 
 ## 4. 启动 PostgreSQL 与 Redis
 ### 4.1 PostgreSQL
+Windows PowerShell（在 `backend` 目录执行）：
 ```powershell
-docker run --name rasa-postgres -e POSTGRES_PASSWORD=postgres -p 5432:5432 -v D:/Github/Rasa-EC-bot/database/pgdata:/var/lib/postgresql/data -d postgres:15
+New-Item -ItemType Directory -Force ..\database\pgdata | Out-Null
+$PGDATA_PATH = (Resolve-Path ..\database\pgdata).Path
+
+docker run --name rasa-postgres -e POSTGRES_PASSWORD=postgres -p 5432:5432 -v "${PGDATA_PATH}:/var/lib/postgresql/data" -d postgres:15
+
+docker ps --filter name=rasa-postgres
+
+docker exec -it rasa-postgres psql -U postgres -c "CREATE DATABASE rasa_ec_bot;"
+```
+
+Linux / macOS（在 `backend` 目录执行）：
+```bash
+mkdir -p ../database/pgdata
+
+docker run --name rasa-postgres -e POSTGRES_PASSWORD=postgres -p 5432:5432 -v "$(pwd)/../database/pgdata:/var/lib/postgresql/data" -d postgres:15
 
 docker ps --filter name=rasa-postgres
 
