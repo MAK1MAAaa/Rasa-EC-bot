@@ -3,15 +3,15 @@
 本目录负责电商客服对话能力：
 - Rasa 负责 NLU + 对话策略
 - Action Server 调用后端接口读取订单/物流/售后数据
-- 本地 Ollama（`qwen3.5:9b`）提供闲聊与自然语言补充回复
+- 本地 Ollama（`qwen3.5:2b`）提供闲聊与自然语言补充回复
 
 ## 1. 运行前准备
-- 已安装 Ollama，并可运行 `qwen3.5:9b`
+- 已安装 Ollama，并可运行 `qwen3.5:2b`
 - 后端接口可访问：`http://127.0.0.1:8000/api/v1`
 
 先拉取模型：
 ```bash
-ollama pull qwen3.5:9b
+ollama pull qwen3.5:2b
 ```
 
 ## 2. 环境变量
@@ -28,7 +28,7 @@ Copy-Item .env.sample .env
 关键变量：
 - `OLLAMA_BASE_URL`：Ollama 服务地址
 - `OLLAMA_CHAT_PATH`：聊天接口路径（默认 `/api/chat`）
-- `OLLAMA_MODEL`：模型名（默认 `qwen3.5:9b`）
+- `OLLAMA_MODEL`：模型名（默认 `qwen3.5:2b`）
 - `BACKEND_API_URL`：后端 API 根路径
 - `FRONTEND_BASE_URL`：前端地址（用于构造可点击链接）
 - `RASA_INTERNAL_TOKEN`：与后端内部接口鉴权一致
@@ -88,3 +88,4 @@ uv run rasa run actions --actions actions --port 5055
 ## 7. 说明
 - 当前版本不包含 LoRA 微调流程。
 - 推荐先完成业务闭环与数据联调，再进入模型微调阶段。
+

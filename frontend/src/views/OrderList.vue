@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import api from '@/api/client'
+import { useAuthStore } from '@/stores/auth'
+import { createRealtimeClient, type RealtimeEvent } from '@/utils/realtime'
 
 interface OrderListItem {
   id: string
@@ -17,10 +19,13 @@ interface OrderListItem {
 
 const route = useRoute()
 const router = useRouter()
+const authStore = useAuthStore()
 
 const loading = ref(false)
 const orders = ref<OrderListItem[]>([])
 const error = ref('')
+let realtimeClient: ReturnType<typeof createRealtimeClient> | null = null
+let realtimeRefreshTimer: ReturnType<typeof setTimeout> | null = null
 
 const orderStatusLabel = (status: string) => {
   if (status === 'pending_shipment') return '待发货'
@@ -51,7 +56,38 @@ const loadOrders = async () => {
   }
 }
 
-onMounted(loadOrders)
+const scheduleRealtimeRefresh = () => {
+  if (realtimeRefreshTimer) {
+    return
+  }
+  realtimeRefreshTimer = setTimeout(async () => {
+    realtimeRefreshTimer = null
+    await loadOrders()
+  }, 320)
+}
+
+const handleRealtimeEvent = (event: RealtimeEvent) => {
+  if (event.event === 'order_changed' || event.event === 'after_sales_changed') {
+    scheduleRealtimeRefresh()
+  }
+}
+
+onMounted(async () => {
+  await loadOrders()
+  realtimeClient = createRealtimeClient({
+    token: authStore.token,
+    onEvent: handleRealtimeEvent
+  })
+})
+
+onBeforeUnmount(() => {
+  if (realtimeRefreshTimer) {
+    clearTimeout(realtimeRefreshTimer)
+    realtimeRefreshTimer = null
+  }
+  realtimeClient?.close()
+  realtimeClient = null
+})
 </script>
 
 <template>

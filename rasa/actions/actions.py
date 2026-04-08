@@ -14,7 +14,7 @@ load_dotenv(RASA_DIR / '.env')
 
 OLLAMA_BASE_URL = os.getenv('OLLAMA_BASE_URL', 'http://127.0.0.1:11434')
 OLLAMA_CHAT_PATH = os.getenv('OLLAMA_CHAT_PATH', '/api/chat')
-OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'qwen3.5:9b')
+OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'qwen3.5:2b')
 BACKEND_API_URL = os.getenv('BACKEND_API_URL', 'http://127.0.0.1:8000/api/v1')
 ACTION_HTTP_TIMEOUT_SEC = float(os.getenv('ACTION_HTTP_TIMEOUT_SEC', '20'))
 FRONTEND_BASE_URL = os.getenv('FRONTEND_BASE_URL', 'http://localhost:5173')
@@ -399,3 +399,4 @@ class ActionQueryAfterSales(Action):
         lines.append(f'如需新增申请，可前往：{frontend_base_url}/orders')
         dispatcher.utter_message(text='\n'.join(lines))
         return []
+

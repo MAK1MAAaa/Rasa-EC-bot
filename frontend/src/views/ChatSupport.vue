@@ -26,7 +26,13 @@ const sending = ref(false)
 const inputText = ref('')
 const chatLogRef = ref<HTMLElement | null>(null)
 
-const quickPrompts = ['查询我的订单', '查询物流进度', '查询售后进度', '如何申请退货或换货', '推荐几款手机']
+const quickPrompts = [
+  '查询我的订单',
+  '查询物流进度',
+  '帮我下单 地址: 上海市浦东新区世纪大道100号',
+  '申请退款 ORD202604010001 原因: 尺寸不合适',
+  '推荐几款手机'
+]
 
 const CHAT_GUEST_ID_KEY = 'chat_guest_id'
 const CHAT_STORAGE_PREFIX = 'chat_sessions_v2'
@@ -51,7 +57,7 @@ const activeSessionId = ref('')
 const buildWelcomeBubble = (): ChatBubble => ({
   id: `welcome-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
   role: 'bot',
-  text: '你好，我是商城客服。可以帮你查订单、查物流、查售后，也可以推荐商品。'
+  text: '你好，我是商城客服。可以查订单/物流/售后，也可以帮你自动下单或发起退款申请。涉及资金和售后时会先给你确认码，只有你回复“确认 + 确认码”才会执行。'
 })
 
 const deriveSessionTitle = (session: ChatSession) => {

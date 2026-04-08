@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import api from '@/api/client'
+import { useAuthStore } from '@/stores/auth'
+import { createRealtimeClient, type RealtimeEvent } from '@/utils/realtime'
 
 interface OrderDetailItem {
   id: string
@@ -46,10 +48,13 @@ interface OrderDetail {
 
 const route = useRoute()
 const router = useRouter()
+const authStore = useAuthStore()
 
 const loading = ref(false)
 const order = ref<OrderDetail | null>(null)
 const error = ref('')
+let realtimeClient: ReturnType<typeof createRealtimeClient> | null = null
+let realtimeRefreshTimer: ReturnType<typeof setTimeout> | null = null
 
 const afterSalesSubmitting = ref(false)
 const afterSalesError = ref('')
@@ -162,11 +167,49 @@ const submitAfterSales = async () => {
 
 const goBack = () => router.push('/orders')
 
+const scheduleRealtimeRefresh = () => {
+  if (realtimeRefreshTimer) {
+    return
+  }
+  realtimeRefreshTimer = setTimeout(async () => {
+    realtimeRefreshTimer = null
+    await loadOrder(orderId.value)
+  }, 320)
+}
+
+const handleRealtimeEvent = (event: RealtimeEvent) => {
+  if (!order.value) {
+    return
+  }
+  if (event.event !== 'order_changed' && event.event !== 'after_sales_changed') {
+    return
+  }
+  if (String(event.data?.order_id || '') !== order.value.id) {
+    return
+  }
+  scheduleRealtimeRefresh()
+}
+
 watch(orderId, (id) => {
   loadOrder(id)
 })
 
-onMounted(() => loadOrder(orderId.value))
+onMounted(async () => {
+  await loadOrder(orderId.value)
+  realtimeClient = createRealtimeClient({
+    token: authStore.token,
+    onEvent: handleRealtimeEvent
+  })
+})
+
+onBeforeUnmount(() => {
+  if (realtimeRefreshTimer) {
+    clearTimeout(realtimeRefreshTimer)
+    realtimeRefreshTimer = null
+  }
+  realtimeClient?.close()
+  realtimeClient = null
+})
 </script>
 
 <template>

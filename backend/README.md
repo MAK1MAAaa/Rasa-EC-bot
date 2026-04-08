@@ -5,7 +5,7 @@
 ## 1. 主要能力
 - 用户：注册登录、商品查询、购物车、下单、订单查询、申请退货/换货
 - 商家：店铺读取、发货地址管理、商品管理、订单发货、售后处理
-- 客服：提供订单/物流/售后内部查询接口给 Rasa Action 调用
+- 客服：提供订单/物流/售后内部查询接口，并支持“自动下单/自动退款”二次确认执行
 - 缓存：Redis 缓存商品筛选元数据与客服汇总数据
 
 ## 2. 运行依赖
@@ -25,6 +25,7 @@ Redis 相关配置（在 `.env` 中）：
 ```env
 REDIS_URL=redis://127.0.0.1:6379/0
 REDIS_CACHE_TTL_SEC=180
+CHAT_ACTION_TTL_SEC=300
 REDIS_DOCKER_CONTAINER_NAME=rasa-redis
 REDIS_DOCKER_IMAGE=redis:7
 REDIS_DOCKER_HOST_PORT=6379
@@ -39,6 +40,7 @@ REDIS_INIT_SCHEMA_VERSION=1
 说明：
 - `REDIS_DOCKER_DATA_DIR` 决定 Redis 持久化目录（默认 `../database/redisdata`）。
 - `REDIS_URL` 是后端服务实际连接地址。
+- `CHAT_ACTION_TTL_SEC` 是客服自动执行“待确认动作”有效期（秒）。
 
 ## 4. 启动 PostgreSQL 与 Redis
 ### 4.1 PostgreSQL
@@ -51,7 +53,9 @@ docker exec -it rasa-postgres psql -U postgres -c "CREATE DATABASE rasa_ec_bot;"
 ```
 
 ### 4.2 Redis（持久化 + 初始化脚本）
-在 `backend` 目录执行：
+在 `backend` 目录执行。
+
+Windows PowerShell：
 
 ```powershell
 # 1) 创建/启动 Redis 容器（自动读取 .env，自动挂载持久化目录）
@@ -63,6 +67,43 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start_redis.ps1
 # 2) 初始化 Redis（健康检查 + 初始化标记）
 powershell -ExecutionPolicy Bypass -File .\scripts\init_redis.ps1
 ```
+
+macOS（bash/zsh）：
+
+```bash
+# 首次执行建议加权限
+chmod +x scripts/start_redis.sh scripts/init_redis.sh scripts/start_redis_macos.sh scripts/init_redis_macos.sh
+
+# 1) 创建/启动 Redis 容器（自动读取 .env）
+./scripts/start_redis_macos.sh
+
+# 可选：强制重建容器
+# ./scripts/start_redis_macos.sh --recreate
+
+# 2) 初始化 Redis（健康检查 + 初始化标记）
+./scripts/init_redis_macos.sh
+```
+
+Linux Fedora（bash）：
+
+```bash
+# 首次执行建议加权限
+chmod +x scripts/start_redis.sh scripts/init_redis.sh scripts/start_redis_fedora.sh scripts/init_redis_fedora.sh
+
+# 1) 创建/启动 Redis 容器（自动读取 .env）
+./scripts/start_redis_fedora.sh
+
+# 可选：强制重建容器
+# ./scripts/start_redis_fedora.sh --recreate
+
+# 2) 初始化 Redis（健康检查 + 初始化标记）
+./scripts/init_redis_fedora.sh
+```
+
+说明：
+- `start_redis_macos.sh` / `start_redis_fedora.sh` 是平台入口脚本，内部复用 `start_redis.sh`。
+- `init_redis_macos.sh` / `init_redis_fedora.sh` 是平台入口脚本，内部复用 `init_redis.sh`。
+- macOS / Fedora 均要求本机可用 `docker` 命令。
 
 初始化脚本会写入：
 - `REDIS_INIT_MARKER_KEY`（记录初始化时间）
@@ -140,6 +181,16 @@ uv run uvicorn app.main:app --reload
 - `GET /api/v1/chat/internal/orders-summary`
 - `GET /api/v1/chat/internal/orders-logistics-summary`
 - `GET /api/v1/chat/internal/after-sales-summary`
+
+### 8.4 客服自动执行（二次确认）
+- 入口：`POST /api/v1/chat/send`
+- 支持动作：
+  - 自动下单（基于当前用户购物车）
+  - 自动发起退款/换货（基于订单号）
+- 安全机制：
+  - 首次只生成“待确认草案”
+  - 用户必须回复 `确认 <确认码>` 才会执行
+  - 回复 `取消 <确认码>` 可放弃执行
 
 ## 9. 种子账号
 统一密码：`password123`

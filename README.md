@@ -3,7 +3,7 @@
 一个可运行的电商平台示例，集成了：
 - 用户端商城（浏览、筛选、购物车、下单、订单、售后）
 - 商家端控制台（商品管理、发货地址、手动发货、售后处理）
-- 智能客服（Rasa + 本地 Ollama `qwen3.5:9b`）
+- 智能客服（Rasa + 本地 Ollama `qwen3.5:2b`）
 - Redis 缓存层（商品筛选元数据 + 客服订单/物流/售后汇总）
 
 ## 1. 项目结构
@@ -42,6 +42,13 @@ Get-Content -Raw -Encoding UTF8 db/seed_data.sql | docker exec -i -e PGCLIENTENC
 ### 3.3 启动后端
 ```bash
 cd backend
+# 首次复制环境变量
+# Windows: Copy-Item .env.sample .env
+# Linux/macOS: cp .env.sample .env
+
+# 建议使用 2B 模型
+# OLLAMA_MODEL=qwen3.5:2b
+
 uv sync
 uv run uvicorn app.main:app --reload
 ```
@@ -49,7 +56,7 @@ uv run uvicorn app.main:app --reload
 
 ### 3.4 启动 Rasa 与 Action Server
 ```bash
-ollama pull qwen3.5:9b
+ollama pull qwen3.5:2b
 
 cd rasa
 # 首次复制环境变量
@@ -81,3 +88,23 @@ pnpm dev
 - 后端说明：[backend/README.md](backend/README.md)
 - 前端说明：[frontend/README.md](frontend/README.md)
 - 客服说明：[rasa/README.md](rasa/README.md)
+
+## 6. 跨电脑迁移检查清单
+在另一台电脑拉取仓库后，按下面顺序检查，避免环境差异导致启动失败：
+
+1. 安装并启动 Docker、Ollama、Node.js、Python 3.10+、uv。
+2. 执行 `ollama pull qwen3.5:2b`，并确认 `ollama list` 里能看到该模型。
+3. 复制并检查环境文件：
+   - `backend/.env.sample -> backend/.env`
+   - `rasa/.env.sample -> rasa/.env`
+   - 两处都确认 `OLLAMA_MODEL=qwen3.5:2b`
+4. 启动 PostgreSQL / Redis 并导入 `backend/db/init_db.sql` 与 `backend/db/seed_data.sql`。
+5. 分别启动：
+   - backend: `uv run uvicorn app.main:app --reload`
+   - rasa server: `uv run rasa run ...`
+   - rasa actions: `uv run rasa run actions ...`
+   - frontend: `pnpm dev`
+6. 冒烟验证：
+   - 打开 `http://127.0.0.1:8000/docs`
+   - 前端进入聊天页，发送一条普通咨询，确认能收到回复
+

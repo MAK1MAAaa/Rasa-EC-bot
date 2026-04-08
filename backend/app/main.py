@@ -1,16 +1,18 @@
 ﻿
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from random import randint
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 import httpx
-from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query, Request, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import func, or_
@@ -25,7 +27,7 @@ from .auth import (
     verify_password,
 )
 from .cache import RedisCache
-from .database import get_session
+from .database import engine, get_session
 from .models import (
     ChatAfterSalesSummaryItem,
     ChatAfterSalesSummaryResponse,
@@ -88,7 +90,7 @@ FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "http://localhost:5173")
 RASA_INTERNAL_TOKEN = os.getenv("RASA_INTERNAL_TOKEN", "")
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3.5:9b")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3.5:2b")
 OLLAMA_TIMEOUT_SEC = float(os.getenv("OLLAMA_TIMEOUT_SEC", "45"))
 LOGISTICS_LLM_MAX_WAIT_SEC = float(os.getenv("LOGISTICS_LLM_MAX_WAIT_SEC", "12"))
 
@@ -132,6 +134,92 @@ app.add_middleware(
 cache = RedisCache(redis_url=REDIS_URL, default_ttl_sec=REDIS_CACHE_TTL_SEC)
 
 PRODUCT_FILTER_CACHE_KEY = "products:filters:v1"
+CHAT_ACTION_TTL_SEC = int(os.getenv("CHAT_ACTION_TTL_SEC", "300"))
+CHAT_ACTION_TYPE_CHECKOUT = "checkout"
+CHAT_ACTION_TYPE_AFTER_SALES = "after_sales"
+PENDING_CHAT_ACTION_MEMORY: dict[str, dict[str, Any]] = {}
+
+
+@dataclass
+class RealtimeConnection:
+    connection_id: int
+    websocket: WebSocket
+    user_id: UUID | None
+    role: str | None
+    shop_id: UUID | None
+
+
+class RealtimeConnectionManager:
+    def __init__(self) -> None:
+        self._lock = asyncio.Lock()
+        self._counter = 0
+        self._connections: dict[int, RealtimeConnection] = {}
+
+    async def connect(
+        self,
+        websocket: WebSocket,
+        *,
+        user_id: UUID | None,
+        role: str | None,
+        shop_id: UUID | None,
+    ) -> int:
+        await websocket.accept()
+        async with self._lock:
+            self._counter += 1
+            connection_id = self._counter
+            self._connections[connection_id] = RealtimeConnection(
+                connection_id=connection_id,
+                websocket=websocket,
+                user_id=user_id,
+                role=role,
+                shop_id=shop_id,
+            )
+            return connection_id
+
+    async def disconnect(self, connection_id: int) -> None:
+        async with self._lock:
+            self._connections.pop(connection_id, None)
+
+    async def broadcast(
+        self,
+        *,
+        event: str,
+        data: dict[str, Any],
+        user_id: UUID | None = None,
+        role: str | None = None,
+        shop_id: UUID | None = None,
+    ) -> None:
+        async with self._lock:
+            candidates = list(self._connections.values())
+
+        stale_connection_ids: list[int] = []
+        normalized_role = normalize_role(role) if role else None
+        payload = {
+            "event": event,
+            "data": data,
+            "sent_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        }
+
+        for connection in candidates:
+            if user_id is not None and connection.user_id != user_id:
+                continue
+            if normalized_role is not None and normalize_role(connection.role) != normalized_role:
+                continue
+            if shop_id is not None and connection.shop_id != shop_id:
+                continue
+
+            try:
+                await connection.websocket.send_json(payload)
+            except Exception:
+                stale_connection_ids.append(connection.connection_id)
+
+        if stale_connection_ids:
+            async with self._lock:
+                for connection_id in stale_connection_ids:
+                    self._connections.pop(connection_id, None)
+
+
+realtime_manager = RealtimeConnectionManager()
 
 
 @app.on_event("startup")
@@ -198,6 +286,361 @@ async def invalidate_chat_cache_for_user(
         await cache.delete_prefix(chat_logistics_summary_cache_prefix(user_id))
     if after_sales:
         await cache.delete_prefix(chat_after_sales_summary_cache_prefix(user_id))
+
+
+def chat_pending_action_cache_key(user_id: UUID) -> str:
+    return f"chat:pending-action:{user_id}"
+
+
+def now_unix_ts() -> int:
+    return int(datetime.utcnow().timestamp())
+
+
+def generate_chat_action_code() -> str:
+    return f"{randint(100000, 999999)}"
+
+
+async def get_pending_chat_action(user_id: UUID) -> dict[str, Any] | None:
+    key = chat_pending_action_cache_key(user_id)
+    payload: dict[str, Any] | None = None
+
+    if cache.enabled:
+        raw = await cache.get_json(key)
+        if isinstance(raw, dict):
+            payload = raw
+    else:
+        raw = PENDING_CHAT_ACTION_MEMORY.get(key)
+        if isinstance(raw, dict):
+            payload = raw
+
+    if not payload:
+        return None
+
+    expires_at = int(payload.get("expires_at_ts") or 0)
+    if expires_at > 0 and expires_at <= now_unix_ts():
+        await clear_pending_chat_action(user_id)
+        return None
+
+    return payload
+
+
+async def set_pending_chat_action(user_id: UUID, payload: dict[str, Any]) -> None:
+    key = chat_pending_action_cache_key(user_id)
+    if cache.enabled:
+        await cache.set_json(key, payload, ttl_sec=CHAT_ACTION_TTL_SEC)
+    else:
+        PENDING_CHAT_ACTION_MEMORY[key] = payload
+
+
+async def clear_pending_chat_action(user_id: UUID) -> None:
+    key = chat_pending_action_cache_key(user_id)
+    if cache.enabled:
+        await cache.delete_keys(key)
+    else:
+        PENDING_CHAT_ACTION_MEMORY.pop(key, None)
+
+
+def parse_confirmation_command(message: str) -> tuple[str, str | None] | None:
+    text = (message or "").strip()
+    if not text:
+        return None
+    match = re.match(r"^(确认|取消|confirm|cancel)\s*([0-9]{4,8})?\s*[。.!！]?$", text, flags=re.IGNORECASE)
+    if not match:
+        return None
+
+    action_raw = (match.group(1) or "").strip().lower()
+    code_raw = (match.group(2) or "").strip() or None
+    if action_raw in {"确认", "confirm"}:
+        return "confirm", code_raw
+    return "cancel", code_raw
+
+
+def extract_email_from_message(message: str) -> str | None:
+    match = re.search(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}", message or "")
+    if not match:
+        return None
+    return normalize_email(match.group(0))
+
+
+def extract_order_id_from_message(message: str) -> str | None:
+    match = re.search(r"(ORD\d{10,})", (message or "").upper())
+    if not match:
+        return None
+    return match.group(1)
+
+
+def extract_reason_from_message(message: str) -> str | None:
+    text = (message or "").strip()
+    if not text:
+        return None
+    for pattern in [r"(?:原因|理由)[:：]\s*(.+)$", r"(?:because|reason)[:：]?\s*(.+)$"]:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match and match.group(1).strip():
+            return match.group(1).strip()
+    return None
+
+
+def extract_address_from_message(message: str) -> str | None:
+    text = (message or "").strip()
+    if not text:
+        return None
+    match = re.search(r"(?:收货地址|地址)[:：]\s*(.+)$", text, flags=re.IGNORECASE)
+    if not match:
+        return None
+    value = match.group(1).strip()
+    value = re.split(r"(?:邮箱|email)[:：]", value, maxsplit=1, flags=re.IGNORECASE)[0].strip()
+    return value or None
+
+
+def contains_action_marker(text: str) -> bool:
+    markers = ["帮我", "给我", "代我", "立即", "马上", "现在", "直接", "自动", "提交", "发起"]
+    return any(marker in text for marker in markers)
+
+
+def is_checkout_request(message: str) -> bool:
+    text = (message or "").strip()
+    if not text:
+        return False
+    lowered = text.lower()
+    keywords = ["下单", "购买", "结算", "买单", "checkout", "place order", "buy for me"]
+    if not any(keyword in text or keyword in lowered for keyword in keywords):
+        return False
+    if text.startswith(("如何", "怎么", "怎样", "可以", "请问")):
+        return False
+    explicit_commands = ["帮我下单", "代我下单", "直接下单", "自动下单", "帮我购买", "帮我结算"]
+    return any(command in text for command in explicit_commands) or contains_action_marker(text)
+
+
+def is_after_sales_request(message: str) -> bool:
+    text = (message or "").strip()
+    if not text:
+        return False
+    lowered = text.lower()
+    keywords = ["退款", "退货", "换货", "售后", "refund", "return", "exchange"]
+    if not any(keyword in text or keyword in lowered for keyword in keywords):
+        return False
+    if text.startswith(("如何", "怎么", "怎样", "可以", "请问")):
+        return False
+    explicit_commands = ["帮我退款", "申请退款", "申请退货", "申请换货", "发起售后", "提交售后"]
+    return any(command in text for command in explicit_commands) or contains_action_marker(text)
+
+
+async def get_latest_order_for_user(session: AsyncSession, user_id: UUID) -> Order | None:
+    statement = select(Order).where(Order.user_id == user_id).order_by(Order.created_at.desc()).limit(1)
+    result = await session.execute(statement)
+    return result.scalar_one_or_none()
+
+
+async def has_active_after_sales_request(session: AsyncSession, order_id: str) -> bool:
+    statement = (
+        select(AfterSales)
+        .where(
+            AfterSales.order_id == order_id,
+            ~AfterSales.status.in_(tuple(AFTER_SALES_TERMINAL_STATUSES)),
+        )
+        .limit(1)
+    )
+    result = await session.execute(statement)
+    return result.scalar_one_or_none() is not None
+
+
+async def prepare_checkout_chat_action(message: str, current_user: User, session: AsyncSession) -> str:
+    rows = await fetch_cart_rows(session, current_user.id)
+    if not rows:
+        return "购物车是空的，先去加购商品后我再帮你下单。"
+
+    shop_ids = {product.shop_id for _, product in rows}
+    if len(shop_ids) > 1:
+        return "当前购物车包含多个店铺商品，暂时只能同店铺下单。请先整理购物车后再试。"
+
+    for cart_item, product in rows:
+        if cart_item.quantity > product.stock:
+            return f"商品「{product.name}」库存不足，请先调整购物车数量。"
+
+    address = extract_address_from_message(message)
+    if not address:
+        latest_order = await get_latest_order_for_user(session, current_user.id)
+        if latest_order and latest_order.address:
+            address = latest_order.address.strip()
+
+    contact_email = extract_email_from_message(message) or normalize_email(current_user.email)
+
+    if not address:
+        return "可以帮你自动下单。请补充收货地址，例如：下单 地址: 上海市浦东新区XX路88号。"
+    if not contact_email:
+        return "请补充联系邮箱，例如：下单 邮箱: your@email.com。"
+
+    code = generate_chat_action_code()
+    item_count = sum(cart_item.quantity for cart_item, _ in rows)
+    total_amount = round(sum(float(product.price) * cart_item.quantity for cart_item, product in rows), 2)
+    preview_names = "、".join(product.name for _, product in rows[:3])
+    if len(rows) > 3:
+        preview_names = f"{preview_names} 等"
+
+    pending_payload = {
+        "type": CHAT_ACTION_TYPE_CHECKOUT,
+        "code": code,
+        "created_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "expires_at_ts": now_unix_ts() + CHAT_ACTION_TTL_SEC,
+        "payload": {
+            "address": address,
+            "contact_email": contact_email,
+        },
+    }
+    await set_pending_chat_action(current_user.id, pending_payload)
+
+    return (
+        "已生成下单草案，请二次确认：\n"
+        f"- 商品：{preview_names}\n"
+        f"- 件数：{item_count}\n"
+        f"- 总额：¥ {total_amount:.2f}\n"
+        f"- 收货地址：{address}\n"
+        f"- 联系邮箱：{contact_email}\n"
+        f"回复「确认 {code}」立即下单，回复「取消 {code}」放弃本次操作（5分钟内有效）。"
+    )
+
+
+async def prepare_after_sales_chat_action(message: str, current_user: User, session: AsyncSession) -> str:
+    order_id = extract_order_id_from_message(message)
+    if not order_id:
+        return "请提供订单号后我才能帮你发起退款/换货，例如：申请退款 ORD202604010001 原因: 尺寸不合适。"
+
+    reason = extract_reason_from_message(message)
+    if not reason:
+        return "请补充售后原因，例如：申请退款 ORD202604010001 原因: 商品与描述不符。"
+
+    request_type = AFTER_SALES_TYPE_EXCHANGE if "换货" in message else AFTER_SALES_TYPE_RETURN
+    order = await get_order_or_404(session, order_id)
+    if order.user_id != current_user.id:
+        return "该订单不属于当前登录账号，无法为你发起售后。"
+    if order.status != ORDER_STATUS_SHIPPED:
+        return "订单未发货完成，当前还不能发起退款/换货。"
+    if await has_active_after_sales_request(session, order.id):
+        return "该订单已有进行中的售后申请，请等待商家处理。"
+
+    code = generate_chat_action_code()
+    pending_payload = {
+        "type": CHAT_ACTION_TYPE_AFTER_SALES,
+        "code": code,
+        "created_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "expires_at_ts": now_unix_ts() + CHAT_ACTION_TTL_SEC,
+        "payload": {
+            "order_id": order.id,
+            "request_type": request_type,
+            "reason": reason,
+        },
+    }
+    await set_pending_chat_action(current_user.id, pending_payload)
+
+    display_type = "换货" if request_type == AFTER_SALES_TYPE_EXCHANGE else "退款/退货"
+    return (
+        "已生成售后申请草案，请二次确认：\n"
+        f"- 订单号：{order.id}\n"
+        f"- 类型：{display_type}\n"
+        f"- 原因：{reason}\n"
+        f"回复「确认 {code}」提交申请，回复「取消 {code}」放弃本次操作（5分钟内有效）。"
+    )
+
+
+async def execute_pending_checkout_action(
+    current_user: User,
+    session: AsyncSession,
+    payload: dict[str, Any],
+) -> str:
+    address = (payload.get("address") or "").strip()
+    contact_email = normalize_email((payload.get("contact_email") or "").strip())
+    if not address or not contact_email:
+        raise HTTPException(status_code=400, detail="Pending checkout payload is incomplete")
+
+    order_detail = await create_order(
+        payload=CreateOrderRequest(address=address, contact_email=contact_email),
+        session=session,
+        current_user=current_user,
+    )
+    base_url = FRONTEND_BASE_URL.rstrip("/")
+    return (
+        f"下单成功，订单号：{order_detail.id}\n"
+        f"订单详情：{base_url}/order/{order_detail.id}"
+    )
+
+
+async def execute_pending_after_sales_action(
+    current_user: User,
+    session: AsyncSession,
+    payload: dict[str, Any],
+) -> str:
+    order_id = (payload.get("order_id") or "").strip()
+    request_type = normalize_after_sales_type(str(payload.get("request_type") or AFTER_SALES_TYPE_RETURN))
+    reason = (payload.get("reason") or "").strip()
+    if not order_id or request_type not in AFTER_SALES_ALLOWED_TYPES or not reason:
+        raise HTTPException(status_code=400, detail="Pending after-sales payload is incomplete")
+
+    result = await create_after_sales_request(
+        payload=CreateAfterSalesRequest(type=request_type, reason=reason),
+        order_id=order_id,
+        session=session,
+        current_user=current_user,
+    )
+    base_url = FRONTEND_BASE_URL.rstrip("/")
+    type_label = "换货" if request_type == AFTER_SALES_TYPE_EXCHANGE else "退款/退货"
+    return (
+        f"{type_label}申请已提交，申请编号：{result.id}\n"
+        f"订单详情：{base_url}/order/{order_id}"
+    )
+
+
+async def handle_chat_transaction_action(message: str, current_user: User, session: AsyncSession) -> str | None:
+    if normalize_role(current_user.role) != "customer":
+        return None
+
+    pending = await get_pending_chat_action(current_user.id)
+    command = parse_confirmation_command(message)
+
+    if command:
+        action, input_code = command
+        if not pending:
+            return "当前没有待确认的自动操作。"
+
+        pending_code = str(pending.get("code") or "").strip()
+        if not input_code and pending_code:
+            return f"为确保安全，请带确认码回复：确认 {pending_code}（或 取消 {pending_code}）。"
+        if input_code and pending_code and input_code != pending_code:
+            return "确认码不匹配，请核对后重试。"
+
+        if action == "cancel":
+            await clear_pending_chat_action(current_user.id)
+            return "已取消本次自动操作。"
+
+        action_type = str(pending.get("type") or "").strip()
+        action_payload = pending.get("payload") if isinstance(pending.get("payload"), dict) else {}
+        try:
+            if action_type == CHAT_ACTION_TYPE_CHECKOUT:
+                result_message = await execute_pending_checkout_action(current_user, session, action_payload)
+            elif action_type == CHAT_ACTION_TYPE_AFTER_SALES:
+                result_message = await execute_pending_after_sales_action(current_user, session, action_payload)
+            else:
+                raise HTTPException(status_code=400, detail="Unsupported pending action type")
+        except HTTPException as exc:
+            await clear_pending_chat_action(current_user.id)
+            return f"自动执行失败：{exc.detail}。本次待确认操作已清除，请重新发起。"
+        except Exception:
+            await clear_pending_chat_action(current_user.id)
+            return "自动执行失败：服务出现异常。本次待确认操作已清除，请稍后重试。"
+
+        await clear_pending_chat_action(current_user.id)
+        return result_message
+
+    if pending and (is_checkout_request(message) or is_after_sales_request(message)):
+        pending_code = str(pending.get("code") or "").strip()
+        return f"你有待确认操作。请先回复「确认 {pending_code}」或「取消 {pending_code}」。"
+
+    if is_checkout_request(message):
+        return await prepare_checkout_chat_action(message, current_user, session)
+
+    if is_after_sales_request(message):
+        return await prepare_after_sales_chat_action(message, current_user, session)
+
+    return None
 
 
 def normalize_email(email: str) -> str:
@@ -341,6 +784,100 @@ async def get_current_db_user_optional(request: Request, session: AsyncSession) 
     statement = select(User).where(func.lower(User.email) == email)
     result = await session.execute(statement)
     return result.scalar_one_or_none()
+
+
+async def resolve_realtime_identity(token: str | None) -> tuple[UUID | None, str | None, UUID | None]:
+    cleaned_token = (token or "").strip()
+    if not cleaned_token:
+        return None, None, None
+
+    token_data = await get_current_user(cleaned_token)
+    email = normalize_email(token_data.email or "")
+    if not email:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials")
+
+    async with AsyncSession(engine) as session:
+        statement = select(User).where(func.lower(User.email) == email)
+        result = await session.execute(statement)
+        user = result.scalar_one_or_none()
+        if not user:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials")
+
+        role = normalize_role(user.role)
+        shop_id: UUID | None = None
+        if role == "merchant":
+            shop = await get_user_shop(session, user.id)
+            if shop:
+                shop_id = shop.id
+
+        return user.id, role, shop_id
+
+
+async def publish_inventory_changed(
+    *,
+    reason: str,
+    shop_id: UUID | None = None,
+    product_ids: list[UUID] | None = None,
+) -> None:
+    await realtime_manager.broadcast(
+        event="inventory_changed",
+        data={
+            "reason": reason,
+            "shop_id": str(shop_id) if shop_id else None,
+            "product_ids": [str(product_id) for product_id in (product_ids or [])],
+        },
+    )
+
+
+async def publish_cart_changed(*, user_id: UUID, reason: str) -> None:
+    await realtime_manager.broadcast(
+        event="cart_changed",
+        data={
+            "reason": reason,
+            "user_id": str(user_id),
+        },
+        user_id=user_id,
+    )
+
+
+async def publish_order_changed(
+    *,
+    order_id: str,
+    user_id: UUID,
+    shop_id: UUID,
+    status: str,
+    reason: str,
+) -> None:
+    payload = {
+        "reason": reason,
+        "order_id": order_id,
+        "status": status,
+        "user_id": str(user_id),
+        "shop_id": str(shop_id),
+    }
+    await realtime_manager.broadcast(event="order_changed", data=payload, user_id=user_id)
+    await realtime_manager.broadcast(event="order_changed", data=payload, role="merchant", shop_id=shop_id)
+
+
+async def publish_after_sales_changed(
+    *,
+    after_sales_id: UUID,
+    order_id: str,
+    user_id: UUID,
+    shop_id: UUID,
+    status: str,
+    reason: str,
+) -> None:
+    payload = {
+        "reason": reason,
+        "after_sales_id": str(after_sales_id),
+        "order_id": order_id,
+        "status": status,
+        "user_id": str(user_id),
+        "shop_id": str(shop_id),
+    }
+    await realtime_manager.broadcast(event="after_sales_changed", data=payload, user_id=user_id)
+    await realtime_manager.broadcast(event="after_sales_changed", data=payload, role="merchant", shop_id=shop_id)
 
 
 async def get_current_merchant_shop(
@@ -682,6 +1219,49 @@ def append_merchant_note(reason: str | None, note: str) -> str:
     return f"{prefix}\n{stamped}".strip() if prefix else stamped
 
 
+@app.websocket("/ws/realtime")
+async def realtime_websocket(websocket: WebSocket, token: str | None = Query(default=None)):
+    try:
+        user_id, role, shop_id = await resolve_realtime_identity(token)
+    except HTTPException:
+        await websocket.close(code=1008)
+        return
+
+    connection_id = await realtime_manager.connect(
+        websocket,
+        user_id=user_id,
+        role=role,
+        shop_id=shop_id,
+    )
+    await websocket.send_json(
+        {
+            "event": "connected",
+            "data": {
+                "user_id": str(user_id) if user_id else None,
+                "role": role,
+                "shop_id": str(shop_id) if shop_id else None,
+            },
+            "sent_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        }
+    )
+
+    try:
+        while True:
+            message = await websocket.receive_text()
+            if message.strip().lower() == "ping":
+                await websocket.send_json(
+                    {
+                        "event": "pong",
+                        "data": {},
+                        "sent_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+                    }
+                )
+    except WebSocketDisconnect:
+        await realtime_manager.disconnect(connection_id)
+    except Exception:
+        await realtime_manager.disconnect(connection_id)
+
+
 @app.get("/")
 async def root():
     return {"message": "Welcome to Rasa-EC-bot API"}
@@ -698,6 +1278,11 @@ async def chat_send(
         raise HTTPException(status_code=400, detail="message cannot be empty")
 
     current_user = await get_current_db_user_optional(request, session)
+    if current_user:
+        transaction_reply = await handle_chat_transaction_action(message, current_user, session)
+        if transaction_reply:
+            return ChatSendResponse(messages=[ChatReplyMessage(text=transaction_reply)])
+
     sender_id = (payload.sender_id or "").strip() or (f"user-{current_user.id}" if current_user else "web_user")
     metadata = {
         "is_authenticated": bool(current_user),
@@ -1102,6 +1687,7 @@ async def add_cart_item(
         session.add(CartItem(user_id=current_user.id, product_id=payload.product_id, quantity=payload.quantity))
 
     await session.commit()
+    await publish_cart_changed(user_id=current_user.id, reason="item_added")
     rows = await fetch_cart_rows(session, current_user.id)
     return build_cart_response(rows)
 
@@ -1129,6 +1715,10 @@ async def update_cart_item(
         item.updated_at = datetime.utcnow()
 
     await session.commit()
+    await publish_cart_changed(
+        user_id=current_user.id,
+        reason="item_removed" if payload.quantity == 0 else "item_updated",
+    )
     rows = await fetch_cart_rows(session, current_user.id)
     return build_cart_response(rows)
 
@@ -1147,6 +1737,7 @@ async def delete_cart_item(
 
     await session.delete(item)
     await session.commit()
+    await publish_cart_changed(user_id=current_user.id, reason="item_removed")
     rows = await fetch_cart_rows(session, current_user.id)
     return build_cart_response(rows)
 
@@ -1179,6 +1770,7 @@ async def create_order(
         )
     shop_id = next(iter(shop_ids))
 
+    product_ids = [product.id for _, product in cart_rows]
     for cart_item, product in cart_rows:
         if cart_item.quantity > product.stock:
             raise HTTPException(status_code=409, detail=f"Insufficient stock for {product.name}")
@@ -1234,6 +1826,19 @@ async def create_order(
 
     await invalidate_product_filter_cache()
     await invalidate_chat_cache_for_user(current_user.id, orders=True, logistics=True)
+    await publish_inventory_changed(
+        reason="order_created",
+        shop_id=new_order.shop_id,
+        product_ids=product_ids,
+    )
+    await publish_cart_changed(user_id=current_user.id, reason="checked_out")
+    await publish_order_changed(
+        order_id=new_order.id,
+        user_id=current_user.id,
+        shop_id=new_order.shop_id,
+        status=new_order.status,
+        reason="created",
+    )
     return await build_order_detail(session, new_order)
 
 
@@ -1349,6 +1954,21 @@ async def create_after_sales_request(
     await session.commit()
     await session.refresh(item)
     await invalidate_chat_cache_for_user(current_user.id, after_sales=True)
+    await publish_after_sales_changed(
+        after_sales_id=item.id,
+        order_id=order.id,
+        user_id=order.user_id,
+        shop_id=order.shop_id,
+        status=item.status,
+        reason="created",
+    )
+    await publish_order_changed(
+        order_id=order.id,
+        user_id=order.user_id,
+        shop_id=order.shop_id,
+        status=order.status,
+        reason="after_sales_created",
+    )
     return to_after_sales_read(item)
 
 
@@ -1415,6 +2035,21 @@ async def merchant_update_after_sales(
     await session.commit()
     await session.refresh(item)
     await invalidate_chat_cache_for_user(order.user_id, after_sales=True)
+    await publish_after_sales_changed(
+        after_sales_id=item.id,
+        order_id=order.id,
+        user_id=order.user_id,
+        shop_id=order.shop_id,
+        status=item.status,
+        reason=f"merchant_{action}",
+    )
+    await publish_order_changed(
+        order_id=order.id,
+        user_id=order.user_id,
+        shop_id=order.shop_id,
+        status=order.status,
+        reason="after_sales_updated",
+    )
     return to_merchant_after_sales_item(item, order)
 
 
@@ -1580,6 +2215,11 @@ async def merchant_create_product(
     await session.commit()
     await session.refresh(product)
     await invalidate_product_filter_cache()
+    await publish_inventory_changed(
+        reason="product_created",
+        shop_id=shop.id,
+        product_ids=[product.id],
+    )
     return to_product_read(product, shop.name)
 
 
@@ -1614,6 +2254,11 @@ async def merchant_update_product(
     await session.commit()
     await session.refresh(product)
     await invalidate_product_filter_cache()
+    await publish_inventory_changed(
+        reason="product_updated",
+        shop_id=shop.id,
+        product_ids=[product.id],
+    )
     return to_product_read(product, shop.name)
 
 
@@ -1715,9 +2360,23 @@ async def merchant_ship_order(
         await session.rollback()
         latest_order = await get_order_or_404(session, order_id)
         await invalidate_chat_cache_for_user(latest_order.user_id, orders=True, logistics=True)
+        await publish_order_changed(
+            order_id=latest_order.id,
+            user_id=latest_order.user_id,
+            shop_id=latest_order.shop_id,
+            status=latest_order.status,
+            reason="shipped",
+        )
         return await build_order_detail(session, latest_order)
     await session.refresh(order)
     await invalidate_chat_cache_for_user(order.user_id, orders=True, logistics=True)
+    await publish_order_changed(
+        order_id=order.id,
+        user_id=order.user_id,
+        shop_id=order.shop_id,
+        status=order.status,
+        reason="shipped",
+    )
 
     return await build_order_detail(session, order)
 

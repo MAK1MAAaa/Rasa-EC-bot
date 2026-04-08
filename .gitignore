@@ -1,11 +1,15 @@
 # Python
 __pycache__/
+**/__pycache__/
 *.py[cod]
 *$py.class
 .venv/
 venv/
 ENV/
+.python-version
 .env
+.env.*
+!.env.sample
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
@@ -22,7 +26,14 @@ dist-ssr/
 
 # IDEs
 .idea/
+.idea/**
+.idea/.gitignore
 .vscode/
+.vscode/**
+*.iml
+.vs/
+.fleet/
+.history/
 *.swp
 *.swo
 *.sublime-project
@@ -39,3 +50,26 @@ backend/app/__pycache__/
 frontend/temp.html
 rasa/models/
 rasa/.rasa/
+backend/.env
+rasa/.env
+LoRA/.env
+
+# UV / local runtime cache
+.uv-cache/
+.uv-python/
+
+# LoRA training artifacts (large, machine-specific)
+LoRA/models/
+LoRA/outputs/
+LoRA/reports/
+LoRA/data/processed/
+LoRA/data/ecm/*.txt
+LoRA/data/ecm2/*.txt
+LoRA/data/E-commerce dataset/*.txt
+LoRA/data/Bitext_Sample_Customer_Support_Training_Dataset_27K_responses-v11.csv
+LoRA/.venv/
+LoRA/.python-version
+LoRA/*.log
+
+# Temp files
+temp.txt

@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import api from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
+import { createRealtimeClient, type RealtimeEvent } from '@/utils/realtime'
 
 interface ShopInfo {
   id: string
@@ -117,6 +118,8 @@ const pageToast = ref<{ visible: boolean; type: ToastKind; message: string }>({
   message: ''
 })
 let pageToastTimer: ReturnType<typeof setTimeout> | null = null
+let realtimeClient: ReturnType<typeof createRealtimeClient> | null = null
+let realtimeRefreshTimer: ReturnType<typeof setTimeout> | null = null
 
 const productForm = reactive({
   name: '',
@@ -417,11 +420,68 @@ const handleAfterSales = async (item: MerchantAfterSalesItem, action: string) =>
   }
 }
 
-onMounted(loadAll)
+const scheduleRealtimeRefresh = (target: 'orders' | 'products' | 'after_sales' | 'all') => {
+  if (realtimeRefreshTimer) {
+    return
+  }
+  realtimeRefreshTimer = setTimeout(async () => {
+    realtimeRefreshTimer = null
+    try {
+      if (target === 'all') {
+        await Promise.all([loadProducts(), loadOrders(), loadAfterSales()])
+        return
+      }
+      if (target === 'orders') {
+        await loadOrders()
+        return
+      }
+      if (target === 'products') {
+        await loadProducts()
+        return
+      }
+      await loadAfterSales()
+    } catch {
+      // Keep current page responsive even if one realtime refresh fails.
+    }
+  }, 320)
+}
+
+const handleRealtimeEvent = (event: RealtimeEvent) => {
+  const eventShopId = typeof event.data?.shop_id === 'string' ? event.data.shop_id : ''
+  if (eventShopId && shop.value?.id && eventShopId !== shop.value.id) {
+    return
+  }
+  if (event.event === 'inventory_changed') {
+    scheduleRealtimeRefresh(activeTab.value === 'products' ? 'products' : 'all')
+    return
+  }
+  if (event.event === 'order_changed') {
+    scheduleRealtimeRefresh(activeTab.value === 'orders' ? 'orders' : 'all')
+    return
+  }
+  if (event.event === 'after_sales_changed') {
+    scheduleRealtimeRefresh(activeTab.value === 'afterSales' ? 'after_sales' : 'all')
+  }
+}
+
+onMounted(async () => {
+  await loadAll()
+  realtimeClient = createRealtimeClient({
+    token: authStore.token,
+    onEvent: handleRealtimeEvent
+  })
+})
 onBeforeUnmount(() => {
   if (pageToastTimer) {
     clearTimeout(pageToastTimer)
+    pageToastTimer = null
   }
+  if (realtimeRefreshTimer) {
+    clearTimeout(realtimeRefreshTimer)
+    realtimeRefreshTimer = null
+  }
+  realtimeClient?.close()
+  realtimeClient = null
 })
 </script>
 

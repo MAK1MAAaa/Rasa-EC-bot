@@ -1,9 +1,10 @@
 ﻿<script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import api from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 import { useCartStore } from '@/stores/cart'
+import { createRealtimeClient, type RealtimeEvent } from '@/utils/realtime'
 
 interface Product {
   id: string
@@ -27,6 +28,8 @@ const loading = ref(false)
 const error = ref('')
 const product = ref<Product | null>(null)
 const quantity = ref(1)
+let realtimeClient: ReturnType<typeof createRealtimeClient> | null = null
+let realtimeRefreshTimer: ReturnType<typeof setTimeout> | null = null
 
 const canBuy = computed(() => Boolean(product.value && product.value.stock > 0 && authStore.isCustomer))
 const fromSource = computed(() => (typeof route.query.from === 'string' ? route.query.from.trim() : ''))
@@ -83,7 +86,48 @@ const handleBack = () => {
   router.push('/products')
 }
 
-onMounted(loadProduct)
+const scheduleRealtimeRefresh = () => {
+  if (realtimeRefreshTimer) {
+    return
+  }
+  realtimeRefreshTimer = setTimeout(async () => {
+    realtimeRefreshTimer = null
+    await loadProduct()
+  }, 320)
+}
+
+const handleRealtimeEvent = (event: RealtimeEvent) => {
+  if (!product.value) {
+    return
+  }
+
+  if (event.event !== 'inventory_changed' && event.event !== 'order_changed') {
+    return
+  }
+
+  const rawIds = Array.isArray(event.data?.product_ids) ? event.data?.product_ids : []
+  const touchedCurrent = rawIds.some((item) => String(item) === product.value?.id)
+  if (rawIds.length === 0 || touchedCurrent) {
+    scheduleRealtimeRefresh()
+  }
+}
+
+onMounted(async () => {
+  await loadProduct()
+  realtimeClient = createRealtimeClient({
+    token: authStore.token,
+    onEvent: handleRealtimeEvent
+  })
+})
+
+onBeforeUnmount(() => {
+  if (realtimeRefreshTimer) {
+    clearTimeout(realtimeRefreshTimer)
+    realtimeRefreshTimer = null
+  }
+  realtimeClient?.close()
+  realtimeClient = null
+})
 </script>
 
 <template>

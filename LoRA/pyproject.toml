@@ -1,0 +1,31 @@
+[project]
+name = "rasa-ec-bot-lora"
+version = "0.1.0"
+description = "QLoRA training pipeline for Qwen3.5-2B in ecommerce customer support."
+requires-python = ">=3.10,<3.12"
+dependencies = [
+  "accelerate>=0.34.0",
+  "bitsandbytes>=0.43.3",
+  "datasets>=2.21.0",
+  "modelscope>=1.35.3",
+  "numpy>=1.26.0",
+  "pandas>=2.2.0",
+  "peft>=0.12.0",
+  "pyyaml>=6.0.2",
+  "safetensors>=0.4.5",
+  "torch==2.5.1",
+  "torchaudio==2.5.1",
+  "torchvision==0.20.1",
+  "transformers>=4.44.2",
+  "trl>=0.10.1",
+]
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu121" }]
+torchaudio = [{ index = "pytorch-cu121" }]
+torchvision = [{ index = "pytorch-cu121" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
+explicit = true

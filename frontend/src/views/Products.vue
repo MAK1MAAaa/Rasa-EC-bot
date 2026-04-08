@@ -1,9 +1,10 @@
 ﻿<script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import api from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 import { useCartStore } from '@/stores/cart'
+import { createRealtimeClient, type RealtimeEvent } from '@/utils/realtime'
 
 interface Product {
   id: string
@@ -57,6 +58,8 @@ const appliedShopId = ref('')
 const appliedShopName = ref('')
 
 const priceRange = ref({ min: 0, max: 0 })
+let realtimeClient: ReturnType<typeof createRealtimeClient> | null = null
+let realtimeRefreshTimer: ReturnType<typeof setTimeout> | null = null
 
 const categoryOptions = computed(() => ['全部', ...availableCategories.value])
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
@@ -212,6 +215,22 @@ const jumpPage = (value: number) => {
   loadProducts()
 }
 
+const scheduleRealtimeRefresh = () => {
+  if (realtimeRefreshTimer) {
+    return
+  }
+  realtimeRefreshTimer = setTimeout(async () => {
+    realtimeRefreshTimer = null
+    await Promise.all([loadFilterMeta(), loadProducts()])
+  }, 360)
+}
+
+const handleRealtimeEvent = (event: RealtimeEvent) => {
+  if (event.event === 'inventory_changed' || event.event === 'order_changed') {
+    scheduleRealtimeRefresh()
+  }
+}
+
 watch(
   () => route.query.shop_id,
   (shopId) => {
@@ -233,6 +252,19 @@ onMounted(async () => {
   }
 
   await loadProducts()
+  realtimeClient = createRealtimeClient({
+    token: authStore.token,
+    onEvent: handleRealtimeEvent
+  })
+})
+
+onBeforeUnmount(() => {
+  if (realtimeRefreshTimer) {
+    clearTimeout(realtimeRefreshTimer)
+    realtimeRefreshTimer = null
+  }
+  realtimeClient?.close()
+  realtimeClient = null
 })
 </script>
 

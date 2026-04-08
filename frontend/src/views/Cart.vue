@@ -1,11 +1,16 @@
 ﻿<script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useCartStore } from '@/stores/cart'
+import { useAuthStore } from '@/stores/auth'
+import { createRealtimeClient, type RealtimeEvent } from '@/utils/realtime'
 
 const router = useRouter()
+const authStore = useAuthStore()
 const cartStore = useCartStore()
 const loading = ref(false)
+let realtimeClient: ReturnType<typeof createRealtimeClient> | null = null
+let realtimeRefreshTimer: ReturnType<typeof setTimeout> | null = null
 
 const loadCart = async () => {
   loading.value = true
@@ -40,7 +45,38 @@ const remove = async (itemId: string) => {
   }
 }
 
-onMounted(loadCart)
+const scheduleRealtimeRefresh = () => {
+  if (realtimeRefreshTimer) {
+    return
+  }
+  realtimeRefreshTimer = setTimeout(async () => {
+    realtimeRefreshTimer = null
+    await loadCart()
+  }, 300)
+}
+
+const handleRealtimeEvent = (event: RealtimeEvent) => {
+  if (event.event === 'cart_changed' || event.event === 'order_changed') {
+    scheduleRealtimeRefresh()
+  }
+}
+
+onMounted(async () => {
+  await loadCart()
+  realtimeClient = createRealtimeClient({
+    token: authStore.token,
+    onEvent: handleRealtimeEvent
+  })
+})
+
+onBeforeUnmount(() => {
+  if (realtimeRefreshTimer) {
+    clearTimeout(realtimeRefreshTimer)
+    realtimeRefreshTimer = null
+  }
+  realtimeClient?.close()
+  realtimeClient = null
+})
 </script>
 
 <template>

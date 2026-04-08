@@ -1,0 +1,1319 @@
+{
+  "intents": [
+    {
+      "tag": "create_account",
+      "patterns": [
+        "How can I create an account?",
+        "How do I sign up?",
+        "I want to register",
+        "Can I make a new account?",
+        "Sign up process",
+        "Register on your website"
+      ],
+      "responses": [
+        "To create an account, click on the 'Sign Up' button on the top right corner of our website and follow the instructions to complete the registration process."
+      ],
+      "context_set": ""
+    },
+    {
+      "tag": "payment_methods",
+      "patterns": [
+        "What payment methods do you accept?",
+        "How can I pay?",
+        "Do you take credit cards?",
+        "Can I use PayPal?",
+        "Payment options",
+        "Accepted payment types"
+      ],
+      "responses": [
+        "We accept major credit cards, debit cards, and PayPal as payment methods for online orders."
+      ],
+      "context_set": ""
+    },
+    {
+      "tag": "track_order",
+      "patterns": [
+        "How can I track my order?",
+        "Where is my order?",
+        "Order tracking",
+        "Track shipment",
+        "Check order status"
+      ],
+      "responses": [
+        "You can track your order by logging into your account and navigating to the 'Order History' section. There, you will find the tracking information for your shipment."
+      ],
+      "context_set": ""
+    },
+    {
+      "tag": "return_policy",
+      "patterns": [
+        "What is your return policy?",
+        "Can I return my purchase?",
+        "How do I return an item?",
+        "Return process",
+        "Refund policy"
+      ],
+      "responses": [
+        "Our return policy allows you to return products within 30 days of purchase for a full refund, provided they are in their original condition and packaging. Please refer to our Returns page for detailed instructions."
+      ],
+      "context_set": ""
+    },
+    {
+      "tag": "cancel_order",
+      "patterns": [
+        "Can I cancel my order?",
+        "How do I cancel an order?",
+        "Order cancellation",
+        "Cancel my purchase"
+      ],
+      "responses": [
+        "You can cancel your order if it has not been shipped yet. Please contact our customer support team with your order details, and we will assist you with the cancellation process."
+      ],
+      "context_set": ""
+    },
+    {
+      "tag": "shipping_info",
+      "patterns": [
+        "How long does shipping take?",
+        "Shipping time",
+        "Delivery duration",
+        "When will my order arrive?"
+      ],
+      "responses": [
+        "Shipping times vary depending on the destination and the shipping method chosen. Standard shipping usually takes 3-5 business days, while express shipping can take 1-2 business days."
+      ],
+      "context_set": ""
+    },
+    {
+      "tag": "international_shipping",
+      "patterns": [
+        "Do you offer international shipping?",
+        "Can you ship overseas?",
+        "Shipping to other countries",
+        "International delivery"
+      ],
+      "responses": [
+        "Yes, we offer international shipping to select countries. The availability and shipping costs will be calculated during the checkout process based on your location."
+      ],
+      "context_set": ""
+    },
+    {
+      "tag": "lost_or_damaged_package",
+      "patterns": [
+        "What should I do if my package is lost or damaged?",
+        "My package is missing",
+        "Received damaged item",
+        "Lost shipment",
+        "Damaged delivery"
+      ],
+      "responses": [
+        "If your package is lost or damaged during transit, please contact our customer support team immediately. We will initiate an investigation and take the necessary steps to resolve the issue."
+      ],
+      "context_set": ""
+    },
+    {
+      "tag": "change_shipping_address",
+      "patterns": [
+        "Can I change my shipping address after placing an order?",
+        "Update shipping address",
+        "Change delivery address",
+        "Edit shipping info"
+      ],
+      "responses": [
+        "If you need to change your shipping address, please contact our customer support team as soon as possible. We will do our best to update the address if the order has not been shipped yet."
+      ],
+      "context_set": ""
+    },
+    {
+      "tag": "customer_support",
+      "patterns": [
+        "How can I contact customer support?",
+        "Customer service contact",
+        "Support phone number",
+        "Email support",
+        "Contact help desk",
+        "How do I reach support?",
+        "Is there a live chat?",
+        "Can I call customer service?",
+        "How do I get help?",
+        "Where can I find your contact info?",
+        "I need assistance",
+        "Help desk number",
+        "Customer care email",
+        "How do I talk to an agent?",
+        "Can I speak to someone?"
+      ],
+      "responses": [
+        "You can contact our customer support team by phone at [phone number] or by email at [email address]. Our team is available [working hours] to assist you with any inquiries or issues you may have.",
+        "For immediate assistance, use the live chat feature on our website during business hours.",
+        "Visit our Contact Us page for all available support options including phone, email, and live chat.",
+        "Our customer care team is here to help you with any questions or problems you may have."
+      ],
+      "context_set": ""
+    },
+    {
+      "tag": "refunds",
+      "patterns": [
+        "How do I get a refund?",
+        "Request a refund",
+        "Refund process",
+        "Money back",
+        "Return and refund",
+        "How long does a refund take?",
+        "Refund for returned item"
+      ],
+      "responses": [
+        "Refunds are processed once we receive your returned item and verify its condition. Please refer to our Returns page for details.",
+        "Refunds typically take 5-7 business days after we receive your return.",
+        "You will be notified by email once your refund has been issued."
+      ],
+      "context_set": ""
+    },
+    {
+      "tag": "product_availability",
+      "patterns": [
+        "Is this product available?",
+        "Is it in stock?",
+        "Product availability",
+        "Can I buy this now?",
+        "Is this item out of stock?",
+        "When will this product be restocked?",
+        "Can I pre-order this item?"
+      ],
+      "responses": [
+        "Product availability is shown on each product page. If an item is out of stock, you can sign up for notifications.",
+        "Pre-order and restock options are available for select products."
+      ],
+      "context_set": ""
+    },
+    {
+      "tag": "discounts_and_offers",
+      "patterns": [
+        "Are there any discounts?",
+        "Current offers",
+        "Promo codes available?",
+        "Any sales right now?",
+        "Special deals",
+        "How do I use a coupon?",
+        "Apply discount code"
+      ],
+      "responses": [
+        "Check our homepage and newsletter for current discounts, promo codes, and special offers.",
+        "Enter your promo code at checkout to apply a discount to your order."
+      ],
+      "context_set": ""
+    },
+    {
+      "tag": "shipping_issues",
+      "patterns": [
+        "My order hasn't arrived",
+        "Delayed shipping",
+        "Where is my package?",
+        "Shipping problem",
+        "Order delivery issue",
+        "Tracking says delivered but I didn't get it",
+        "Lost shipment"
+      ],
+      "responses": [
+        "If your order is delayed or missing, please contact customer support with your order details for assistance.",
+        "Check your tracking information in your account for updates on your shipment."
+      ],
+      "context_set": ""
+    },
+    {
+      "tag": "order_status",
+      "patterns": [
+        "What is the status of my order?",
+        "Is my order shipped?",
+        "Order status update",
+        "Has my order been processed?",
+        "Order confirmation",
+        "Order history",
+        "Order tracking info"
+      ],
+      "responses": [
+        "You can check your order status by logging into your account and viewing the 'Order History' section.",
+        "Order status and tracking information are available in your account dashboard."
+      ],
+      "context_set": ""
+    },
+    {
+        "tag": "gift_cards",
+        "patterns": [
+        "Do you sell gift cards?",
+        "Can I buy a gift card?",
+        "How do I use a gift card?",
+        "Gift card balance",
+        "Check gift card balance"
+        ],
+        "responses": [
+        "Yes, we offer digital gift cards in various denominations. You can purchase them on our website and they can be redeemed at checkout.",
+        "To check the balance of your gift card, please enter the gift card number on our Gift Card Balance page."
+        ],
+        "context_set": ""
+        },
+        {
+        "tag": "eco_friendly_packaging",
+        "patterns": [
+        "Do you use sustainable packaging?",
+        "Is your packaging recyclable?",
+        "Eco-friendly packaging options",
+        "Environmentally friendly shipping",
+        "Green packaging"
+        ],
+        "responses": [
+        "We are committed to sustainability and use eco-friendly, recyclable materials for our packaging wherever possible. We are always working to reduce our environmental impact."
+        ],
+        "context_set": ""
+        },
+    {
+        "tag": "product_customization",
+        "patterns": [
+        "Can I customize a product?",
+        "Do you offer personalized items?",
+        "Product customization options",
+        "Custom orders",
+        "Make my own design"
+        ],
+        "responses": [
+        "We offer customization for select products. Please look for the 'Customize' button on the product page to see the available options."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "financing",
+        "patterns": [
+        "Do you offer financing?",
+        "Can I pay in installments?",
+        "Buy now pay later",
+        "Payment plans",
+        "Financing options"
+        ],
+        "responses": [
+        "Yes, we partner with [e.g., Afterpay, Klarna, Affirm] to offer flexible payment plans. You can select this option at checkout to pay for your order in installments."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "store_credit",
+        "patterns": [
+        "How do I use my store credit?",
+        "Check my store credit balance",
+        "Do you offer store credit?",
+        "Store credit balance",
+        "Redeem store credit"
+        ],
+        "responses": [
+        "Store credit is automatically applied to your account. You can view your balance and apply it during the checkout process.",
+        "To check your store credit balance, log into your account and view the 'Store Credit' section."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "size_guide",
+        "patterns": [
+        "What is the size guide?",
+        "Size chart",
+        "How do I find my size?",
+        "Sizing information",
+        "What size am I?",
+        "Clothing sizes"
+        ],
+        "responses": [
+        "You can find our detailed size guide on each product page to help you choose the right fit.",
+        "Please refer to our size chart for specific measurements and sizing recommendations."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "password_reset",
+        "patterns": [
+        "I forgot my password",
+        "How do I reset my password?",
+        "Can't log into my account",
+        "Change my password",
+        "Password reset link"
+        ],
+        "responses": [
+        "To reset your password, click on 'Forgot Password' on the login page and enter your email address. We will send you a link to create a new password."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "wishlist",
+        "patterns": [
+        "How do I create a wishlist?",
+        "Can I save products for later?",
+        "Add item to wishlist",
+        "My favorites",
+        "How to use the wishlist"
+        ],
+        "responses": [
+        "You can add products to your wishlist by clicking the heart icon on any product page. This allows you to save items you love for future purchases.",
+        "To view your wishlist, simply log into your account and navigate to the 'My Wishlist' section."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "loyalty_program",
+        "patterns": [
+        "What is your loyalty program?",
+        "How do I join the rewards program?",
+        "Loyalty points balance",
+        "How do I earn points?",
+        "Redeeming rewards"
+        ],
+        "responses": [
+        "Our loyalty program rewards you for every purchase. You can earn points on every order and redeem them for exclusive discounts and rewards. Sign up is free and easy!",
+        "You can check your loyalty points balance in your account dashboard."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "product_reviews",
+        "patterns": [
+        "How do I leave a review?",
+        "Can I read reviews?",
+        "Where are the product reviews?",
+        "Review an item",
+        "Submit a review"
+        ],
+        "responses": [
+        "You can leave a review on any product page. Just scroll down and click 'Write a review' to share your thoughts and help other customers.",
+        "Product reviews are located on each product page, usually below the product description."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "technical_support",
+        "patterns": [
+        "I have a technical issue",
+        "Website is not working",
+        "Problem with the site",
+        "Need technical help",
+        "Report a bug"
+        ],
+        "responses": [
+        "I can help with that. Could you please describe the issue you are experiencing? You can also contact our technical support team by email at [email address]."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "in_store_pickup",
+        "patterns": [
+        "Do you have in-store pickup?",
+        "Can I pick up my order?",
+        "Click and collect",
+        "Store pickup options",
+        "Pickup from store"
+        ],
+        "responses": [
+        "Yes, we offer in-store pickup at select locations. If this option is available for your order, you will see it during the checkout process.",
+        "You can choose to pick up your order from our [store location] during business hours."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "newsletter_subscription",
+        "patterns": [
+        "How do I subscribe to the newsletter?",
+        "Sign up for emails",
+        "Newsletter sign-up",
+        "Get product updates",
+        "Subscribe to your mailing list"
+        ],
+        "responses": [
+        "You can subscribe to our newsletter by entering your email address in the subscription box at the bottom of our website. You'll get updates on new products, sales, and more!"
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "modify_order",
+        "patterns": [
+        "Can I change my order?",
+        "Modify my order",
+        "Add an item to my order",
+        "Change an item in my order",
+        "Update my order"
+        ],
+        "responses": [
+        "Order modifications are only possible if your order has not yet been shipped. Please contact customer support immediately with your order number and requested changes."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "product_care",
+        "patterns": [
+        "How do I care for my product?",
+        "Product care instructions",
+        "Washing instructions",
+        "How to clean [product name]",
+        "Maintenance tips"
+        ],
+        "responses": [
+        "Product care instructions can be found on the product page under the 'Care & Maintenance' section. Following these tips will help your item last longer."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "login_issues",
+        "patterns": [
+        "I can't log in",
+        "Having trouble logging in",
+        "My account is locked",
+        "Problem with my account login",
+        "Unable to access my account"
+        ],
+        "responses": [
+        "If you are having trouble logging into your account, please try resetting your password. If that doesn't work, contact our customer support team for further assistance."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "wholesale_orders",
+        "patterns": [
+        "Do you offer wholesale?",
+        "Bulk order inquiry",
+        "Wholesale pricing",
+        "Business orders",
+        "Can I buy in bulk?"
+        ],
+        "responses": [
+        "Yes, we offer wholesale pricing for bulk orders. Please visit our 'Wholesale' page or email our sales team at [email address] to learn more about our business-to-business options."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "order_history",
+        "patterns": [
+        "Can I see my past orders?",
+        "Order history",
+        "View my previous purchases",
+        "Where are my old orders?",
+        "Past order details"
+        ],
+        "responses": [
+        "You can view your complete order history by logging into your account and navigating to the 'Order History' section."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "privacy_policy",
+        "patterns": [
+        "What is your privacy policy?",
+        "How do you use my data?",
+        "Data privacy",
+        "Is my information secure?",
+        "Privacy statement"
+        ],
+        "responses": [
+        "Our privacy policy outlines how we collect, use, and protect your personal information. You can read the full policy on our 'Privacy Policy' page to learn more about our commitment to your privacy."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "product_recommendations",
+        "patterns": [
+        "Can you recommend a product?",
+        "What should I buy?",
+        "Product recommendations",
+        "Suggest a product",
+        "What's popular?"
+        ],
+        "responses": [
+        "I'd be happy to! To give you the best recommendation, please tell me what you're looking for, such as a product type, price range, or specific features.",
+        "Our 'Top Sellers' or 'Featured Products' sections on the homepage might give you some great ideas!"
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "stock_alerts",
+        "patterns": [
+        "Can I get a stock alert?",
+        "Notify me when this is in stock",
+        "When will this be available?",
+        "Out of stock notification",
+        "Alert me when back in stock"
+        ],
+        "responses": [
+        "If a product is out of stock, you can sign up for a 'Back in Stock' alert on the product page. We'll send you an email as soon as it's available again."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "guest_checkout",
+        "patterns": [
+        "Can I checkout as a guest?",
+        "Do I need an account to buy?",
+        "Checkout without an account",
+        "Guest checkout option"
+        ],
+        "responses": [
+        "Yes, we offer a guest checkout option so you can place an order without creating an account. You will still need to provide your email address for order confirmation and tracking."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "about_us",
+        "patterns": [
+        "Tell me about your company",
+        "Who are you?",
+        "What is your mission?",
+        "About us"
+        ],
+        "responses": [
+        "We are a company dedicated to providing high-quality [product type] with a focus on [company values]. You can learn more about our story and mission on the 'About Us' page."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "careers",
+        "patterns": [
+        "Are you hiring?",
+        "Careers at your company",
+        "Job openings",
+        "Work for you"
+        ],
+        "responses": [
+        "Thank you for your interest! All of our current job openings are listed on our 'Careers' page. We are always looking for talented individuals to join our team."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "incorrect_item",
+        "patterns": [
+        "I received the wrong item",
+        "The item I got is not what I ordered",
+        "Incorrect product received",
+        "Wrong item in my package"
+        ],
+        "responses": [
+        "I apologize for the error. Please contact our customer support team with your order number and a description of the incorrect item you received, and we will arrange for the correct product to be shipped to you."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "account_deletion",
+        "patterns": [
+        "How do I delete my account?",
+        "Close my account",
+        "Delete my profile",
+        "Remove my account"
+        ],
+        "responses": [
+        "If you wish to delete your account, please contact our customer support team. They will guide you through the process to ensure your information is properly removed from our system."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "newsletter_unsubscription",
+        "patterns": [
+        "How do I unsubscribe from your newsletter?",
+        "Stop receiving emails",
+        "Unsubscribe me from your mailing list",
+        "Opt out of newsletter"
+        ],
+        "responses": [
+        "You can unsubscribe from our newsletter by clicking the 'Unsubscribe' link at the bottom of any of our marketing emails.",
+        "You can manage your email preferences in your account settings."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "gift_wrapping",
+        "patterns": [
+        "Do you offer gift wrapping?",
+        "Can I get my order gift wrapped?",
+        "Gift wrapping service",
+        "Add gift wrap"
+        ],
+        "responses": [
+        "Yes, we offer gift wrapping for an additional fee during checkout. Look for the gift wrapping option on the cart page before you complete your purchase."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "product_warranty",
+        "patterns": [
+        "What is the product warranty?",
+        "Is there a warranty?",
+        "Product guarantee",
+        "Warranty information"
+        ],
+        "responses": [
+        "Many of our products come with a manufacturer's warranty. You can find specific warranty information on the product page under the 'Specifications' or 'Details' section."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "price_match",
+        "patterns": [
+        "Do you price match?",
+        "Will you match a competitor's price?",
+        "Price matching policy",
+        "Price guarantee"
+        ],
+        "responses": [
+        "We do not currently offer a price matching policy. We strive to offer competitive prices and frequent promotions to ensure you get the best value."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "security",
+        "patterns": [
+        "Is your website secure?",
+        "Is my payment information safe?",
+        "Website security",
+        "Data security"
+        ],
+        "responses": [
+        "Our website uses SSL encryption and other security measures to ensure that your personal and payment information is safe and secure."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "sustainable_practices",
+        "patterns": [
+        "What are your sustainable practices?",
+        "Are your products ethically sourced?",
+        "Eco-friendly company",
+        "Do you have a sustainability report?"
+        ],
+        "responses": [
+        "We are committed to sustainability. In addition to our eco-friendly packaging, we focus on [sustainable practices, e.g., sourcing from ethical suppliers, reducing waste, etc.]. You can find more information on our 'Sustainability' page."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "corporate_responsibility",
+        "patterns": [
+        "Do you support any charities?",
+        "What is your corporate responsibility?",
+        "Do you give back to the community?",
+        "CSR initiatives"
+        ],
+        "responses": [
+        "Yes, we believe in corporate responsibility. We support several organizations and initiatives, including [charity/initiative name]. Details about our corporate social responsibility can be found on our 'About Us' page."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "feedback",
+        "patterns": [
+        "How can I give feedback?",
+        "Provide a suggestion",
+        "Send a comment",
+        "Give a suggestion"
+        ],
+        "responses": [
+        "We'd love to hear your feedback! You can submit a suggestion or comment through our 'Contact Us' page, or by emailing us directly at [email address]."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "account_update_details",
+        "patterns": [
+        "How do I change my email address?",
+        "Update my account info",
+        "Change my phone number",
+        "How to edit profile details"
+        ],
+        "responses": [
+        "You can update your account details, including your email and phone number, by logging into your account and navigating to the 'Profile' or 'Account Settings' page."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "referral_program",
+        "patterns": [
+        "Do you have a referral program?",
+        "Can I refer a friend?",
+        "How to earn referral rewards",
+        "Referral code"
+        ],
+        "responses": [
+        "Yes, we have a referral program! Share your unique referral link with friends, and you'll both receive a discount on your next purchase when they make their first order."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "social_media",
+        "patterns": [
+        "What are your social media accounts?",
+        "Follow you on social media",
+        "Find you on Facebook",
+        "Instagram page"
+        ],
+        "responses": [
+        "You can follow us on all major social media platforms, including [social media platforms, e.g., Facebook, Instagram, Twitter]. Find the links at the bottom of our website."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "store_hours",
+        "patterns": [
+        "What are your store hours?",
+        "Are you open today?",
+        "When do you close?",
+        "Opening times"
+        ],
+        "responses": [
+        "Our online store is open 24/7. If you are asking about a physical location, please check our 'Store Locator' page for specific hours and holiday schedules."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "subscription_service",
+        "patterns": [
+        "Do you have a subscription service?",
+        "Can I subscribe to a product?",
+        "How does the subscription work?",
+        "Subscription plan"
+        ],
+        "responses": [
+        "Yes, we offer a subscription service on many of our products. You can choose a delivery frequency that works for you and save on every recurring order."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "report_spam",
+        "patterns": [
+        "I am getting too many emails",
+        "I am getting spam emails",
+        "Report spam",
+        "Stop spam emails from you"
+        ],
+        "responses": [
+        "I'm sorry to hear that. You can unsubscribe from our mailing list by clicking the 'Unsubscribe' link at the bottom of any of our emails. If you continue to receive unwanted emails, please contact our support team."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "technical_issue_checkout",
+        "patterns": [
+        "I can't complete my order",
+        "Checkout is not working",
+        "Problem with payment",
+        "Can't place an order"
+        ],
+        "responses": [
+        "I apologize for the inconvenience. Please try clearing your browser cache and cookies, or try using a different browser. If the issue persists, please contact our technical support team with a screenshot of the error."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "coupon_application",
+        "patterns": [
+        "How do I apply a coupon?",
+        "My coupon code is not working",
+        "Voucher code",
+        "How to use a promo code"
+        ],
+        "responses": [
+        "To apply a coupon, enter the code in the 'Promo Code' or 'Discount Code' box at checkout and click 'Apply'. If your coupon isn't working, check the terms and conditions to ensure it's still valid and applicable to your order."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "guest_returns",
+        "patterns": [
+        "How do I return something if I checked out as a guest?",
+        "Guest return process",
+        "Returning an item without an account",
+        "Can I return my order if I didn't create an account?"
+        ],
+        "responses": [
+        "If you checked out as a guest, you can initiate a return by visiting our 'Guest Returns' page and entering your order number and email address. You will receive a return label and instructions via email."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "product_restock_date",
+        "patterns": [
+        "When will [product name] be back in stock?",
+        "What is the restock date for this product?",
+        "Estimated restock time",
+        "When can I buy this again?"
+        ],
+        "responses": [
+        "Unfortunately, we do not have an exact restock date at this time. We recommend signing up for a 'Back in Stock' alert on the product page to be notified as soon as it's available.",
+        "Please keep an eye on the product page for updates. Restock dates are subject to change."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "order_cancellation_status",
+        "patterns": [
+        "Did my order cancellation go through?",
+        "Is my order cancelled?",
+        "Check cancellation status",
+        "Has my order been successfully cancelled?"
+        ],
+        "responses": [
+        "You will receive an email confirmation once your order has been successfully cancelled. If you don't receive it within a few hours, please contact customer support."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "multiple_shipping_addresses",
+        "patterns": [
+        "Can I save multiple shipping addresses?",
+        "How do I add another shipping address?",
+        "Multiple addresses for shipping"
+        ],
+        "responses": [
+        "Yes, you can save and manage multiple shipping addresses in your account settings. Simply log in and navigate to your address book to add, edit, or delete addresses."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "report_website_bug",
+        "patterns": [
+        "I found a bug on your website",
+        "There's an error on the site",
+        "The website is glitching",
+        "Report a website error"
+        ],
+        "responses": [
+        "Thank you for bringing that to our attention! Please provide a detailed description of the bug and the steps to reproduce it, and our technical team will look into it."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "order_fulfillment",
+        "patterns": [
+        "How long does it take to fulfill an order?",
+        "Order processing time",
+        "When will my order be ready to ship?",
+        "How quickly are orders processed?"
+        ],
+        "responses": [
+        "Orders are typically processed and fulfilled within 1-2 business days. You will receive a shipment confirmation email with tracking information once your order has been dispatched."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "return_label",
+        "patterns": [
+        "How do I get a return label?",
+        "Where is my return label?",
+        "Need a return shipping label",
+        "Request a return label"
+        ],
+        "responses": [
+        "You can generate a return label from the 'Order History' section in your account. For guest orders, please use our 'Guest Returns' page to request one."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "product_details",
+        "patterns": [
+        "Tell me more about this product",
+        "What are the features of [product name]?",
+        "Product specifications",
+        "What is this made of?",
+        "Product materials"
+        ],
+        "responses": [
+        "You can find detailed product information, including features, specifications, and materials, on the product page under the 'Description' and 'Specifications' tabs."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "change_order_quantity",
+        "patterns": [
+        "Can I change the quantity of an item in my order?",
+        "Update item quantity",
+        "Add more items to my order",
+        "Change the number of products"
+        ],
+        "responses": [
+        "If your order has not yet been shipped, you may be able to change the quantity of an item. Please contact customer support immediately for assistance."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "billing_issues",
+        "patterns": [
+        "Problem with my payment",
+        "My card was declined",
+        "I was charged the wrong amount",
+        "Billing error"
+        ],
+        "responses": [
+        "If you have a billing issue, please contact our customer support team with your order number and a description of the problem. They will investigate and help resolve it."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "gift_receipt",
+        "patterns": [
+        "Can I get a gift receipt?",
+        "Do you offer gift receipts?",
+        "How do I get a gift receipt?"
+        ],
+        "responses": [
+        "Yes, we offer gift receipts for your purchases. You can select this option at checkout, and the receipt will not show the price."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "pre_orders",
+        "patterns": [
+        "How do pre-orders work?",
+        "Can I pre-order this item?",
+        "When will my pre-order ship?",
+        "Pre-order policy"
+        ],
+        "responses": [
+        "Our pre-order policy allows you to reserve a product before its official release. Your card will not be charged until the item is ready to ship, and you will receive an email notification when it is dispatched."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "affiliate_program",
+        "patterns": [
+        "Do you have an affiliate program?",
+        "How can I join your affiliate program?",
+        "Affiliate marketing",
+        "Partnership opportunities"
+        ],
+        "responses": [
+        "Yes, we have an affiliate program! You can apply on our 'Affiliate Program' page to earn commissions on sales you refer. We look forward to partnering with you!"
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "product_comparison",
+        "patterns": [
+        "Can you compare [product1] and [product2]?",
+        "What's the difference between these two products?",
+        "Compare products",
+        "Which one is better?"
+        ],
+        "responses": [
+        "I can help with that. Please provide the names or item numbers of the products you'd like to compare, and I will highlight their key differences and features."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "contact_department",
+        "patterns": [
+        "How do I contact the sales department?",
+        "Contact press relations",
+        "Customer support phone number",
+        "Get in touch with marketing"
+        ],
+        "responses": [
+        "For specific department inquiries, you can use our contact form and specify the department, or find a direct email on our 'Contact Us' page under the relevant section. For general support, you can reach us at [email address]."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "security_report",
+        "patterns": [
+        "I see a suspicious email",
+        "How do I report a security issue?",
+        "Report a fraudulent charge",
+        "Is this email from you?"
+        ],
+        "responses": [
+        "If you receive a suspicious email or notice a fraudulent charge, do not click on any links. Please forward the email to [security email address] or contact our customer support team immediately to report the activity."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "b2b_sales",
+        "patterns": [
+        "Do you have a business sales team?",
+        "B2B sales contact",
+        "Corporate purchasing",
+        "Bulk buying for business"
+        ],
+        "responses": [
+        "For all business-to-business and corporate purchasing inquiries, please contact our dedicated sales team at [email address]. They can assist you with special pricing and bulk order options."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "price_adjustment",
+        "patterns": [
+        "The price changed after I bought it",
+        "Do you offer a price adjustment?",
+        "Price drop refund",
+        "Price guarantee"
+        ],
+        "responses": [
+        "We offer a price adjustment within [number] days of your purchase if an item goes on sale. Please contact customer support with your order number to request an adjustment."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "warranty_claim",
+        "patterns": [
+        "How do I make a warranty claim?",
+        "My product broke, is it under warranty?",
+        "Warranty process",
+        "Product repair"
+        ],
+        "responses": [
+        "To make a warranty claim, please contact our support team with your order number and a description of the issue. They will provide instructions on how to proceed with the claim or a repair."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "shipping_insurance",
+        "patterns": [
+        "Do you offer shipping insurance?",
+        "Is my package insured?",
+        "Shipping insurance options"
+        ],
+        "responses": [
+        "Yes, we offer shipping insurance as an optional add-on during the checkout process. This will protect your order against loss or damage during transit."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "product_manuals",
+        "patterns": [
+        "Where can I find a product manual?",
+        "Do you have user guides?",
+        "Download product instructions"
+        ],
+        "responses": [
+        "You can find digital product manuals and user guides on the individual product pages, usually in a 'Downloads' or 'Specifications' section. If you can't find what you're looking for, feel free to contact our support team."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "subscription_management",
+        "patterns": [
+        "How do I manage my subscription?",
+        "Change subscription plan",
+        "Pause my subscription",
+        "Cancel my subscription"
+        ],
+        "responses": [
+        "You can manage all aspects of your subscription, including changing your plan, pausing, or canceling, by logging into your account and navigating to the 'My Subscriptions' section."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "exchange_item",
+        "patterns": [
+        "Can I exchange an item?",
+        "How do I exchange for a different size?",
+        "Exchange process"
+        ],
+        "responses": [
+        "Yes, you can exchange an item for a different size or color. Please visit our 'Exchanges' page or contact customer support to start the process."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "return_damaged_item",
+        "patterns": [
+        "How to return a damaged item?",
+        "Received a broken product",
+        "Return a faulty item"
+        ],
+        "responses": [
+        "I apologize for the inconvenience. Please contact our customer support team immediately with your order number and photos of the damaged item so we can arrange for a return and replacement."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "gift_card_purchase",
+        "patterns": [
+        "How do I buy a gift card?",
+        "Where can I purchase a gift card?",
+        "Gift card purchase process"
+        ],
+        "responses": [
+        "You can purchase a digital gift card directly from our website by visiting the 'Gift Cards' page. You can choose the amount and the recipient's email address."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "bulk_pricing",
+        "patterns": [
+        "Do you have bulk pricing?",
+        "Discounts for large orders",
+        "Bulk order pricing"
+        ],
+        "responses": [
+        "Yes, we offer tiered pricing for bulk orders. Please visit our 'Wholesale' or 'Business Orders' page for more information, or contact our sales team directly for a custom quote."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "order_confirmation",
+        "patterns": [
+        "I haven't received my order confirmation email",
+        "Where is my order confirmation?",
+        "Lost my order confirmation"
+        ],
+        "responses": [
+        "Please check your spam or junk folder first. If you still can't find it, please contact customer support with the email address you used for the purchase, and we will resend the confirmation."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "international_returns",
+        "patterns": [
+        "Can I return an international order?",
+        "International return policy",
+        "Return from overseas"
+        ],
+        "responses": [
+        "Yes, we accept returns on international orders. However, the customer is responsible for return shipping costs. Please see our 'International Returns' policy for detailed instructions."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "store_locations",
+        "patterns": [
+        "Where are your physical stores?",
+        "Find a store near me",
+        "Store address"
+        ],
+        "responses": [
+        "Our 'Store Locator' page provides a list of all our physical store locations, along with their addresses and hours of operation. Just enter your city or ZIP code to find the nearest store."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "newsletter_benefits",
+        "patterns": [
+        "What are the benefits of the newsletter?",
+        "Why should I subscribe?",
+        "What do I get from the newsletter?"
+        ],
+        "responses": [
+        "By subscribing to our newsletter, you'll get exclusive access to new product announcements, special sales, and subscriber-only discounts delivered directly to your inbox!"
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "product_reviews_incentive",
+        "patterns": [
+        "Do I get a discount for leaving a review?",
+        "Rewards for reviews",
+        "Incentives for product feedback"
+        ],
+        "responses": [
+        "We do not currently offer a discount for leaving a review, but your feedback helps us and other customers greatly. We sometimes offer special promotions for reviewers, so keep an eye on your email for future offers."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "payment_security",
+        "patterns": [
+        "Is it safe to use my credit card?",
+        "Payment gateway security",
+        "Is my info safe?"
+        ],
+        "responses": [
+        "Yes, your security is our top priority. We use industry-standard encryption and follow best practices to ensure that your payment information is always safe and secure."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "gift_returns",
+        "patterns": [
+        "How do I return a gift?",
+        "Return a gifted item",
+        "Can I return something I received as a gift?"
+        ],
+        "responses": [
+        "You can return a gift for store credit if you have the order number or a gift receipt. Please contact our customer support team to assist with the process."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "product_registration",
+        "patterns": [
+        "How do I register my product?",
+        "Product registration for warranty",
+        "Register a new product"
+        ],
+        "responses": [
+        "To register your product for warranty purposes, please visit our 'Product Registration' page and fill out the form with your product's serial number and purchase details."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "report_fraud",
+        "patterns": [
+        "I think I've been scammed",
+        "Report a fraudulent website",
+        "Report suspicious activity"
+        ],
+        "responses": [
+        "I am sorry to hear that. Please contact our security team at [security email address] or call us directly at [phone number] to report any suspicious or fraudulent activity."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "website_accessibility",
+        "patterns": [
+        "Is your website accessible?",
+        "Accessibility features on the site",
+        "Website for disabled users"
+        ],
+        "responses": [
+        "We are committed to making our website accessible to everyone. We follow Web Content Accessibility Guidelines (WCAG) and are always working to improve the user experience. Please contact us if you have any feedback or encounter issues."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "dropshipping_partnerships",
+        "patterns": [
+        "Do you offer dropshipping?",
+        "Dropshipping partnerships",
+        "Can I be a dropshipper?"
+        ],
+        "responses": [
+        "We are not currently offering dropshipping partnerships. However, you can join our affiliate program to earn commissions on sales."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "loyalty_tiers",
+        "patterns": [
+        "What are the loyalty program tiers?",
+        "How to upgrade my loyalty tier",
+        "Loyalty rewards levels"
+        ],
+        "responses": [
+        "Our loyalty program has several tiers, each with increasing benefits. You can see your current tier and how to unlock the next level in the 'My Rewards' section of your account."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "order_issues_missing_item",
+        "patterns": [
+        "An item is missing from my order",
+        "Part of my order is missing",
+        "I didn't receive all my items"
+        ],
+        "responses": [
+        "I apologize for the missing item. Please provide your order number and the name of the missing product, and we will get that shipped to you as soon as possible."
+        ],
+        "context_set": ""
+    },
+    {
+        "tag": "order_issues_extra_item",
+        "patterns": [
+        "I received an extra item in my order",
+        "I got an item I didn't order",
+        "There's an extra product in my package"
+        ],
+        "responses": [
+        "Thank you for letting us know! We can provide you with a return label for the extra item. Please contact customer support with your order details to proceed."
+        ],
+        "context_set": ""
+    }
+
+  ]
+}

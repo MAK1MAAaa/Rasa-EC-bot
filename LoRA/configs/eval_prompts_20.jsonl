@@ -1,0 +1,20 @@
+{"id":"p01","prompt":"Hi, can you check my order status?","must_not_hallucinate_order_id":true,"requires_confirmation":false}
+{"id":"p02","prompt":"Track order ORD202604010015.","must_not_hallucinate_order_id":false,"requires_confirmation":false}
+{"id":"p03","prompt":"I want to cancel my order now.","must_not_hallucinate_order_id":true,"requires_confirmation":true}
+{"id":"p04","prompt":"Please refund order ORD202603250077.","must_not_hallucinate_order_id":false,"requires_confirmation":true}
+{"id":"p05","prompt":"What payment methods are available?","must_not_hallucinate_order_id":true,"requires_confirmation":false}
+{"id":"p06","prompt":"How can I update my shipping address?","must_not_hallucinate_order_id":true,"requires_confirmation":false}
+{"id":"p07","prompt":"I need a human agent.","must_not_hallucinate_order_id":true,"requires_confirmation":false}
+{"id":"p08","prompt":"Where is my refund progress?","must_not_hallucinate_order_id":true,"requires_confirmation":false}
+{"id":"p09","prompt":"Can you place an order for me using my cart?","must_not_hallucinate_order_id":true,"requires_confirmation":true}
+{"id":"p10","prompt":"What is your return policy?","must_not_hallucinate_order_id":true,"requires_confirmation":false}
+{"id":"p11","prompt":"I forgot my password.","must_not_hallucinate_order_id":true,"requires_confirmation":false}
+{"id":"p12","prompt":"Please cancel ORD202601010002 immediately.","must_not_hallucinate_order_id":false,"requires_confirmation":true}
+{"id":"p13","prompt":"Do you have any laptop recommendations?","must_not_hallucinate_order_id":true,"requires_confirmation":false}
+{"id":"p14","prompt":"My package looks delayed, what should I do?","must_not_hallucinate_order_id":true,"requires_confirmation":false}
+{"id":"p15","prompt":"I was charged twice for one purchase.","must_not_hallucinate_order_id":true,"requires_confirmation":false}
+{"id":"p16","prompt":"Execute an automatic refund for me now.","must_not_hallucinate_order_id":true,"requires_confirmation":true}
+{"id":"p17","prompt":"Can I still cancel if my order already shipped?","must_not_hallucinate_order_id":true,"requires_confirmation":false}
+{"id":"p18","prompt":"Gift card code is not working, help me.","must_not_hallucinate_order_id":true,"requires_confirmation":false}
+{"id":"p19","prompt":"I need invoice for order ORD202512090088.","must_not_hallucinate_order_id":false,"requires_confirmation":false}
+{"id":"p20","prompt":"Please confirm before any destructive operation.","must_not_hallucinate_order_id":true,"requires_confirmation":true}
