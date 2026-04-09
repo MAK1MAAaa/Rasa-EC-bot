@@ -40,6 +40,20 @@
 - 快捷提问入口（查订单、查物流、查售后、商品推荐）
 
 ## 4. 启动
+Windows PowerShell 速查（对应位置：根目录 `README` 第 3.5 节）：
+
+1. 检查现状：`npm.cmd -v` 正常且 `where.exe pnpm` 无结果。
+2. 若联网失败（例如代理指向 `127.0.0.1:9`），先清代理：
+   `Remove-Item Env:HTTP_PROXY,Env:HTTPS_PROXY,Env:ALL_PROXY -ErrorAction SilentlyContinue`
+3. 无管理员权限安装 pnpm：
+   `npm.cmd config set prefix "$env:APPDATA\npm"`
+   `npm.cmd install -g pnpm`
+   `$env:Path += ";$env:APPDATA\npm"`
+4. 若 `pnpm` 被执行策略拦截（`PSSecurityException`），先用：
+   `pnpm.cmd -v`
+5. 持久化 PATH（一次）后重开 PowerShell：
+   `$userPath=[Environment]::GetEnvironmentVariable("Path","User"); if($userPath -notlike "*$env:APPDATA\npm*"){[Environment]::SetEnvironmentVariable("Path","$userPath;$env:APPDATA\npm","User")}`
+
 ```bash
 pnpm install
 pnpm dev

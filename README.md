@@ -95,6 +95,20 @@ uv run rasa run actions --actions actions --port 5055
 ```
 
 ### 3.5 启动前端
+Windows PowerShell 速查（对应位置：根目录 `README` 的本节、`frontend/README` 第 4 节）：
+
+1. 先确认：`npm.cmd -v` 正常、`where.exe pnpm` 找不到（表示 npm 有，pnpm 没装好）。
+2. 如果 `corepack` 或 `pnpm` 联网失败，先清代理（本机曾出现 `127.0.0.1:9`）：
+   `Remove-Item Env:HTTP_PROXY,Env:HTTPS_PROXY,Env:ALL_PROXY -ErrorAction SilentlyContinue`
+3. 无管理员权限安装 pnpm（推荐）：
+   `npm.cmd config set prefix "$env:APPDATA\npm"`
+   `npm.cmd install -g pnpm`
+   `$env:Path += ";$env:APPDATA\npm"`
+4. 如果 `pnpm -v` 被 `PSSecurityException` 拦截，改用：
+   `pnpm.cmd -v`
+5. 持久化 PATH（只需一次）并重开 PowerShell：
+   `$userPath=[Environment]::GetEnvironmentVariable("Path","User"); if($userPath -notlike "*$env:APPDATA\npm*"){[Environment]::SetEnvironmentVariable("Path","$userPath;$env:APPDATA\npm","User")}`
+
 ```bash
 cd frontend
 pnpm install
