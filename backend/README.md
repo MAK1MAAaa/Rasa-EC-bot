@@ -212,14 +212,25 @@ uv run uvicorn app.main:app --reload
 - `GET /api/v1/chat/internal/after-sales-summary`
 
 ### 8.4 客服自动执行（二次确认）
-- 入口：`POST /api/v1/chat/send`
+- 入口：
+  - `POST /api/v1/chat/send`
+  - `POST /api/v1/chat/pending-action/decision`
 - 支持动作：
   - 自动下单（基于当前用户购物车）
   - 自动发起退款/换货（基于订单号）
+- 权限约束：
+  - 商家账号调用 `POST /api/v1/chat/send` 将返回 `403`
 - 安全机制：
   - 首次只生成“待确认草案”
-  - 用户必须回复 `确认 <确认码>` 才会执行
-  - 回复 `取消 <确认码>` 可放弃执行
+  - 用户通过前端弹窗按钮确认/取消（无需确认码）
+  - 待确认动作默认 5 分钟有效（`CHAT_ACTION_TTL_SEC`）
+
+### 8.5 客服消息结构化协议
+- `POST /api/v1/chat/send` 返回 `messages[]`，每条消息支持：
+  - `text: string`
+  - `cards: ChatCard[]`（可选）
+  - `actions: ChatAction[]`（可选）
+- 后端会透传 Rasa `custom.cards/actions`，前端可直接渲染卡片；旧客户端可仅使用 `text` 字段。
 
 ## 9. 种子账号
 统一密码：`password123`

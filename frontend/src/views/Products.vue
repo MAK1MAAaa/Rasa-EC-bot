@@ -273,7 +273,7 @@ onBeforeUnmount(() => {
     <div class="hero">
       <h1>本周热卖</h1>
       <div class="hero-actions">
-        <button class="chat-link" type="button" @click="router.push('/chat')">问客服</button>
+        <button v-if="!authStore.isMerchant" class="chat-link" type="button" @click="router.push('/chat')">问客服</button>
         <button class="ghost-link" type="button" @click="showFilters = !showFilters">{{ showFilters ? '收起筛选' : '筛选' }}</button>
       </div>
     </div>

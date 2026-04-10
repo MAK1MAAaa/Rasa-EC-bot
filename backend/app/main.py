@@ -31,6 +31,8 @@ from .database import engine, get_session
 from .models import (
     ChatAfterSalesSummaryItem,
     ChatAfterSalesSummaryResponse,
+    ChatAction,
+    ChatCard,
     ChatOrderLogisticsSummaryItem,
     ChatOrderLogisticsSummaryResponse,
     AfterSales,
@@ -41,6 +43,7 @@ from .models import (
     CartResponse,
     ChatOrderSummaryItem,
     ChatOrderSummaryResponse,
+    ChatPendingActionDecisionRequest,
     ChatReplyMessage,
     ChatSendRequest,
     ChatSendResponse,
@@ -296,10 +299,6 @@ def now_unix_ts() -> int:
     return int(datetime.utcnow().timestamp())
 
 
-def generate_chat_action_code() -> str:
-    return f"{randint(100000, 999999)}"
-
-
 async def get_pending_chat_action(user_id: UUID) -> dict[str, Any] | None:
     key = chat_pending_action_cache_key(user_id)
     payload: dict[str, Any] | None = None
@@ -340,19 +339,112 @@ async def clear_pending_chat_action(user_id: UUID) -> None:
         PENDING_CHAT_ACTION_MEMORY.pop(key, None)
 
 
-def parse_confirmation_command(message: str) -> tuple[str, str | None] | None:
+def normalize_chat_cards(raw_cards: Any) -> list[ChatCard]:
+    if not isinstance(raw_cards, list):
+        return []
+
+    cards: list[ChatCard] = []
+    for raw_card in raw_cards:
+        if not isinstance(raw_card, dict):
+            continue
+        card_type = str(raw_card.get("type") or "").strip()
+        if not card_type:
+            continue
+        data = raw_card.get("data")
+        cards.append(ChatCard(type=card_type, data=data if isinstance(data, dict) else {}))
+    return cards
+
+
+def normalize_chat_actions(raw_actions: Any) -> list[ChatAction]:
+    if not isinstance(raw_actions, list):
+        return []
+
+    actions: list[ChatAction] = []
+    for raw_action in raw_actions:
+        if not isinstance(raw_action, dict):
+            continue
+        action_type = str(raw_action.get("type") or "").strip()
+        label = str(raw_action.get("label") or "").strip()
+        if not action_type or not label:
+            continue
+        payload = raw_action.get("payload")
+        style = raw_action.get("style")
+        actions.append(
+            ChatAction(
+                type=action_type,
+                label=label,
+                payload=payload if isinstance(payload, dict) else {},
+                style=str(style).strip() if isinstance(style, str) and style.strip() else None,
+            )
+        )
+    return actions
+
+
+def build_chat_message(
+    text: str,
+    *,
+    cards: Any = None,
+    actions: Any = None,
+) -> ChatReplyMessage:
+    return ChatReplyMessage(
+        text=(text or "").strip(),
+        cards=normalize_chat_cards(cards),
+        actions=normalize_chat_actions(actions),
+    )
+
+
+def parse_confirmation_command(message: str) -> str | None:
     text = (message or "").strip()
     if not text:
         return None
-    match = re.match(r"^(确认|取消|confirm|cancel)\s*([0-9]{4,8})?\s*[。.!！]?$", text, flags=re.IGNORECASE)
+
+    match = re.match(r"^(确认|取消|confirm|cancel)\s*[。.!！]?$", text, flags=re.IGNORECASE)
     if not match:
         return None
 
     action_raw = (match.group(1) or "").strip().lower()
-    code_raw = (match.group(2) or "").strip() or None
-    if action_raw in {"确认", "confirm"}:
-        return "confirm", code_raw
-    return "cancel", code_raw
+    return "confirm" if action_raw in {"确认", "confirm"} else "cancel"
+
+
+def build_pending_action_card(pending: dict[str, Any]) -> dict[str, Any]:
+    action_type = str(pending.get("type") or "").strip()
+    summary = pending.get("summary") if isinstance(pending.get("summary"), dict) else {}
+    details_raw = summary.get("details") if isinstance(summary.get("details"), list) else []
+    details: list[dict[str, str]] = []
+
+    for raw_item in details_raw:
+        if not isinstance(raw_item, dict):
+            continue
+        label = str(raw_item.get("label") or "").strip()
+        value = str(raw_item.get("value") or "").strip()
+        if label and value:
+            details.append({"label": label, "value": value})
+
+    return {
+        "action_type": action_type,
+        "title": str(summary.get("title") or "待确认操作"),
+        "description": str(summary.get("description") or ""),
+        "details": details,
+        "created_at": str(pending.get("created_at") or ""),
+        "expires_at_ts": int(pending.get("expires_at_ts") or 0),
+    }
+
+
+def build_pending_action_buttons() -> list[dict[str, Any]]:
+    return [
+        {
+            "type": "pending_action_decision",
+            "label": "确认执行",
+            "style": "primary",
+            "payload": {"decision": "confirm"},
+        },
+        {
+            "type": "pending_action_decision",
+            "label": "取消操作",
+            "style": "danger",
+            "payload": {"decision": "cancel"},
+        },
+    ]
 
 
 def extract_email_from_message(message: str) -> str | None:
@@ -444,18 +536,18 @@ async def has_active_after_sales_request(session: AsyncSession, order_id: str) -
     return result.scalar_one_or_none() is not None
 
 
-async def prepare_checkout_chat_action(message: str, current_user: User, session: AsyncSession) -> str:
+async def prepare_checkout_chat_action(message: str, current_user: User, session: AsyncSession) -> ChatReplyMessage:
     rows = await fetch_cart_rows(session, current_user.id)
     if not rows:
-        return "购物车是空的，先去加购商品后我再帮你下单。"
+        return build_chat_message("购物车是空的，先去加购商品后我再帮你下单。")
 
     shop_ids = {product.shop_id for _, product in rows}
     if len(shop_ids) > 1:
-        return "当前购物车包含多个店铺商品，暂时只能同店铺下单。请先整理购物车后再试。"
+        return build_chat_message("当前购物车包含多个店铺商品，暂时只能同店铺下单。请先整理购物车后再试。")
 
     for cart_item, product in rows:
         if cart_item.quantity > product.stock:
-            return f"商品「{product.name}」库存不足，请先调整购物车数量。"
+            return build_chat_message(f"商品「{product.name}」库存不足，请先调整购物车数量。")
 
     address = extract_address_from_message(message)
     if not address:
@@ -466,11 +558,10 @@ async def prepare_checkout_chat_action(message: str, current_user: User, session
     contact_email = extract_email_from_message(message) or normalize_email(current_user.email)
 
     if not address:
-        return "可以帮你自动下单。请补充收货地址，例如：下单 地址: 上海市浦东新区XX路88号。"
+        return build_chat_message("可以帮你自动下单。请补充收货地址，例如：下单 地址: 上海市浦东新区XX路88号。")
     if not contact_email:
-        return "请补充联系邮箱，例如：下单 邮箱: your@email.com。"
+        return build_chat_message("请补充联系邮箱，例如：下单 邮箱: your@email.com。")
 
-    code = generate_chat_action_code()
     item_count = sum(cart_item.quantity for cart_item, _ in rows)
     total_amount = round(sum(float(product.price) * cart_item.quantity for cart_item, product in rows), 2)
     preview_names = "、".join(product.name for _, product in rows[:3])
@@ -479,49 +570,53 @@ async def prepare_checkout_chat_action(message: str, current_user: User, session
 
     pending_payload = {
         "type": CHAT_ACTION_TYPE_CHECKOUT,
-        "code": code,
         "created_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
         "expires_at_ts": now_unix_ts() + CHAT_ACTION_TTL_SEC,
         "payload": {
             "address": address,
             "contact_email": contact_email,
         },
+        "summary": {
+            "title": "自动下单草案",
+            "description": "请在弹窗中确认或取消。",
+            "details": [
+                {"label": "商品", "value": preview_names},
+                {"label": "件数", "value": str(item_count)},
+                {"label": "总额", "value": f"¥ {total_amount:.2f}"},
+                {"label": "收货地址", "value": address},
+                {"label": "联系邮箱", "value": contact_email},
+            ],
+        },
     }
     await set_pending_chat_action(current_user.id, pending_payload)
 
-    return (
-        "已生成下单草案，请二次确认：\n"
-        f"- 商品：{preview_names}\n"
-        f"- 件数：{item_count}\n"
-        f"- 总额：¥ {total_amount:.2f}\n"
-        f"- 收货地址：{address}\n"
-        f"- 联系邮箱：{contact_email}\n"
-        f"回复「确认 {code}」立即下单，回复「取消 {code}」放弃本次操作（5分钟内有效）。"
+    return build_chat_message(
+        "已生成下单草案，请在下方卡片中确认或取消（5分钟内有效）。",
+        cards=[{"type": "pending_action", "data": build_pending_action_card(pending_payload)}],
+        actions=build_pending_action_buttons(),
     )
 
 
-async def prepare_after_sales_chat_action(message: str, current_user: User, session: AsyncSession) -> str:
+async def prepare_after_sales_chat_action(message: str, current_user: User, session: AsyncSession) -> ChatReplyMessage:
     order_id = extract_order_id_from_message(message)
     if not order_id:
-        return "请提供订单号后我才能帮你发起退款/换货，例如：申请退款 ORD202604010001 原因: 尺寸不合适。"
+        return build_chat_message("请提供订单号后我才能帮你发起退款/换货，例如：申请退款 ORD202604010001 原因: 尺寸不合适。")
 
     reason = extract_reason_from_message(message)
     if not reason:
-        return "请补充售后原因，例如：申请退款 ORD202604010001 原因: 商品与描述不符。"
+        return build_chat_message("请补充售后原因，例如：申请退款 ORD202604010001 原因: 商品与描述不符。")
 
     request_type = AFTER_SALES_TYPE_EXCHANGE if "换货" in message else AFTER_SALES_TYPE_RETURN
     order = await get_order_or_404(session, order_id)
     if order.user_id != current_user.id:
-        return "该订单不属于当前登录账号，无法为你发起售后。"
+        return build_chat_message("该订单不属于当前登录账号，无法为你发起售后。")
     if order.status != ORDER_STATUS_SHIPPED:
-        return "订单未发货完成，当前还不能发起退款/换货。"
+        return build_chat_message("订单未发货完成，当前还不能发起退款/换货。")
     if await has_active_after_sales_request(session, order.id):
-        return "该订单已有进行中的售后申请，请等待商家处理。"
+        return build_chat_message("该订单已有进行中的售后申请，请等待商家处理。")
 
-    code = generate_chat_action_code()
     pending_payload = {
         "type": CHAT_ACTION_TYPE_AFTER_SALES,
-        "code": code,
         "created_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
         "expires_at_ts": now_unix_ts() + CHAT_ACTION_TTL_SEC,
         "payload": {
@@ -529,16 +624,22 @@ async def prepare_after_sales_chat_action(message: str, current_user: User, sess
             "request_type": request_type,
             "reason": reason,
         },
+        "summary": {
+            "title": "自动售后草案",
+            "description": "请在弹窗中确认或取消。",
+            "details": [
+                {"label": "订单号", "value": order.id},
+                {"label": "类型", "value": "换货" if request_type == AFTER_SALES_TYPE_EXCHANGE else "退款/退货"},
+                {"label": "原因", "value": reason},
+            ],
+        },
     }
     await set_pending_chat_action(current_user.id, pending_payload)
 
-    display_type = "换货" if request_type == AFTER_SALES_TYPE_EXCHANGE else "退款/退货"
-    return (
-        "已生成售后申请草案，请二次确认：\n"
-        f"- 订单号：{order.id}\n"
-        f"- 类型：{display_type}\n"
-        f"- 原因：{reason}\n"
-        f"回复「确认 {code}」提交申请，回复「取消 {code}」放弃本次操作（5分钟内有效）。"
+    return build_chat_message(
+        "已生成售后申请草案，请在下方卡片中确认或取消（5分钟内有效）。",
+        cards=[{"type": "pending_action", "data": build_pending_action_card(pending_payload)}],
+        actions=build_pending_action_buttons(),
     )
 
 
@@ -546,7 +647,7 @@ async def execute_pending_checkout_action(
     current_user: User,
     session: AsyncSession,
     payload: dict[str, Any],
-) -> str:
+) -> ChatReplyMessage:
     address = (payload.get("address") or "").strip()
     contact_email = normalize_email((payload.get("contact_email") or "").strip())
     if not address or not contact_email:
@@ -558,9 +659,22 @@ async def execute_pending_checkout_action(
         current_user=current_user,
     )
     base_url = FRONTEND_BASE_URL.rstrip("/")
-    return (
-        f"下单成功，订单号：{order_detail.id}\n"
-        f"订单详情：{base_url}/order/{order_detail.id}"
+    item_count = sum(int(item.quantity) for item in order_detail.items)
+    return build_chat_message(
+        "下单成功，订单已创建。",
+        cards=[
+            {
+                "type": "order",
+                "data": {
+                    "id": order_detail.id,
+                    "status": order_detail.status,
+                    "total_amount": float(order_detail.total_amount),
+                    "item_count": item_count,
+                    "created_at": order_detail.created_at.isoformat(),
+                    "order_link": f"{base_url}/order/{order_detail.id}",
+                },
+            }
+        ],
     )
 
 
@@ -568,7 +682,7 @@ async def execute_pending_after_sales_action(
     current_user: User,
     session: AsyncSession,
     payload: dict[str, Any],
-) -> str:
+) -> ChatReplyMessage:
     order_id = (payload.get("order_id") or "").strip()
     request_type = normalize_after_sales_type(str(payload.get("request_type") or AFTER_SALES_TYPE_RETURN))
     reason = (payload.get("reason") or "").strip()
@@ -581,15 +695,81 @@ async def execute_pending_after_sales_action(
         session=session,
         current_user=current_user,
     )
+    order = await get_order_or_404(session, order_id)
+    count_result = await session.execute(select(func.count(OrderItem.id)).where(OrderItem.order_id == order_id))
+    item_count = int(count_result.scalar_one() or 0)
     base_url = FRONTEND_BASE_URL.rstrip("/")
     type_label = "换货" if request_type == AFTER_SALES_TYPE_EXCHANGE else "退款/退货"
-    return (
-        f"{type_label}申请已提交，申请编号：{result.id}\n"
-        f"订单详情：{base_url}/order/{order_id}"
+    order_link = f"{base_url}/order/{order_id}"
+    return build_chat_message(
+        f"{type_label}申请已提交。",
+        cards=[
+            {
+                "type": "after_sales",
+                "data": {
+                    "id": str(result.id),
+                    "order_id": order_id,
+                    "type": request_type,
+                    "status": result.status,
+                    "created_at": result.created_at.isoformat(),
+                    "reason": reason,
+                    "order_link": order_link,
+                },
+            },
+            {
+                "type": "order",
+                "data": {
+                    "id": order.id,
+                    "status": order.status,
+                    "total_amount": float(order.total_amount),
+                    "item_count": item_count,
+                    "created_at": order.created_at.isoformat(),
+                    "order_link": order_link,
+                },
+            },
+        ],
     )
 
 
-async def handle_chat_transaction_action(message: str, current_user: User, session: AsyncSession) -> str | None:
+async def decide_pending_chat_action(
+    decision: str,
+    current_user: User,
+    session: AsyncSession,
+) -> ChatReplyMessage:
+    normalized_decision = (decision or "").strip().lower()
+    if normalized_decision not in {"confirm", "cancel"}:
+        raise HTTPException(status_code=400, detail="decision must be confirm or cancel")
+
+    pending = await get_pending_chat_action(current_user.id)
+    if not pending:
+        return build_chat_message("当前没有待确认的自动操作。")
+
+    if normalized_decision == "cancel":
+        await clear_pending_chat_action(current_user.id)
+        return build_chat_message("已取消本次自动操作。")
+
+    action_type = str(pending.get("type") or "").strip()
+    action_payload = pending.get("payload") if isinstance(pending.get("payload"), dict) else {}
+
+    try:
+        if action_type == CHAT_ACTION_TYPE_CHECKOUT:
+            result_message = await execute_pending_checkout_action(current_user, session, action_payload)
+        elif action_type == CHAT_ACTION_TYPE_AFTER_SALES:
+            result_message = await execute_pending_after_sales_action(current_user, session, action_payload)
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported pending action type")
+    except HTTPException as exc:
+        await clear_pending_chat_action(current_user.id)
+        return build_chat_message(f"自动执行失败：{exc.detail}。本次待确认操作已清除，请重新发起。")
+    except Exception:
+        await clear_pending_chat_action(current_user.id)
+        return build_chat_message("自动执行失败：服务出现异常。本次待确认操作已清除，请稍后重试。")
+
+    await clear_pending_chat_action(current_user.id)
+    return result_message
+
+
+async def handle_chat_transaction_action(message: str, current_user: User, session: AsyncSession) -> ChatReplyMessage | None:
     if normalize_role(current_user.role) != "customer":
         return None
 
@@ -597,42 +777,14 @@ async def handle_chat_transaction_action(message: str, current_user: User, sessi
     command = parse_confirmation_command(message)
 
     if command:
-        action, input_code = command
-        if not pending:
-            return "当前没有待确认的自动操作。"
-
-        pending_code = str(pending.get("code") or "").strip()
-        if not input_code and pending_code:
-            return f"为确保安全，请带确认码回复：确认 {pending_code}（或 取消 {pending_code}）。"
-        if input_code and pending_code and input_code != pending_code:
-            return "确认码不匹配，请核对后重试。"
-
-        if action == "cancel":
-            await clear_pending_chat_action(current_user.id)
-            return "已取消本次自动操作。"
-
-        action_type = str(pending.get("type") or "").strip()
-        action_payload = pending.get("payload") if isinstance(pending.get("payload"), dict) else {}
-        try:
-            if action_type == CHAT_ACTION_TYPE_CHECKOUT:
-                result_message = await execute_pending_checkout_action(current_user, session, action_payload)
-            elif action_type == CHAT_ACTION_TYPE_AFTER_SALES:
-                result_message = await execute_pending_after_sales_action(current_user, session, action_payload)
-            else:
-                raise HTTPException(status_code=400, detail="Unsupported pending action type")
-        except HTTPException as exc:
-            await clear_pending_chat_action(current_user.id)
-            return f"自动执行失败：{exc.detail}。本次待确认操作已清除，请重新发起。"
-        except Exception:
-            await clear_pending_chat_action(current_user.id)
-            return "自动执行失败：服务出现异常。本次待确认操作已清除，请稍后重试。"
-
-        await clear_pending_chat_action(current_user.id)
-        return result_message
+        return await decide_pending_chat_action(command, current_user, session)
 
     if pending and (is_checkout_request(message) or is_after_sales_request(message)):
-        pending_code = str(pending.get("code") or "").strip()
-        return f"你有待确认操作。请先回复「确认 {pending_code}」或「取消 {pending_code}」。"
+        return build_chat_message(
+            "你有待确认操作，请先在下方卡片中确认或取消。",
+            cards=[{"type": "pending_action", "data": build_pending_action_card(pending)}],
+            actions=build_pending_action_buttons(),
+        )
 
     if is_checkout_request(message):
         return await prepare_checkout_chat_action(message, current_user, session)
@@ -1267,6 +1419,19 @@ async def root():
     return {"message": "Welcome to Rasa-EC-bot API"}
 
 
+@app.post("/api/v1/chat/pending-action/decision", response_model=ChatSendResponse)
+async def chat_pending_action_decision(
+    payload: ChatPendingActionDecisionRequest,
+    current_user: User = Depends(get_current_db_user),
+    session: AsyncSession = Depends(get_session),
+):
+    if normalize_role(current_user.role) != "customer":
+        raise HTTPException(status_code=403, detail="Only customer accounts can decide pending chat actions")
+
+    reply = await decide_pending_chat_action(payload.decision, current_user, session)
+    return ChatSendResponse(messages=[reply])
+
+
 @app.post("/api/v1/chat/send", response_model=ChatSendResponse)
 async def chat_send(
     payload: ChatSendRequest,
@@ -1278,10 +1443,13 @@ async def chat_send(
         raise HTTPException(status_code=400, detail="message cannot be empty")
 
     current_user = await get_current_db_user_optional(request, session)
+    if current_user and normalize_role(current_user.role) == "merchant":
+        raise HTTPException(status_code=403, detail="Merchant accounts cannot access chat support")
+
     if current_user:
         transaction_reply = await handle_chat_transaction_action(message, current_user, session)
         if transaction_reply:
-            return ChatSendResponse(messages=[ChatReplyMessage(text=transaction_reply)])
+            return ChatSendResponse(messages=[transaction_reply])
 
     sender_id = (payload.sender_id or "").strip() or (f"user-{current_user.id}" if current_user else "web_user")
     metadata = {
@@ -1318,12 +1486,25 @@ async def chat_send(
     messages: list[ChatReplyMessage] = []
     for item in data:
         if isinstance(item, dict):
+            custom_payload = item.get("custom") if isinstance(item.get("custom"), dict) else {}
             text = item.get("text")
-            if isinstance(text, str) and text.strip():
-                messages.append(ChatReplyMessage(text=text.strip()))
+            if not isinstance(text, str):
+                custom_text = custom_payload.get("text")
+                text = custom_text if isinstance(custom_text, str) else ""
+
+            cards = item.get("cards")
+            actions = item.get("actions")
+            if cards is None:
+                cards = custom_payload.get("cards")
+            if actions is None:
+                actions = custom_payload.get("actions")
+
+            parsed = build_chat_message(text or "", cards=cards, actions=actions)
+            if parsed.text or parsed.cards or parsed.actions:
+                messages.append(parsed)
 
     if not messages:
-        messages.append(ChatReplyMessage(text="Sorry, no reply was generated. Please try again later."))
+        messages.append(build_chat_message("暂时没有生成有效回复，请稍后重试。"))
     return ChatSendResponse(messages=messages)
 
 

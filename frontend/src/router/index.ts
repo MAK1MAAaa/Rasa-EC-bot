@@ -102,6 +102,10 @@ router.beforeEach((to) => {
     return '/merchant'
   }
 
+  if (to.path.startsWith('/chat') && role === 'merchant') {
+    return '/merchant'
+  }
+
   if (to.meta.guestOnly && token) {
     return role === 'merchant' ? '/merchant' : '/products'
   }

@@ -37,7 +37,6 @@ const logout = () => {
 
       <nav v-if="authStore.isMerchant" class="header-nav">
         <router-link :class="navClass('/merchant')" to="/merchant">商家台</router-link>
-        <router-link :class="navClass('/chat')" to="/chat">客服</router-link>
       </nav>
 
       <nav v-else class="header-nav">

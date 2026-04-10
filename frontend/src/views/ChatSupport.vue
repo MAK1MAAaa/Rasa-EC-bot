@@ -1,12 +1,29 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import api from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 
+type ChatBubbleRole = 'user' | 'bot' | 'system'
+type PendingDecision = 'confirm' | 'cancel'
+
+interface ChatCard {
+  type: string
+  data: Record<string, any>
+}
+
+interface ChatAction {
+  type: string
+  label: string
+  payload: Record<string, any>
+  style?: string
+}
+
 interface ChatBubble {
   id: string
-  role: 'user' | 'bot' | 'system'
+  role: ChatBubbleRole
   text: string
+  cards: ChatCard[]
+  actions: ChatAction[]
 }
 
 interface ChatSession {
@@ -17,8 +34,14 @@ interface ChatSession {
   bubbles: ChatBubble[]
 }
 
+interface ChatMessagePayload {
+  text?: string
+  cards?: any
+  actions?: any
+}
+
 interface ChatSendResponse {
-  messages: Array<{ text: string }>
+  messages: ChatMessagePayload[]
 }
 
 const authStore = useAuthStore()
@@ -46,6 +69,46 @@ const readOrCreateGuestId = () => {
   return next
 }
 
+const sanitizeCards = (rawCards: any): ChatCard[] => {
+  if (!Array.isArray(rawCards)) return []
+  return rawCards
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null
+      const type = typeof item.type === 'string' ? item.type.trim() : ''
+      if (!type) return null
+      const data = item.data && typeof item.data === 'object' && !Array.isArray(item.data) ? item.data : {}
+      return { type, data }
+    })
+    .filter((item): item is ChatCard => !!item)
+}
+
+const sanitizeActions = (rawActions: any): ChatAction[] => {
+  if (!Array.isArray(rawActions)) return []
+  return rawActions
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null
+      const type = typeof item.type === 'string' ? item.type.trim() : ''
+      const label = typeof item.label === 'string' ? item.label.trim() : ''
+      if (!type || !label) return null
+      const payload = item.payload && typeof item.payload === 'object' && !Array.isArray(item.payload) ? item.payload : {}
+      return {
+        type,
+        label,
+        payload,
+        style: typeof item.style === 'string' && item.style.trim() ? item.style.trim() : undefined
+      }
+    })
+    .filter((item): item is ChatAction => !!item)
+}
+
+const buildBubble = (role: ChatBubbleRole, text: string, cards: ChatCard[] = [], actions: ChatAction[] = []): ChatBubble => ({
+  id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  role,
+  text,
+  cards,
+  actions
+})
+
 const guestIdentity = ref(readOrCreateGuestId())
 const principalId = computed(() => authStore.user?.id || guestIdentity.value)
 const sessionsStorageKey = computed(() => `${CHAT_STORAGE_PREFIX}:${principalId.value}`)
@@ -54,11 +117,23 @@ const activeStorageKey = computed(() => `${CHAT_ACTIVE_PREFIX}:${principalId.val
 const sessions = ref<ChatSession[]>([])
 const activeSessionId = ref('')
 
-const buildWelcomeBubble = (): ChatBubble => ({
-  id: `welcome-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-  role: 'bot',
-  text: '你好，我是商城客服。可以查订单/物流/售后，也可以帮你自动下单或发起退款申请。涉及资金和售后时会先给你确认码，只有你回复“确认 + 确认码”才会执行。'
+const decisionModal = ref<{
+  visible: boolean
+  decision: PendingDecision
+  card: ChatCard | null
+  loading: boolean
+}>({
+  visible: false,
+  decision: 'confirm',
+  card: null,
+  loading: false
 })
+
+const buildWelcomeBubble = (): ChatBubble =>
+  buildBubble(
+    'bot',
+    '你好，我是商城客服。可以查订单/物流/售后，也可以帮你自动下单或发起退款申请。涉及资金和售后时，会弹出确认卡片供你确认或取消。'
+  )
 
 const deriveSessionTitle = (session: ChatSession) => {
   const firstUser = session.bubbles.find((item) => item.role === 'user' && item.text.trim())
@@ -87,12 +162,19 @@ const safeParseSessions = (raw: string | null): ChatSession[] => {
       .map((item) => {
         const bubbles = Array.isArray(item?.bubbles)
           ? item.bubbles
-              .filter((b: any) => ['user', 'bot', 'system'].includes(b?.role) && typeof b?.text === 'string')
-              .map((b: any) => ({
-                id: typeof b.id === 'string' && b.id ? b.id : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-                role: b.role as ChatBubble['role'],
-                text: String(b.text)
-              }))
+              .filter((b: any) => ['user', 'bot', 'system'].includes(b?.role))
+              .map((b: any) => {
+                const text = typeof b?.text === 'string' ? b.text : ''
+                const cards = sanitizeCards(b?.cards)
+                const actions = sanitizeActions(b?.actions)
+                return {
+                  id: typeof b?.id === 'string' && b.id ? b.id : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                  role: b.role as ChatBubbleRole,
+                  text,
+                  cards,
+                  actions
+                }
+              })
           : []
 
         const fallback = createSession()
@@ -123,6 +205,25 @@ const bubbles = computed(() => currentSession.value?.bubbles || [])
 const userLabel = computed(() => authStore.user?.username || '游客')
 const senderId = computed(() => `${principalId.value}:${activeSessionId.value || 'default'}`)
 
+const modalTitle = computed(() => (decisionModal.value.decision === 'confirm' ? '确认执行该操作？' : '确认取消该操作？'))
+const modalConfirmLabel = computed(() => {
+  if (decisionModal.value.loading) return '处理中...'
+  return decisionModal.value.decision === 'confirm' ? '确认执行' : '确认取消'
+})
+
+const modalCardDetails = computed(() => {
+  const card = decisionModal.value.card
+  if (!card || card.type !== 'pending_action') return [] as Array<{ label: string; value: string }>
+  const details = Array.isArray(card.data?.details) ? card.data.details : []
+  return details
+    .map((item: any) => {
+      const label = typeof item?.label === 'string' ? item.label.trim() : ''
+      const value = typeof item?.value === 'string' ? item.value.trim() : ''
+      return label && value ? { label, value } : null
+    })
+    .filter((item: any): item is { label: string; value: string } => !!item)
+})
+
 const ensureCurrentSession = () => {
   if (currentSession.value) return currentSession.value
   const first = sessions.value[0]
@@ -150,15 +251,34 @@ const touchSession = (session: ChatSession) => {
   moveSessionToTop(session.id)
 }
 
-const pushBubble = (role: ChatBubble['role'], text: string) => {
+const pushBubble = (role: ChatBubbleRole, text: string, cards: ChatCard[] = [], actions: ChatAction[] = []) => {
   const session = ensureCurrentSession()
-  session.bubbles.push({
-    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    role,
-    text
-  })
+  session.bubbles.push(buildBubble(role, text, cards, actions))
   touchSession(session)
   persistChatState()
+}
+
+const appendReplyMessages = (messages: ChatMessagePayload[]) => {
+  const replies = Array.isArray(messages) ? messages : []
+  if (replies.length === 0) {
+    pushBubble('bot', '暂时没有回复，请稍后重试。')
+    return
+  }
+
+  let hasValidReply = false
+  replies.forEach((item) => {
+    const text = typeof item?.text === 'string' ? item.text.trim() : ''
+    const cards = sanitizeCards(item?.cards)
+    const actions = sanitizeActions(item?.actions)
+    if (text || cards.length > 0 || actions.length > 0) {
+      hasValidReply = true
+      pushBubble('bot', text, cards, actions)
+    }
+  })
+
+  if (!hasValidReply) {
+    pushBubble('bot', '暂时没有回复，请稍后重试。')
+  }
 }
 
 const createNewSession = () => {
@@ -258,6 +378,16 @@ const linkTarget = (rawUrl: string) => {
   }
 }
 
+const openLink = (rawUrl: string) => {
+  const href = rewriteChatLink(rawUrl)
+  const target = linkTarget(rawUrl)
+  if (target === '_self') {
+    window.location.href = href
+    return
+  }
+  window.open(href, '_blank', 'noopener,noreferrer')
+}
+
 const renderMessageHtml = (value: string) => {
   const urlRegex = /https?:\/\/[^\s<]+/g
   let output = ''
@@ -280,6 +410,108 @@ const renderMessageHtml = (value: string) => {
   return output.replace(/\n/g, '<br/>')
 }
 
+const orderStatusLabel = (status: string) => {
+  if (status === 'pending_shipment') return '待发货'
+  if (status === 'shipped') return '已发货'
+  return status || '未知状态'
+}
+
+const afterSalesStatusLabel = (status: string) => {
+  const map: Record<string, string> = {
+    submitted: '待商家处理',
+    merchant_approved: '商家已同意',
+    processing: '处理中',
+    merchant_rejected: '商家已拒绝',
+    completed: '已完成',
+    cancelled: '已取消'
+  }
+  return map[status] || status || '未知状态'
+}
+
+const afterSalesTypeLabel = (value: string) => {
+  if (value === 'return') return '退货'
+  if (value === 'exchange') return '换货'
+  return value || '售后'
+}
+
+const getText = (value: any, fallback = '-') => {
+  if (typeof value !== 'string') return fallback
+  const cleaned = value.trim()
+  return cleaned || fallback
+}
+
+const getNum = (value: any, fallback = 0) => {
+  const num = Number(value)
+  return Number.isFinite(num) ? num : fallback
+}
+
+const formatMoney = (value: any) => `¥ ${getNum(value).toFixed(2)}`
+
+const formatDateText = (value: any) => {
+  if (typeof value !== 'string' || !value.trim()) return '-'
+  const dt = new Date(value)
+  if (Number.isNaN(dt.getTime())) return value
+  return dt.toLocaleString()
+}
+
+const findPendingCard = () => {
+  const current = bubbles.value
+  for (let i = current.length - 1; i >= 0; i -= 1) {
+    const card = current[i].cards.find((item) => item.type === 'pending_action')
+    if (card) return card
+  }
+  return null
+}
+
+const openDecisionModal = (decision: PendingDecision, card?: ChatCard | null) => {
+  decisionModal.value.visible = true
+  decisionModal.value.decision = decision
+  decisionModal.value.loading = false
+  decisionModal.value.card = card || findPendingCard()
+}
+
+const closeDecisionModal = () => {
+  if (decisionModal.value.loading) return
+  decisionModal.value.visible = false
+  decisionModal.value.card = null
+}
+
+const submitPendingDecision = async () => {
+  if (decisionModal.value.loading) return
+  decisionModal.value.loading = true
+
+  const decision = decisionModal.value.decision
+  pushBubble('user', decision === 'confirm' ? '确认执行' : '取消操作')
+
+  try {
+    const response = await api.post<ChatSendResponse>('/chat/pending-action/decision', { decision })
+    appendReplyMessages(response.data.messages)
+    decisionModal.value.visible = false
+    decisionModal.value.card = null
+  } catch (err: any) {
+    pushBubble('system', err.response?.data?.detail || '确认操作失败，请稍后再试。')
+  } finally {
+    decisionModal.value.loading = false
+    await scrollToBottom()
+  }
+}
+
+const onBubbleAction = (action: ChatAction, cardContext?: ChatCard | null) => {
+  if (action.type === 'pending_action_decision') {
+    const decision = action.payload?.decision === 'cancel' ? 'cancel' : 'confirm'
+    openDecisionModal(decision, cardContext || null)
+    return
+  }
+
+  const actionUrl = typeof action.payload?.url === 'string' ? action.payload.url : ''
+  if (actionUrl) {
+    openLink(actionUrl)
+    return
+  }
+
+  pushBubble('system', '该操作暂不支持。')
+}
+
 const scrollToBottom = async () => {
   await nextTick()
   chatLogRef.value?.scrollTo({ top: chatLogRef.value.scrollHeight, behavior: 'smooth' })
@@ -298,16 +530,7 @@ const sendMessage = async (overrideText?: string) => {
       message,
       sender_id: senderId.value
     })
-    const replies = Array.isArray(response.data.messages) ? response.data.messages : []
-    if (replies.length === 0) {
-      pushBubble('bot', '暂时没有回复，请稍后重试。')
-    } else {
-      replies.forEach((item) => {
-        if (typeof item.text === 'string' && item.text.trim()) {
-          pushBubble('bot', item.text.trim())
-        }
-      })
-    }
+    appendReplyMessages(response.data.messages)
   } catch (err: any) {
     pushBubble('system', err.response?.data?.detail || '客服服务暂不可用，请稍后再试。')
   } finally {
@@ -379,7 +602,116 @@ watch(
         <div ref="chatLogRef" class="chat-log" role="log" aria-live="polite">
           <article v-for="item in bubbles" :key="item.id" :class="`bubble ${item.role}`">
             <span class="tag">{{ item.role === 'user' ? '我' : item.role === 'bot' ? '客服' : '系统' }}</span>
-            <p v-html="renderMessageHtml(item.text)"></p>
+            <p v-if="item.text" v-html="renderMessageHtml(item.text)"></p>
+
+            <div v-if="item.cards.length > 0" class="bubble-cards">
+              <article
+                v-for="(card, cardIndex) in item.cards"
+                :key="`${item.id}-${cardIndex}`"
+                :class="['chat-card', `type-${card.type}`]"
+              >
+                <template v-if="card.type === 'product'">
+                  <div class="card-head">
+                    <strong>{{ getText(card.data.name, '商品') }}</strong>
+                    <span class="pill">{{ getText(card.data.category, '未分类') }}</span>
+                  </div>
+                  <div class="card-row">
+                    <span>{{ formatMoney(card.data.price) }}</span>
+                    <span>库存 {{ getNum(card.data.stock) }}</span>
+                  </div>
+                  <div class="card-row muted" v-if="card.data.shop_name">{{ card.data.shop_name }}</div>
+                  <div class="card-actions" v-if="card.data.product_link">
+                    <button type="button" @click="openLink(card.data.product_link)">查看商品</button>
+                  </div>
+                </template>
+
+                <template v-else-if="card.type === 'order'">
+                  <div class="card-head">
+                    <strong>订单 {{ getText(card.data.id) }}</strong>
+                    <span class="pill">{{ getText(card.data.status_label, orderStatusLabel(getText(card.data.status, ''))) }}</span>
+                  </div>
+                  <div class="card-row">
+                    <span>{{ getNum(card.data.item_count) }} 件商品</span>
+                    <span>{{ formatMoney(card.data.total_amount) }}</span>
+                  </div>
+                  <div class="card-row muted">{{ formatDateText(card.data.created_at) }}</div>
+                  <div class="card-actions" v-if="card.data.order_link">
+                    <button type="button" @click="openLink(card.data.order_link)">查看订单</button>
+                  </div>
+                </template>
+
+                <template v-else-if="card.type === 'logistics'">
+                  <div class="card-head">
+                    <strong>物流 {{ getText(card.data.id) }}</strong>
+                    <span class="pill">{{ getText(card.data.status_label, orderStatusLabel(getText(card.data.status, ''))) }}</span>
+                  </div>
+                  <div class="card-row muted" v-if="card.data.tracking_no">运单号：{{ getText(card.data.tracking_no) }}</div>
+                  <div class="card-row muted" v-if="card.data.current_location">当前位置：{{ getText(card.data.current_location) }}</div>
+                  <div class="card-row muted" v-if="card.data.estimated_delivery_text || card.data.estimated_delivery_at">
+                    预计送达：{{ getText(card.data.estimated_delivery_text, formatDateText(card.data.estimated_delivery_at)) }}
+                  </div>
+                  <div class="card-row muted" v-if="Array.isArray(card.data.route_plan) && card.data.route_plan.length > 0">
+                    途径：{{ card.data.route_plan.join(' -> ') }}
+                  </div>
+                  <div class="card-actions" v-if="card.data.order_link">
+                    <button type="button" @click="openLink(card.data.order_link)">查看订单</button>
+                  </div>
+                </template>
+
+                <template v-else-if="card.type === 'after_sales'">
+                  <div class="card-head">
+                    <strong>售后 {{ getText(card.data.id) }}</strong>
+                    <span class="pill">{{ getText(card.data.status_label, afterSalesStatusLabel(getText(card.data.status, ''))) }}</span>
+                  </div>
+                  <div class="card-row">订单号：{{ getText(card.data.order_id) }}</div>
+                  <div class="card-row">类型：{{ getText(card.data.type_label, afterSalesTypeLabel(getText(card.data.type, ''))) }}</div>
+                  <div class="card-row muted" v-if="card.data.created_at_text || card.data.created_at">
+                    提交时间：{{ getText(card.data.created_at_text, formatDateText(card.data.created_at)) }}
+                  </div>
+                  <div class="card-row muted" v-if="card.data.reason">原因：{{ getText(card.data.reason) }}</div>
+                  <div class="card-actions" v-if="card.data.order_link">
+                    <button type="button" @click="openLink(card.data.order_link)">查看订单</button>
+                  </div>
+                </template>
+
+                <template v-else-if="card.type === 'pending_action'">
+                  <div class="card-head">
+                    <strong>{{ getText(card.data.title, '待确认操作') }}</strong>
+                    <span class="pill warn">待确认</span>
+                  </div>
+                  <div class="card-row muted" v-if="card.data.description">{{ getText(card.data.description, '') }}</div>
+                  <div v-if="Array.isArray(card.data.details)" class="detail-list">
+                    <div v-for="(detail, detailIndex) in card.data.details" :key="`${item.id}-${cardIndex}-${detailIndex}`" class="detail-item">
+                      <span>{{ getText(detail?.label, '-') }}</span>
+                      <strong>{{ getText(detail?.value, '-') }}</strong>
+                    </div>
+                  </div>
+                  <div class="card-actions">
+                    <button type="button" @click="openDecisionModal('confirm', card)">确认执行</button>
+                    <button type="button" class="danger" @click="openDecisionModal('cancel', card)">取消操作</button>
+                  </div>
+                </template>
+
+                <template v-else>
+                  <div class="card-head">
+                    <strong>{{ card.type }}</strong>
+                  </div>
+                  <div class="card-row muted">{{ JSON.stringify(card.data) }}</div>
+                </template>
+              </article>
+            </div>
+
+            <div v-if="item.actions.length > 0" class="bubble-actions">
+              <button
+                v-for="(action, actionIndex) in item.actions"
+                :key="`${item.id}-action-${actionIndex}`"
+                :class="action.style || ''"
+                type="button"
+                @click="onBubbleAction(action, item.cards.find((card) => card.type === 'pending_action') || null)"
+              >
+                {{ action.label }}
+              </button>
+            </div>
           </article>
         </div>
 
@@ -395,6 +727,27 @@ watch(
           </button>
         </div>
       </div>
+    </div>
+
+    <div v-if="decisionModal.visible" class="decision-mask" @click.self="closeDecisionModal">
+      <section class="decision-card">
+        <h3>{{ modalTitle }}</h3>
+        <p v-if="decisionModal.card?.data?.description" class="modal-desc">{{ getText(decisionModal.card.data.description, '') }}</p>
+
+        <div v-if="modalCardDetails.length > 0" class="detail-list">
+          <div v-for="(detail, index) in modalCardDetails" :key="`modal-${index}`" class="detail-item">
+            <span>{{ detail.label }}</span>
+            <strong>{{ detail.value }}</strong>
+          </div>
+        </div>
+
+        <div class="decision-actions">
+          <button type="button" class="ghost" :disabled="decisionModal.loading" @click="closeDecisionModal">返回</button>
+          <button type="button" :class="decisionModal.decision === 'confirm' ? 'primary' : 'danger'" :disabled="decisionModal.loading" @click="submitPendingDecision">
+            {{ modalConfirmLabel }}
+          </button>
+        </div>
+      </section>
     </div>
   </section>
 </template>
@@ -575,7 +928,7 @@ watch(
   scrollbar-color: rgba(87, 64, 31, 0.42) rgba(112, 92, 56, 0.12);
   background: transparent;
   display: grid;
-  gap: 2px;
+  gap: 6px;
 }
 
 .chat-log::-webkit-scrollbar {
@@ -598,7 +951,7 @@ watch(
 
 .bubble {
   width: fit-content;
-  max-width: min(84%, 720px);
+  max-width: min(90%, 760px);
   height: fit-content;
   border-radius: 14px;
   padding: 10px 12px;
@@ -606,7 +959,7 @@ watch(
   line-height: 1.65;
   white-space: pre-wrap;
   display: grid;
-  gap: 4px;
+  gap: 8px;
   border: 1px solid transparent;
 }
 
@@ -647,6 +1000,93 @@ watch(
   border-color: #fecdd3;
 }
 
+.bubble-cards {
+  display: grid;
+  gap: 8px;
+}
+
+.chat-card {
+  background: rgba(255, 255, 255, 0.75);
+  border: 1px solid #e6d8be;
+  border-radius: 12px;
+  padding: 10px;
+  display: grid;
+  gap: 6px;
+  color: #2d2416;
+}
+
+.card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.pill {
+  border-radius: 999px;
+  background: #f2e2c2;
+  color: #543f1e;
+  font-size: 11px;
+  padding: 4px 10px;
+}
+
+.pill.warn {
+  background: #feedd0;
+  color: #7a4b14;
+}
+
+.card-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.card-row.muted {
+  color: #6f6554;
+}
+
+.detail-list {
+  display: grid;
+  gap: 6px;
+}
+
+.detail-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  font-size: 13px;
+}
+
+.detail-item span {
+  color: #6f6554;
+}
+
+.card-actions,
+.bubble-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.card-actions button,
+.bubble-actions button {
+  border: none;
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: #2f2413;
+  color: #fff7ea;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.card-actions button.danger,
+.bubble-actions button.danger {
+  background: #be123c;
+}
+
 .input-row {
   border-top: 1px solid rgba(0, 0, 0, 0.05);
   margin-top: 0;
@@ -680,6 +1120,65 @@ watch(
   cursor: not-allowed;
 }
 
+.decision-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(31, 24, 13, 0.42);
+  display: grid;
+  place-items: center;
+  z-index: 40;
+  padding: 16px;
+}
+
+.decision-card {
+  width: min(520px, 100%);
+  background: #fffaf1;
+  border: 1px solid #e5d5b7;
+  border-radius: 16px;
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.decision-card h3 {
+  margin: 0;
+  color: #332717;
+}
+
+.modal-desc {
+  margin: 0;
+  color: #6f6554;
+  font-size: 14px;
+}
+
+.decision-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.decision-actions button {
+  border: none;
+  border-radius: 999px;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+
+.decision-actions .ghost {
+  background: #efe3cb;
+  color: #4d3a1e;
+}
+
+.decision-actions .primary {
+  background: #2f2413;
+  color: #fff7ea;
+}
+
+.decision-actions .danger {
+  background: #be123c;
+  color: #fff7fb;
+}
+
 :deep(.bubble a) {
   color: inherit;
   text-decoration: underline;
@@ -710,7 +1209,7 @@ watch(
   }
 
   .bubble {
-    max-width: 94%;
+    max-width: 96%;
   }
 
   .input-row {
@@ -720,5 +1219,10 @@ watch(
   .input-row button {
     min-height: 42px;
   }
+
+  .decision-actions {
+    flex-direction: column;
+  }
 }
 </style>
+

@@ -72,8 +72,11 @@ uv run rasa run actions --actions actions --port 5055
 - `action_query_after_sales`
 - `action_ollama_reply`
 
+以上查询 Action 已升级为结构化输出：在保留简短 `text` 的同时，返回 `json_message.cards`（商品/订单/物流/售后卡片）。
+
 ### 5.3 与后端联动接口
 - `POST /api/v1/chat/send`（前端 -> 后端 -> Rasa）
+- `POST /api/v1/chat/pending-action/decision`（前端二次确认 -> 后端执行）
 - `GET /api/v1/chat/internal/orders-summary`
 - `GET /api/v1/chat/internal/orders-logistics-summary`
 - `GET /api/v1/chat/internal/after-sales-summary`

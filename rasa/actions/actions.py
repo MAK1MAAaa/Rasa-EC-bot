@@ -106,6 +106,20 @@ def _build_headers() -> dict[str, str]:
     return headers
 
 
+def _safe_int(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _safe_float(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 class ActionOllamaReply(Action):
     def name(self) -> str:
         return 'action_ollama_reply'
@@ -182,22 +196,33 @@ class ActionRecommendProducts(Action):
             dispatcher.utter_message(text='暂时没有匹配的在售商品，你可以换个分类试试。')
             return []
 
-        lines: list[str] = []
+        cards: list[dict[str, Any]] = []
         for item in items:
             name = _safe_text(item.get('name')) or '未命名商品'
             cat = _safe_text(item.get('category')) or '未分类'
-            price = float(item.get('price', 0))
+            price = _safe_float(item.get('price'))
             product_id = _safe_text(item.get('id'))
-            if product_id:
-                product_link = f'{frontend_base_url}/products/{product_id}'
-                lines.append(f'- {name} | {cat} | ¥{price:.2f}\n  商品链接: {product_link}')
-            else:
-                lines.append(f'- {name} | {cat} | ¥{price:.2f}')
+            product_link = f'{frontend_base_url}/products/{product_id}' if product_id else ''
+            cards.append(
+                {
+                    'type': 'product',
+                    'data': {
+                        'id': product_id,
+                        'name': name,
+                        'category': cat,
+                        'price': price,
+                        'stock': _safe_int(item.get('stock')),
+                        'shop_name': _safe_text(item.get('shop_name')),
+                        'product_link': product_link,
+                        'image_url': _safe_text(item.get('image_url')),
+                    },
+                }
+            )
 
         prefix = '给你推荐这几款商品：'
         if category:
             prefix = f'给你推荐几款 {category} 商品：'
-        dispatcher.utter_message(text=f"{prefix}\n" + '\n'.join(lines))
+        dispatcher.utter_message(text=prefix, json_message={'cards': cards})
         return []
 
 
@@ -243,18 +268,30 @@ class ActionQueryMyOrders(Action):
             )
             return []
 
-        lines = ['这是你最近的订单：']
+        cards: list[dict[str, Any]] = []
         for item in items:
             order_id = _safe_text(item.get('id'))
-            status = _order_status_label(_safe_text(item.get('status')))
-            item_count = int(item.get('item_count') or 0)
-            total_amount = float(item.get('total_amount') or 0)
+            raw_status = _safe_text(item.get('status'))
+            status = _order_status_label(raw_status)
+            item_count = _safe_int(item.get('item_count'))
+            total_amount = _safe_float(item.get('total_amount'))
             order_link = _safe_text(item.get('order_link'))
-            lines.append(f'- {order_id} | {status} | {item_count} 件 | ¥{total_amount:.2f}')
-            if order_link:
-                lines.append(f'  订单链接: {order_link}')
+            cards.append(
+                {
+                    'type': 'order',
+                    'data': {
+                        'id': order_id,
+                        'status': raw_status,
+                        'status_label': status,
+                        'item_count': item_count,
+                        'total_amount': total_amount,
+                        'created_at': _safe_text(item.get('created_at')),
+                        'order_link': order_link,
+                    },
+                }
+            )
 
-        dispatcher.utter_message(text='\n'.join(lines))
+        dispatcher.utter_message(text='这是你最近的订单：', json_message={'cards': cards})
         return []
 
 
@@ -305,32 +342,35 @@ class ActionQueryOrderLogistics(Action):
                 dispatcher.utter_message(text=f'目前没有可查询的物流信息，你可以先查看订单页：{frontend_base_url}/orders')
             return []
 
-        lines = ['帮你查到这些物流信息：']
+        cards: list[dict[str, Any]] = []
         for item in items:
             current_order_id = _safe_text(item.get('id'))
-            status = _order_status_label(_safe_text(item.get('status')))
+            raw_status = _safe_text(item.get('status'))
+            status = _order_status_label(raw_status)
             tracking_no = _safe_text(item.get('tracking_no'))
             current_location = _safe_text(item.get('current_location'))
-            eta = _format_time(item.get('estimated_delivery_at'))
+            eta_text = _format_time(item.get('estimated_delivery_at'))
             order_link = _safe_text(item.get('order_link'))
             route_plan = item.get('route_plan') if isinstance(item.get('route_plan'), list) else []
-            route_text = ' -> '.join([_safe_text(point) for point in route_plan if _safe_text(point)])
+            cards.append(
+                {
+                    'type': 'logistics',
+                    'data': {
+                        'id': current_order_id,
+                        'status': raw_status,
+                        'status_label': status,
+                        'tracking_no': tracking_no,
+                        'current_location': current_location,
+                        'estimated_delivery_at': _safe_text(item.get('estimated_delivery_at')),
+                        'estimated_delivery_text': eta_text,
+                        'route_plan': [_safe_text(point) for point in route_plan if _safe_text(point)],
+                        'order_link': order_link,
+                        'created_at': _safe_text(item.get('created_at')),
+                    },
+                }
+            )
 
-            if tracking_no:
-                lines.append(f'- {current_order_id} | {status} | 运单号 {tracking_no}')
-                if current_location:
-                    lines.append(f'  当前位置: {current_location}')
-                if eta:
-                    lines.append(f'  预计送达: {eta}')
-                if route_text:
-                    lines.append(f'  途径: {route_text}')
-            else:
-                lines.append(f'- {current_order_id} | {status} | 暂无物流轨迹（可能还未发货）')
-
-            if order_link:
-                lines.append(f'  订单链接: {order_link}')
-
-        dispatcher.utter_message(text='\n'.join(lines))
+        dispatcher.utter_message(text='帮你查到这些物流信息：', json_message={'cards': cards})
         return []
 
 
@@ -376,27 +416,37 @@ class ActionQueryAfterSales(Action):
             )
             return []
 
-        lines = ['这是你最近的售后进度：']
+        cards: list[dict[str, Any]] = []
         for item in items:
             request_id = _safe_text(item.get('id'))
             order_id = _safe_text(item.get('order_id'))
-            request_type = _after_sales_type_label(_safe_text(item.get('type')))
-            status = _after_sales_status_label(_safe_text(item.get('status')))
-            created_at = _format_time(item.get('created_at'))
+            raw_type = _safe_text(item.get('type'))
+            request_type = _after_sales_type_label(raw_type)
+            raw_status = _safe_text(item.get('status'))
+            status = _after_sales_status_label(raw_status)
             reason = _safe_text(item.get('reason'))
             order_link = _safe_text(item.get('order_link'))
+            cards.append(
+                {
+                    'type': 'after_sales',
+                    'data': {
+                        'id': request_id,
+                        'order_id': order_id,
+                        'type': raw_type,
+                        'type_label': request_type,
+                        'status': raw_status,
+                        'status_label': status,
+                        'created_at': _safe_text(item.get('created_at')),
+                        'created_at_text': _format_time(item.get('created_at')),
+                        'reason': reason,
+                        'order_link': order_link,
+                    },
+                }
+            )
 
-            lines.append(f'- {request_type} | 订单 {order_id} | {status}')
-            if created_at:
-                lines.append(f'  提交时间: {created_at}')
-            if reason:
-                lines.append(f'  原因: {reason[:80]}')
-            if request_id:
-                lines.append(f'  售后单ID: {request_id}')
-            if order_link:
-                lines.append(f'  订单链接: {order_link}')
-
-        lines.append(f'如需新增申请，可前往：{frontend_base_url}/orders')
-        dispatcher.utter_message(text='\n'.join(lines))
+        dispatcher.utter_message(
+            text=f'这是你最近的售后进度，可前往订单页继续处理：{frontend_base_url}/orders',
+            json_message={'cards': cards},
+        )
         return []
 

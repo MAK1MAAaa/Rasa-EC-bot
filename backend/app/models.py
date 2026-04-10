@@ -1,5 +1,5 @@
 ﻿from datetime import datetime
-from typing import List, Optional
+from typing import Any, List, Optional
 from uuid import UUID, uuid4
 
 from sqlalchemy import Column
@@ -179,12 +179,30 @@ class ChatSendRequest(SQLModel):
     sender_id: Optional[str] = None
 
 
+class ChatCard(SQLModel):
+    type: str
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
+class ChatAction(SQLModel):
+    type: str
+    label: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+    style: Optional[str] = None
+
+
 class ChatReplyMessage(SQLModel):
     text: str
+    cards: List[ChatCard] = Field(default_factory=list)
+    actions: List[ChatAction] = Field(default_factory=list)
 
 
 class ChatSendResponse(SQLModel):
     messages: List[ChatReplyMessage]
+
+
+class ChatPendingActionDecisionRequest(SQLModel):
+    decision: str
 
 
 class ChatOrderSummaryItem(SQLModel):
