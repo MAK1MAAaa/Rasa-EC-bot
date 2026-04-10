@@ -2,20 +2,26 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
 import json
+import logging
 import os
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from io import BytesIO
+from pathlib import Path as FsPath
 from random import randint
 from typing import Any, Literal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
-from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query, Request, WebSocket, WebSocketDisconnect, status
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Path, Query, Request, UploadFile, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
+from PIL import Image
+from sqlalchemy import func, or_, text
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import func, or_
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -47,8 +53,11 @@ from .models import (
     ChatReplyMessage,
     ChatSendRequest,
     ChatSendResponse,
+    ChatUploadImageResponse,
     CreateAfterSalesRequest,
     CreateOrderRequest,
+    KBIndexRequest,
+    KBIndexResponse,
     Logistics,
     LogisticsRead,
     LoginRequest,
@@ -83,11 +92,14 @@ from .models import (
     UserCreate,
     UserRead,
 )
+from .nexau_orchestrator import NexAUAgentOrchestrator, infer_message_domains, is_complex_query
 
 app = FastAPI(title="Rasa-EC-bot Backend", version="0.3.0")
+logger = logging.getLogger("rasa_ec_bot.chat_router")
 
 RASA_SERVER_URL = os.getenv("RASA_SERVER_URL", "http://127.0.0.1:5005")
 RASA_REST_WEBHOOK_PATH = os.getenv("RASA_REST_WEBHOOK_PATH", "/webhooks/rest/webhook")
+RASA_PARSE_PATH = os.getenv("RASA_PARSE_PATH", "/model/parse")
 RASA_REQUEST_TIMEOUT_SEC = float(os.getenv("RASA_REQUEST_TIMEOUT_SEC", "30"))
 FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "http://localhost:5173")
 RASA_INTERNAL_TOKEN = os.getenv("RASA_INTERNAL_TOKEN", "")
@@ -96,9 +108,39 @@ OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3.5:2b")
 OLLAMA_TIMEOUT_SEC = float(os.getenv("OLLAMA_TIMEOUT_SEC", "45"))
 LOGISTICS_LLM_MAX_WAIT_SEC = float(os.getenv("LOGISTICS_LLM_MAX_WAIT_SEC", "12"))
+AGENT_OLLAMA_MODEL = os.getenv("AGENT_OLLAMA_MODEL", "qwen3.5:2b-lora")
+AGENT_OLLAMA_TIMEOUT_SEC = float(os.getenv("AGENT_OLLAMA_TIMEOUT_SEC", str(OLLAMA_TIMEOUT_SEC)))
+OLLAMA_EMBED_MODEL = os.getenv("OLLAMA_EMBED_MODEL", "mxbai-embed-large")
+OLLAMA_VLM_MODEL = os.getenv("OLLAMA_VLM_MODEL", "qwen3-vl:2b")
+KB_EMBEDDING_DIM = int(os.getenv("KB_EMBEDDING_DIM", "1024"))
+KB_RETRIEVAL_TOP_K = int(os.getenv("KB_RETRIEVAL_TOP_K", "4"))
+KB_CHUNK_SIZE = int(os.getenv("KB_CHUNK_SIZE", "500"))
+KB_CHUNK_OVERLAP = int(os.getenv("KB_CHUNK_OVERLAP", "80"))
+CHAT_UPLOAD_DIR = os.getenv("CHAT_UPLOAD_DIR", "data/chat_uploads")
+CHAT_UPLOAD_MAX_MB = int(os.getenv("CHAT_UPLOAD_MAX_MB", "8"))
+CHAT_UPLOAD_MAX_BYTES = CHAT_UPLOAD_MAX_MB * 1024 * 1024
+CHAT_UPLOAD_ALLOWED_MIME = {"image/jpeg", "image/png", "image/webp"}
+CHAT_ROUTER_ENABLE_AGENT = os.getenv("CHAT_ROUTER_ENABLE_AGENT", "true").strip().lower() not in {"0", "false", "no"}
+CHAT_ROUTER_RASA_CONFIDENCE_THRESHOLD = float(os.getenv("CHAT_ROUTER_RASA_CONFIDENCE_THRESHOLD", "0.72"))
+FAST_ROUTER_INTENTS = {
+    "greet",
+    "goodbye",
+    "thanks",
+    "ask_order_help",
+    "ask_shipping_help",
+    "ask_after_sales_help",
+    "ask_product_recommendation",
+    "bot_challenge",
+}
 
 REDIS_URL = os.getenv("REDIS_URL", "")
 REDIS_CACHE_TTL_SEC = int(os.getenv("REDIS_CACHE_TTL_SEC", "180"))
+APP_ROOT_DIR = FsPath(__file__).resolve().parents[1]
+UPLOAD_ROOT_DIR = (
+    FsPath(CHAT_UPLOAD_DIR).resolve()
+    if FsPath(CHAT_UPLOAD_DIR).is_absolute()
+    else (APP_ROOT_DIR / CHAT_UPLOAD_DIR).resolve()
+)
 
 ORDER_STATUS_PENDING_SHIPMENT = "pending_shipment"
 ORDER_STATUS_SHIPPED = "shipped"
@@ -227,6 +269,7 @@ realtime_manager = RealtimeConnectionManager()
 
 @app.on_event("startup")
 async def on_startup() -> None:
+    UPLOAD_ROOT_DIR.mkdir(parents=True, exist_ok=True)
     await cache.connect()
 
 
@@ -245,6 +288,285 @@ def parse_response_model(model_cls, payload: dict):
     if hasattr(model_cls, "model_validate"):
         return model_cls.model_validate(payload)  # type: ignore[attr-defined]
     return model_cls.parse_obj(payload)
+
+
+def clean_kb_source_type(source_type: str) -> str:
+    normalized = (source_type or "").strip().lower()
+    if normalized not in {"policy", "manual"}:
+        raise HTTPException(status_code=400, detail="source_type must be policy or manual")
+    return normalized
+
+
+def split_text_into_chunks(text: str, *, chunk_size: int, overlap: int) -> list[str]:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return []
+    normalized_chunk_size = max(150, chunk_size)
+    normalized_overlap = max(0, min(overlap, normalized_chunk_size - 1))
+    step = max(1, normalized_chunk_size - normalized_overlap)
+    chunks: list[str] = []
+    for start in range(0, len(cleaned), step):
+        chunk = cleaned[start : start + normalized_chunk_size].strip()
+        if chunk:
+            chunks.append(chunk)
+        if start + normalized_chunk_size >= len(cleaned):
+            break
+    return chunks
+
+
+def compute_sha256(content: bytes) -> str:
+    return hashlib.sha256(content).hexdigest()
+
+
+def infer_image_size(content: bytes) -> tuple[int | None, int | None]:
+    try:
+        with Image.open(BytesIO(content)) as image:
+            width, height = image.size
+            return int(width), int(height)
+    except Exception:
+        return None, None
+
+
+def build_vector_literal(vector: list[float]) -> str:
+    return "[" + ",".join(f"{item:.9f}" for item in vector) + "]"
+
+
+def safe_parse_json_object(raw_text: str) -> dict[str, Any]:
+    text = (raw_text or "").strip()
+    if not text:
+        return {}
+    try:
+        value = json.loads(text)
+        return value if isinstance(value, dict) else {}
+    except Exception:
+        pass
+
+    match = re.search(r"\{[\s\S]*\}", text)
+    if not match:
+        return {}
+    try:
+        value = json.loads(match.group(0))
+        return value if isinstance(value, dict) else {}
+    except Exception:
+        return {}
+
+
+async def generate_embedding(text_content: str) -> list[float]:
+    payload_embed = {
+        "model": OLLAMA_EMBED_MODEL,
+        "input": [text_content],
+    }
+    try:
+        async with httpx.AsyncClient(timeout=OLLAMA_TIMEOUT_SEC) as client:
+            response = await client.post(f"{OLLAMA_BASE_URL}/api/embed", json=payload_embed)
+        response.raise_for_status()
+        payload = response.json()
+        embeddings = payload.get("embeddings") if isinstance(payload, dict) else None
+        if isinstance(embeddings, list) and embeddings and isinstance(embeddings[0], list):
+            vector = [float(item) for item in embeddings[0]]
+            if len(vector) != KB_EMBEDDING_DIM:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Embedding dimension mismatch: expected {KB_EMBEDDING_DIM}, got {len(vector)}",
+                )
+            return vector
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+
+    payload_legacy = {
+        "model": OLLAMA_EMBED_MODEL,
+        "prompt": text_content,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=OLLAMA_TIMEOUT_SEC) as client:
+            response = await client.post(f"{OLLAMA_BASE_URL}/api/embeddings", json=payload_legacy)
+        response.raise_for_status()
+        payload = response.json()
+        embedding = payload.get("embedding") if isinstance(payload, dict) else None
+        if isinstance(embedding, list):
+            vector = [float(item) for item in embedding]
+            if len(vector) != KB_EMBEDDING_DIM:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Embedding dimension mismatch: expected {KB_EMBEDDING_DIM}, got {len(vector)}",
+                )
+            return vector
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=503, detail=f"Embedding service unavailable: {exc}") from exc
+
+    raise HTTPException(status_code=503, detail="Embedding service returned invalid payload")
+
+
+async def retrieve_kb_knowledge(
+    *,
+    session: AsyncSession,
+    source_type: str,
+    query_text: str,
+    top_k: int | None = None,
+) -> list[dict[str, Any]]:
+    cleaned_query = (query_text or "").strip()
+    if not cleaned_query:
+        return []
+
+    vector = await generate_embedding(cleaned_query)
+    vector_literal = build_vector_literal(vector)
+    limit = max(1, min(top_k or KB_RETRIEVAL_TOP_K, 10))
+    normalized_source_type = clean_kb_source_type(source_type)
+
+    vector_statement = text(
+        """
+        SELECT
+            c.id AS chunk_id,
+            c.chunk_text AS chunk_text,
+            c.metadata AS metadata,
+            d.title AS title,
+            d.version AS version,
+            d.source_type AS source_type,
+            (1 - (c.embedding <=> CAST(:embedding AS vector))) AS score
+        FROM kb_chunks c
+        JOIN kb_documents d ON d.id = c.document_id
+        WHERE d.source_type = :source_type AND d.status = 'active'
+        ORDER BY c.embedding <=> CAST(:embedding AS vector)
+        LIMIT :limit
+        """
+    )
+    vector_rows = (await session.execute(
+        vector_statement,
+        {"embedding": vector_literal, "source_type": normalized_source_type, "limit": limit},
+    )).mappings().all()
+
+    keyword_statement = text(
+        """
+        SELECT
+            c.id AS chunk_id,
+            c.chunk_text AS chunk_text,
+            c.metadata AS metadata,
+            d.title AS title,
+            d.version AS version,
+            d.source_type AS source_type,
+            ts_rank(to_tsvector('simple', c.chunk_text), plainto_tsquery('simple', :query)) AS score
+        FROM kb_chunks c
+        JOIN kb_documents d ON d.id = c.document_id
+        WHERE d.source_type = :source_type
+          AND d.status = 'active'
+          AND to_tsvector('simple', c.chunk_text) @@ plainto_tsquery('simple', :query)
+        ORDER BY score DESC
+        LIMIT :limit
+        """
+    )
+    keyword_rows = (await session.execute(
+        keyword_statement,
+        {"query": cleaned_query, "source_type": normalized_source_type, "limit": limit},
+    )).mappings().all()
+
+    merged: list[dict[str, Any]] = []
+    seen_chunk_ids: set[str] = set()
+    for row in [*vector_rows, *keyword_rows]:
+        chunk_id = str(row.get("chunk_id") or "")
+        if not chunk_id or chunk_id in seen_chunk_ids:
+            continue
+        seen_chunk_ids.add(chunk_id)
+        merged.append(
+            {
+                "chunk_id": chunk_id,
+                "chunk_text": str(row.get("chunk_text") or ""),
+                "title": str(row.get("title") or ""),
+                "version": str(row.get("version") or ""),
+                "source_type": str(row.get("source_type") or ""),
+                "score": float(row.get("score") or 0.0),
+                "metadata": row.get("metadata") if isinstance(row.get("metadata"), dict) else {},
+            }
+        )
+        if len(merged) >= limit:
+            break
+    return merged
+
+
+def normalize_image_analysis(raw: dict[str, Any]) -> dict[str, Any]:
+    confidence_raw = raw.get("confidence")
+    try:
+        confidence = float(confidence_raw)
+    except Exception:
+        confidence = 0.0
+    confidence = max(0.0, min(confidence, 1.0))
+    return {
+        "issue_type": str(raw.get("issue_type") or "unknown").strip() or "unknown",
+        "severity": str(raw.get("severity") or "medium").strip() or "medium",
+        "evidence": str(raw.get("evidence") or "").strip(),
+        "suggested_action": str(raw.get("suggested_action") or "").strip(),
+        "confidence": confidence,
+    }
+
+
+async def analyze_uploaded_image_vlm(
+    *,
+    session: AsyncSession,
+    attachment_id: str,
+    current_user: User | None,
+) -> dict[str, Any]:
+    query_statement = text(
+        """
+        SELECT id, user_id, local_path, mime
+        FROM chat_attachments
+        WHERE id = CAST(:attachment_id AS uuid)
+        LIMIT 1
+        """
+    )
+    row = (await session.execute(query_statement, {"attachment_id": attachment_id})).mappings().first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+
+    row_user_id = row.get("user_id")
+    if current_user and row_user_id and str(row_user_id) != str(current_user.id):
+        raise HTTPException(status_code=403, detail="Attachment does not belong to current user")
+
+    local_path = FsPath(str(row.get("local_path") or ""))
+    if not local_path.exists() or not local_path.is_file():
+        raise HTTPException(status_code=404, detail="Attachment file not found")
+
+    image_bytes = local_path.read_bytes()
+    encoded_image = base64.b64encode(image_bytes).decode("ascii")
+    system_prompt = (
+        "你是电商售后图像分析助手。"
+        "请只输出 JSON 对象，字段必须为：issue_type,severity,evidence,suggested_action,confidence。"
+        "confidence 范围 0 到 1。"
+    )
+    user_prompt = "请识别图像中的售后问题，并给出结构化分析结果。"
+    payload = {
+        "model": OLLAMA_VLM_MODEL,
+        "stream": False,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {
+                "role": "user",
+                "content": user_prompt,
+                "images": [encoded_image],
+            },
+        ],
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=AGENT_OLLAMA_TIMEOUT_SEC) as client:
+            response = await client.post(f"{OLLAMA_BASE_URL}/api/chat", json=payload)
+        response.raise_for_status()
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=503, detail=f"VLM service unavailable: {exc}") from exc
+
+    response_payload = response.json() if response.content else {}
+    raw_content = ""
+    if isinstance(response_payload, dict):
+        message_payload = response_payload.get("message")
+        if isinstance(message_payload, dict):
+            raw_content = str(message_payload.get("content") or "")
+    parsed = normalize_image_analysis(safe_parse_json_object(raw_content))
+    return {
+        "attachment_id": attachment_id,
+        "analysis": parsed,
+    }
 
 
 def chat_orders_summary_cache_prefix(user_id: UUID) -> str:
@@ -793,6 +1115,421 @@ async def handle_chat_transaction_action(message: str, current_user: User, sessi
         return await prepare_after_sales_chat_action(message, current_user, session)
 
     return None
+
+
+def normalize_rasa_response_messages(raw_data: Any) -> list[ChatReplyMessage]:
+    if not isinstance(raw_data, list):
+        return []
+
+    messages: list[ChatReplyMessage] = []
+    for item in raw_data:
+        if not isinstance(item, dict):
+            continue
+        custom_payload = item.get("custom") if isinstance(item.get("custom"), dict) else {}
+        text = item.get("text")
+        if not isinstance(text, str):
+            custom_text = custom_payload.get("text")
+            text = custom_text if isinstance(custom_text, str) else ""
+
+        cards = item.get("cards")
+        actions = item.get("actions")
+        if cards is None:
+            cards = custom_payload.get("cards")
+        if actions is None:
+            actions = custom_payload.get("actions")
+
+        parsed = build_chat_message(text or "", cards=cards, actions=actions)
+        if parsed.text or parsed.cards or parsed.actions:
+            messages.append(parsed)
+    return messages
+
+
+async def parse_rasa_intent(message: str) -> tuple[str, float]:
+    parse_url = f"{RASA_SERVER_URL.rstrip('/')}{RASA_PARSE_PATH}"
+    try:
+        async with httpx.AsyncClient(timeout=RASA_REQUEST_TIMEOUT_SEC) as client:
+            response = await client.post(parse_url, json={"text": message})
+        response.raise_for_status()
+        payload = response.json()
+        intent = payload.get("intent") if isinstance(payload, dict) else {}
+        intent_name = str(intent.get("name") or "").strip()
+        confidence = float(intent.get("confidence") or 0.0)
+        return intent_name, confidence
+    except Exception:
+        return "", 0.0
+
+
+def decide_chat_route(*, message: str, intent_name: str, intent_confidence: float) -> str:
+    if not CHAT_ROUTER_ENABLE_AGENT:
+        return "rule"
+    if intent_name == "nlu_fallback":
+        return "agent"
+    if intent_confidence < CHAT_ROUTER_RASA_CONFIDENCE_THRESHOLD:
+        return "agent"
+    if is_complex_query(message):
+        return "agent"
+    if intent_name in FAST_ROUTER_INTENTS:
+        return "rule"
+    return "agent"
+
+
+async def call_rasa_webhook(*, sender_id: str, message: str, metadata: dict[str, Any]) -> list[ChatReplyMessage]:
+    webhook_url = f"{RASA_SERVER_URL.rstrip('/')}{RASA_REST_WEBHOOK_PATH}"
+    try:
+        async with httpx.AsyncClient(timeout=RASA_REQUEST_TIMEOUT_SEC) as client:
+            response = await client.post(
+                webhook_url,
+                json={"sender": sender_id, "message": message, "metadata": metadata},
+            )
+        response.raise_for_status()
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Rasa response timeout")
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Rasa request failed with status {exc.response.status_code}",
+        )
+    except httpx.HTTPError:
+        raise HTTPException(status_code=503, detail="Rasa service unavailable")
+
+    data = response.json()
+    if not isinstance(data, list):
+        raise HTTPException(status_code=502, detail="Invalid response from Rasa")
+    messages = normalize_rasa_response_messages(data)
+    if not messages:
+        messages.append(build_chat_message("暂时没有生成有效回复，请稍后重试。"))
+    return messages
+
+
+async def query_price_protection_candidates(
+    *,
+    user_id: UUID,
+    session: AsyncSession,
+    order_limit: int = 3,
+) -> dict[str, Any]:
+    statement = (
+        select(Order)
+        .where(Order.user_id == user_id)
+        .order_by(Order.created_at.desc())
+        .limit(max(1, min(order_limit, 10)))
+    )
+    order_result = await session.execute(statement)
+    orders = order_result.scalars().all()
+    if not orders:
+        return {"orders": [], "eligible_items": [], "total_refund_diff": 0.0}
+
+    order_ids = [order.id for order in orders]
+    item_result = await session.execute(select(OrderItem).where(OrderItem.order_id.in_(order_ids)))
+    order_items = item_result.scalars().all()
+    product_ids = {item.product_id for item in order_items}
+    product_map: dict[UUID, Product] = {}
+    if product_ids:
+        product_result = await session.execute(select(Product).where(Product.id.in_(tuple(product_ids))))
+        products = product_result.scalars().all()
+        product_map = {product.id: product for product in products}
+
+    order_briefs: list[dict[str, Any]] = []
+    eligible_items: list[dict[str, Any]] = []
+    total_refund_diff = 0.0
+    for order in orders:
+        order_briefs.append(
+            {
+                "order_id": order.id,
+                "created_at": order.created_at.isoformat(),
+                "status": order.status,
+            }
+        )
+        for item in order_items:
+            if item.order_id != order.id:
+                continue
+            product = product_map.get(item.product_id)
+            if not product:
+                continue
+            old_unit_price = float(item.unit_price)
+            new_unit_price = float(product.price)
+            unit_diff = round(old_unit_price - new_unit_price, 2)
+            if unit_diff <= 0:
+                continue
+            quantity = int(item.quantity)
+            refund_diff = round(unit_diff * quantity, 2)
+            total_refund_diff = round(total_refund_diff + refund_diff, 2)
+            eligible_items.append(
+                {
+                    "order_id": item.order_id,
+                    "product_id": str(item.product_id),
+                    "product_name": item.product_name,
+                    "old_unit_price": old_unit_price,
+                    "new_unit_price": new_unit_price,
+                    "quantity": quantity,
+                    "refund_diff": refund_diff,
+                }
+            )
+
+    return {
+        "orders": order_briefs,
+        "eligible_items": eligible_items,
+        "total_refund_diff": total_refund_diff,
+    }
+
+
+def serialize_chat_cards(cards: list[ChatCard]) -> list[dict[str, Any]]:
+    return [{"type": card.type, "data": dict(card.data)} for card in cards]
+
+
+def serialize_chat_actions(actions: list[ChatAction]) -> list[dict[str, Any]]:
+    serialized: list[dict[str, Any]] = []
+    for action in actions:
+        item: dict[str, Any] = {"type": action.type, "label": action.label, "payload": dict(action.payload)}
+        if action.style:
+            item["style"] = action.style
+        serialized.append(item)
+    return serialized
+
+
+async def run_nexau_agent_orchestrator(
+    *,
+    message: str,
+    current_user: User | None,
+    session: AsyncSession,
+    attachments: list[str] | None = None,
+) -> tuple[ChatReplyMessage, list[dict[str, Any]]]:
+    orchestrator = NexAUAgentOrchestrator(
+        ollama_base_url=OLLAMA_BASE_URL,
+        ollama_model=AGENT_OLLAMA_MODEL,
+        ollama_timeout_sec=AGENT_OLLAMA_TIMEOUT_SEC,
+        frontend_base_url=FRONTEND_BASE_URL,
+    )
+
+    async def tool_query_orders_summary(user_id: str, limit: int = 5) -> dict[str, Any]:
+        response = await chat_internal_orders_summary(
+            user_id=UUID(user_id),
+            limit=max(1, min(limit, 10)),
+            x_rasa_token=(RASA_INTERNAL_TOKEN or None),
+            session=session,
+        )
+        cards = [
+            {
+                "type": "order",
+                "data": {
+                    "id": item.id,
+                    "status": item.status,
+                    "total_amount": item.total_amount,
+                    "item_count": item.item_count,
+                    "created_at": item.created_at.isoformat(),
+                    "order_link": item.order_link,
+                },
+            }
+            for item in response.items
+        ]
+        return {"observation": dump_response_model(response), "cards": cards}
+
+    async def tool_query_logistics_summary(user_id: str, order_id: str | None = None, limit: int = 5) -> dict[str, Any]:
+        response = await chat_internal_orders_logistics_summary(
+            user_id=UUID(user_id),
+            order_id=order_id,
+            limit=max(1, min(limit, 10)),
+            x_rasa_token=(RASA_INTERNAL_TOKEN or None),
+            session=session,
+        )
+        cards = [
+            {
+                "type": "logistics",
+                "data": {
+                    "id": item.id,
+                    "status": item.status,
+                    "created_at": item.created_at.isoformat(),
+                    "order_link": item.order_link,
+                    "tracking_no": item.tracking_no,
+                    "current_location": item.current_location,
+                    "estimated_delivery_at": (
+                        item.estimated_delivery_at.isoformat() if item.estimated_delivery_at else None
+                    ),
+                    "route_plan": list(item.route_plan),
+                },
+            }
+            for item in response.items
+        ]
+        return {"observation": dump_response_model(response), "cards": cards}
+
+    async def tool_query_after_sales_summary(user_id: str, limit: int = 5) -> dict[str, Any]:
+        response = await chat_internal_after_sales_summary(
+            user_id=UUID(user_id),
+            limit=max(1, min(limit, 10)),
+            x_rasa_token=(RASA_INTERNAL_TOKEN or None),
+            session=session,
+        )
+        cards = [
+            {
+                "type": "after_sales",
+                "data": {
+                    "id": str(item.id),
+                    "order_id": item.order_id,
+                    "type": item.type,
+                    "status": item.status,
+                    "created_at": item.created_at.isoformat(),
+                    "reason": item.reason,
+                    "order_link": item.order_link,
+                },
+            }
+            for item in response.items
+        ]
+        return {"observation": dump_response_model(response), "cards": cards}
+
+    async def tool_query_price_protection(user_id: str) -> dict[str, Any]:
+        observation = await query_price_protection_candidates(user_id=UUID(user_id), session=session)
+        return {"observation": observation}
+
+    async def tool_retrieve_policy_knowledge(query: str) -> dict[str, Any]:
+        matches = await retrieve_kb_knowledge(
+            session=session,
+            source_type="policy",
+            query_text=query,
+            top_k=KB_RETRIEVAL_TOP_K,
+        )
+        observation = {
+            "source_type": "policy",
+            "query": query,
+            "matches": [
+                {
+                    "title": item["title"],
+                    "version": item["version"],
+                    "score": item["score"],
+                    "chunk_text": item["chunk_text"],
+                }
+                for item in matches
+            ],
+        }
+        return {"observation": observation}
+
+    async def tool_retrieve_manual_knowledge(query: str) -> dict[str, Any]:
+        matches = await retrieve_kb_knowledge(
+            session=session,
+            source_type="manual",
+            query_text=query,
+            top_k=KB_RETRIEVAL_TOP_K,
+        )
+        observation = {
+            "source_type": "manual",
+            "query": query,
+            "matches": [
+                {
+                    "title": item["title"],
+                    "version": item["version"],
+                    "score": item["score"],
+                    "chunk_text": item["chunk_text"],
+                }
+                for item in matches
+            ],
+        }
+        return {"observation": observation}
+
+    async def tool_analyze_uploaded_image_vlm(attachment_id: str) -> dict[str, Any]:
+        result = await analyze_uploaded_image_vlm(
+            session=session,
+            attachment_id=attachment_id,
+            current_user=current_user,
+        )
+        analysis = result["analysis"]
+        return {
+            "observation": result,
+            "cards": [
+                {
+                    "type": "image_analysis",
+                    "data": {
+                        "attachment_id": attachment_id,
+                        "issue_type": analysis.get("issue_type"),
+                        "severity": analysis.get("severity"),
+                        "evidence": analysis.get("evidence"),
+                        "suggested_action": analysis.get("suggested_action"),
+                        "confidence": analysis.get("confidence"),
+                    },
+                }
+            ],
+        }
+
+    async def tool_draft_after_sales_request(order_id: str, request_type: str, reason: str) -> dict[str, Any]:
+        if not current_user:
+            raise HTTPException(status_code=401, detail="Unauthenticated user cannot create draft action")
+        action_text = "换货" if request_type == AFTER_SALES_TYPE_EXCHANGE else "退款"
+        synthetic_message = f"申请{action_text} {order_id} 原因: {reason}"
+        reply = await prepare_after_sales_chat_action(synthetic_message, current_user, session)
+        return {
+            "observation": {
+                "draft_text": reply.text,
+                "cards_count": len(reply.cards),
+                "actions_count": len(reply.actions),
+            },
+            "cards": serialize_chat_cards(reply.cards),
+            "actions": serialize_chat_actions(reply.actions),
+        }
+
+    orchestrator.register_tool(
+        name="query_orders_summary",
+        mode="read",
+        description="查询当前用户最近订单汇总",
+        handler=tool_query_orders_summary,
+    )
+    orchestrator.register_tool(
+        name="query_logistics_summary",
+        mode="read",
+        description="查询当前用户物流汇总",
+        handler=tool_query_logistics_summary,
+    )
+    orchestrator.register_tool(
+        name="query_after_sales_summary",
+        mode="read",
+        description="查询当前用户售后汇总",
+        handler=tool_query_after_sales_summary,
+    )
+    orchestrator.register_tool(
+        name="query_price_protection",
+        mode="read",
+        description="基于订单与当前商品价格计算可补差价信息",
+        handler=tool_query_price_protection,
+    )
+    orchestrator.register_tool(
+        name="retrieve_policy_knowledge",
+        mode="read",
+        description="检索售后政策知识库内容",
+        handler=tool_retrieve_policy_knowledge,
+    )
+    orchestrator.register_tool(
+        name="retrieve_manual_knowledge",
+        mode="read",
+        description="检索商品说明书知识库内容",
+        handler=tool_retrieve_manual_knowledge,
+    )
+    orchestrator.register_tool(
+        name="analyze_uploaded_image_vlm",
+        mode="read",
+        description="使用视觉模型分析用户上传图片并输出结构化结论",
+        handler=tool_analyze_uploaded_image_vlm,
+    )
+    orchestrator.register_tool(
+        name="draft_after_sales_request",
+        mode="write",
+        description="生成待确认售后草案，不直接执行写入",
+        handler=tool_draft_after_sales_request,
+    )
+
+    result = await orchestrator.run(
+        message=message,
+        user_id=str(current_user.id) if current_user else "",
+        is_authenticated=bool(current_user),
+        attachments=attachments or [],
+    )
+    reply = build_chat_message(result.text, cards=result.cards, actions=result.actions)
+    tool_call_logs = [
+        {
+            "name": call.name,
+            "mode": call.mode,
+            "success": call.success,
+            "args": call.args,
+            "error": call.error,
+        }
+        for call in result.tool_calls
+    ]
+    return reply, tool_call_logs
 
 
 def normalize_email(email: str) -> str:
@@ -1419,6 +2156,202 @@ async def root():
     return {"message": "Welcome to Rasa-EC-bot API"}
 
 
+def normalize_attachment_ids(raw_ids: list[str]) -> list[str]:
+    cleaned_ids: list[str] = []
+    for raw_id in raw_ids:
+        value = (raw_id or "").strip()
+        if not value:
+            continue
+        try:
+            normalized = str(UUID(value))
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=400, detail=f"Invalid attachment id: {value}") from exc
+        if normalized not in cleaned_ids:
+            cleaned_ids.append(normalized)
+    return cleaned_ids
+
+
+async def validate_chat_attachments(
+    *,
+    session: AsyncSession,
+    attachment_ids: list[str],
+    current_user: User | None,
+) -> None:
+    for attachment_id in attachment_ids:
+        statement = text(
+            """
+            SELECT id, user_id
+            FROM chat_attachments
+            WHERE id = CAST(:attachment_id AS uuid)
+            LIMIT 1
+            """
+        )
+        row = (await session.execute(statement, {"attachment_id": attachment_id})).mappings().first()
+        if not row:
+            raise HTTPException(status_code=400, detail=f"Attachment not found: {attachment_id}")
+
+        owner_user_id = row.get("user_id")
+        if owner_user_id and not current_user:
+            raise HTTPException(status_code=403, detail=f"Attachment login required: {attachment_id}")
+        if current_user and owner_user_id and str(owner_user_id) != str(current_user.id):
+            raise HTTPException(status_code=403, detail=f"Attachment forbidden: {attachment_id}")
+
+
+@app.post("/api/v1/chat/upload-image", response_model=ChatUploadImageResponse)
+async def chat_upload_image(
+    request: Request,
+    file: UploadFile = File(...),
+    session: AsyncSession = Depends(get_session),
+):
+    current_user = await get_current_db_user_optional(request, session)
+    if current_user and normalize_role(current_user.role) == "merchant":
+        raise HTTPException(status_code=403, detail="Merchant accounts cannot access chat support")
+
+    content_type = (file.content_type or "").strip().lower()
+    if content_type not in CHAT_UPLOAD_ALLOWED_MIME:
+        raise HTTPException(status_code=400, detail="Only jpeg/png/webp image is supported")
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Uploaded image is empty")
+    if len(content) > CHAT_UPLOAD_MAX_BYTES:
+        raise HTTPException(status_code=413, detail=f"Image exceeds {CHAT_UPLOAD_MAX_MB}MB")
+
+    width, height = infer_image_size(content)
+    if width is None or height is None:
+        raise HTTPException(status_code=400, detail="Invalid image file")
+
+    attachment_uuid = uuid4()
+    extension_map = {
+        "image/jpeg": ".jpg",
+        "image/png": ".png",
+        "image/webp": ".webp",
+    }
+    extension = extension_map.get(content_type, ".bin")
+    bucket_dir = UPLOAD_ROOT_DIR / datetime.utcnow().strftime("%Y%m%d")
+    bucket_dir.mkdir(parents=True, exist_ok=True)
+    local_path = bucket_dir / f"{attachment_uuid}{extension}"
+    local_path.write_bytes(content)
+
+    sender_id = f"user-{current_user.id}" if current_user else "guest-upload"
+    insert_stmt = text(
+        """
+        INSERT INTO chat_attachments (
+            id, user_id, sender_id, local_path, mime, sha256, width, height, size_bytes
+        ) VALUES (
+            CAST(:id AS uuid), :user_id, :sender_id, :local_path, :mime, :sha256, :width, :height, :size_bytes
+        )
+        """
+    )
+    await session.execute(
+        insert_stmt,
+        {
+            "id": str(attachment_uuid),
+            "user_id": str(current_user.id) if current_user else None,
+            "sender_id": sender_id,
+            "local_path": str(local_path),
+            "mime": content_type,
+            "sha256": compute_sha256(content),
+            "width": width,
+            "height": height,
+            "size_bytes": len(content),
+        },
+    )
+    await session.commit()
+
+    return ChatUploadImageResponse(
+        attachment_id=str(attachment_uuid),
+        mime=content_type,
+        size_bytes=len(content),
+        width=width,
+        height=height,
+    )
+
+
+@app.post("/api/v1/kb/index", response_model=KBIndexResponse)
+async def kb_index(
+    payload: KBIndexRequest,
+    current_user: User = Depends(get_current_db_user),
+    session: AsyncSession = Depends(get_session),
+):
+    if normalize_role(current_user.role) != "merchant":
+        raise HTTPException(status_code=403, detail="Only merchant account can index knowledge")
+    if not payload.items:
+        raise HTTPException(status_code=400, detail="items cannot be empty")
+
+    indexed_documents = 0
+    indexed_chunks = 0
+    for item in payload.items:
+        source_type = clean_kb_source_type(item.source_type)
+        title = (item.title or "").strip()
+        content = (item.content or "").strip()
+        if not title or not content:
+            raise HTTPException(status_code=400, detail="title and content are required")
+
+        checksum = compute_sha256(content.encode("utf-8"))
+        upsert_document_stmt = text(
+            """
+            INSERT INTO kb_documents (source_type, title, version, status, checksum, updated_at)
+            VALUES (:source_type, :title, :version, :status, :checksum, CURRENT_TIMESTAMP)
+            ON CONFLICT (checksum)
+            DO UPDATE SET
+                source_type = EXCLUDED.source_type,
+                title = EXCLUDED.title,
+                version = EXCLUDED.version,
+                status = EXCLUDED.status,
+                updated_at = CURRENT_TIMESTAMP
+            RETURNING id
+            """
+        )
+        document_id = (
+            await session.execute(
+                upsert_document_stmt,
+                {
+                    "source_type": source_type,
+                    "title": title,
+                    "version": (item.version or "").strip() or None,
+                    "status": (item.status or "").strip() or "active",
+                    "checksum": checksum,
+                },
+            )
+        ).scalar_one()
+        indexed_documents += 1
+
+        await session.execute(
+            text("DELETE FROM kb_chunks WHERE document_id = CAST(:document_id AS uuid)"),
+            {"document_id": str(document_id)},
+        )
+
+        chunks = split_text_into_chunks(content, chunk_size=KB_CHUNK_SIZE, overlap=KB_CHUNK_OVERLAP)
+        for chunk_order, chunk_text in enumerate(chunks):
+            embedding = await generate_embedding(chunk_text)
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO kb_chunks (document_id, chunk_order, chunk_text, embedding, metadata)
+                    VALUES (
+                        CAST(:document_id AS uuid),
+                        :chunk_order,
+                        :chunk_text,
+                        CAST(:embedding AS vector),
+                        CAST(:metadata AS jsonb)
+                    )
+                    """
+                ),
+                {
+                    "document_id": str(document_id),
+                    "chunk_order": chunk_order,
+                    "chunk_text": chunk_text,
+                    "embedding": build_vector_literal(embedding),
+                    "metadata": json.dumps(item.metadata if isinstance(item.metadata, dict) else {}, ensure_ascii=False),
+                },
+            )
+            indexed_chunks += 1
+
+    await session.commit()
+    return KBIndexResponse(indexed_documents=indexed_documents, indexed_chunks=indexed_chunks)
+
+
 @app.post("/api/v1/chat/pending-action/decision", response_model=ChatSendResponse)
 async def chat_pending_action_decision(
     payload: ChatPendingActionDecisionRequest,
@@ -1439,18 +2372,22 @@ async def chat_send(
     session: AsyncSession = Depends(get_session),
 ):
     message = payload.message.strip()
-    if not message:
-        raise HTTPException(status_code=400, detail="message cannot be empty")
+    attachment_ids = normalize_attachment_ids(payload.attachments or [])
+    if not message and not attachment_ids:
+        raise HTTPException(status_code=400, detail="message or attachments cannot be empty")
 
     current_user = await get_current_db_user_optional(request, session)
     if current_user and normalize_role(current_user.role) == "merchant":
         raise HTTPException(status_code=403, detail="Merchant accounts cannot access chat support")
 
-    if current_user:
+    await validate_chat_attachments(session=session, attachment_ids=attachment_ids, current_user=current_user)
+
+    if current_user and message and not attachment_ids:
         transaction_reply = await handle_chat_transaction_action(message, current_user, session)
         if transaction_reply:
             return ChatSendResponse(messages=[transaction_reply])
 
+    trace_id = uuid4().hex
     sender_id = (payload.sender_id or "").strip() or (f"user-{current_user.id}" if current_user else "web_user")
     metadata = {
         "is_authenticated": bool(current_user),
@@ -1458,53 +2395,54 @@ async def chat_send(
         "user_email": current_user.email if current_user else "",
         "username": current_user.username if current_user else "",
         "frontend_base_url": FRONTEND_BASE_URL,
+        "trace_id": trace_id,
+        "attachments": attachment_ids,
     }
 
-    webhook_url = f"{RASA_SERVER_URL.rstrip('/')}{RASA_REST_WEBHOOK_PATH}"
+    intent_name = ""
+    intent_confidence = 0.0
+    if message:
+        intent_name, intent_confidence = await parse_rasa_intent(message)
+    route = (
+        "agent"
+        if attachment_ids
+        else decide_chat_route(message=message, intent_name=intent_name, intent_confidence=intent_confidence)
+    )
+    domains = sorted(infer_message_domains(message))
+    logger.info(
+        "chat_route trace_id=%s route=%s intent=%s confidence=%.3f domains=%s sender_id=%s attachments=%d",
+        trace_id,
+        route,
+        intent_name or "unknown",
+        intent_confidence,
+        ",".join(domains),
+        sender_id,
+        len(attachment_ids),
+    )
 
-    try:
-        async with httpx.AsyncClient(timeout=RASA_REQUEST_TIMEOUT_SEC) as client:
-            response = await client.post(
-                webhook_url,
-                json={"sender": sender_id, "message": message, "metadata": metadata},
+    metadata["route"] = route
+    if route == "agent":
+        try:
+            reply, tool_call_logs = await run_nexau_agent_orchestrator(
+                message=message,
+                current_user=current_user,
+                session=session,
+                attachments=attachment_ids,
             )
-        response.raise_for_status()
-    except httpx.TimeoutException:
-        raise HTTPException(status_code=504, detail="Rasa response timeout")
-    except httpx.HTTPStatusError as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Rasa request failed with status {exc.response.status_code}",
-        )
-    except httpx.HTTPError:
-        raise HTTPException(status_code=503, detail="Rasa service unavailable")
+            logger.info(
+                "agent_route trace_id=%s tool_calls=%s",
+                trace_id,
+                json.dumps(tool_call_logs, ensure_ascii=False, default=str),
+            )
+            return ChatSendResponse(messages=[reply])
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("agent_route_failed trace_id=%s error=%s fallback=rule", trace_id, str(exc))
+            metadata["route"] = "rule"
 
-    data = response.json()
-    if not isinstance(data, list):
-        raise HTTPException(status_code=502, detail="Invalid response from Rasa")
+    if not message:
+        raise HTTPException(status_code=400, detail="attachments request must route to agent")
 
-    messages: list[ChatReplyMessage] = []
-    for item in data:
-        if isinstance(item, dict):
-            custom_payload = item.get("custom") if isinstance(item.get("custom"), dict) else {}
-            text = item.get("text")
-            if not isinstance(text, str):
-                custom_text = custom_payload.get("text")
-                text = custom_text if isinstance(custom_text, str) else ""
-
-            cards = item.get("cards")
-            actions = item.get("actions")
-            if cards is None:
-                cards = custom_payload.get("cards")
-            if actions is None:
-                actions = custom_payload.get("actions")
-
-            parsed = build_chat_message(text or "", cards=cards, actions=actions)
-            if parsed.text or parsed.cards or parsed.actions:
-                messages.append(parsed)
-
-    if not messages:
-        messages.append(build_chat_message("暂时没有生成有效回复，请稍后重试。"))
+    messages = await call_rasa_webhook(sender_id=sender_id, message=message, metadata=metadata)
     return ChatSendResponse(messages=messages)
 
 
@@ -2566,3 +3504,4 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(app, host="0.0.0.0", port=8000)
+

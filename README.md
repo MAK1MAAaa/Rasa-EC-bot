@@ -17,7 +17,7 @@
 
 ## 2. 技术栈
 - Frontend: Vue 3 + Vite + Pinia + Tailwind CSS
-- Backend: FastAPI + SQLModel + PostgreSQL
+- Backend: FastAPI + SQLModel + PostgreSQL(pgvector)
 - Chatbot: Rasa + Rasa SDK Actions + Ollama
 - Cache: Redis
 
@@ -29,8 +29,8 @@ New-Item -ItemType Directory -Force .\database\pgdata, .\database\redisdata | Ou
 $PGDATA_PATH = (Resolve-Path .\database\pgdata).Path
 $REDISDATA_PATH = (Resolve-Path .\database\redisdata).Path
 
-# PostgreSQL
-docker run --name rasa-postgres -e POSTGRES_PASSWORD=postgres -p 5432:5432 -v "${PGDATA_PATH}:/var/lib/postgresql/data" -d postgres:15
+# PostgreSQL (pgvector)
+docker run --name rasa-postgres -e POSTGRES_PASSWORD=postgres -p 5432:5432 -v "${PGDATA_PATH}:/var/lib/postgresql/data" -d pgvector/pgvector:pg15
 docker exec -it rasa-postgres psql -U postgres -c "CREATE DATABASE rasa_ec_bot;"
 
 # Redis
@@ -41,8 +41,8 @@ Linux / macOS（在项目根目录执行）：
 ```bash
 mkdir -p ./database/pgdata ./database/redisdata
 
-# PostgreSQL
-docker run --name rasa-postgres -e POSTGRES_PASSWORD=postgres -p 5432:5432 -v "$(pwd)/database/pgdata:/var/lib/postgresql/data" -d postgres:15
+# PostgreSQL (pgvector)
+docker run --name rasa-postgres -e POSTGRES_PASSWORD=postgres -p 5432:5432 -v "$(pwd)/database/pgdata:/var/lib/postgresql/data" -d pgvector/pgvector:pg15
 docker exec -it rasa-postgres psql -U postgres -c "CREATE DATABASE rasa_ec_bot;"
 
 # Redis
@@ -57,6 +57,19 @@ docker run --name rasa-redis -p 6379:6379 -v "$(pwd)/database/redisdata:/data" -
   - `docker stop rasa-postgres rasa-redis`
   - `docker rm rasa-postgres rasa-redis`
   - 再执行上面的 `docker run` 命令
+
+已有 PostgreSQL 容器升级到 pgvector（保留数据）：
+
+1. 备份：
+   - `docker exec -t rasa-postgres pg_dump -U postgres -d rasa_ec_bot > rasa_ec_bot_backup.sql`
+2. 停止并删除旧容器（不删宿主机 `database/pgdata`）：
+   - `docker stop rasa-postgres`
+   - `docker rm rasa-postgres`
+3. 用 pgvector 镜像重建：
+   - `docker run --name rasa-postgres -e POSTGRES_PASSWORD=postgres -p 5432:5432 -v ".../database/pgdata:/var/lib/postgresql/data" -d pgvector/pgvector:pg15`
+4. 恢复数据并启用扩展：
+   - `docker exec -i rasa-postgres psql -U postgres -d rasa_ec_bot < rasa_ec_bot_backup.sql`
+   - `docker exec -it rasa-postgres psql -U postgres -d rasa_ec_bot -c "CREATE EXTENSION IF NOT EXISTS vector;"`
 
 ### 3.2 初始化数据库
 ```powershell
@@ -149,3 +162,27 @@ pnpm dev
    - 打开 `http://127.0.0.1:8000/docs`
    - 前端进入聊天页，发送一条普通咨询，确认能收到回复
 
+
+## 7. 混合客服路由（Rasa Fast Router + NexAU Agent）
+
+当前后端已支持混合客服路由：
+- 高频确定性问题（高置信 intent）继续走 Rasa 规则链路。
+- 复杂多轮/多目标问题（如补差价+退换货组合）切到内置 NexAU Agent Orchestrator（ReAct + Tool Calling）。
+
+说明：
+- `POST /api/v1/chat/send` 返回结构保持不变：`messages[].text/cards/actions`。
+- 后端内部新增可观测字段：`trace_id` 与 `route`（仅日志/metadata 使用，不改变前端协议）。
+- 写操作（下单/售后）仍通过二次确认草案机制，Agent 不会直接落库执行。
+
+## 8. Multi-modal RAG（pgvector + 图片）
+
+- 数据层升级为 `pgvector/pgvector:pg15`，向量与业务数据同库。
+- 新增能力：
+  - `POST /api/v1/chat/upload-image`：聊天单图上传（返回 `attachment_id`）。
+  - `POST /api/v1/kb/index`：政策/说明书入库分块 + embedding。
+  - `POST /api/v1/chat/send`：新增可选 `attachments: string[]`，旧请求保持兼容。
+- Agent 新增工具：
+  - `retrieve_policy_knowledge`
+  - `retrieve_manual_knowledge`
+  - `analyze_uploaded_image_vlm`（固定模型 `qwen3-vl:2b`）
+- 返回协议保持不变：`messages[].text/cards/actions`。

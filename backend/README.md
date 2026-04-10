@@ -10,7 +10,7 @@
 
 ## 2. 运行依赖
 - Python `>=3.10, <3.12`
-- PostgreSQL 15
+- PostgreSQL 15（pgvector）
 - Redis 7（Docker）
 
 ## 3. 环境变量
@@ -49,7 +49,7 @@ Windows PowerShell（在 `backend` 目录执行）：
 New-Item -ItemType Directory -Force ..\database\pgdata | Out-Null
 $PGDATA_PATH = (Resolve-Path ..\database\pgdata).Path
 
-docker run --name rasa-postgres -e POSTGRES_PASSWORD=postgres -p 5432:5432 -v "${PGDATA_PATH}:/var/lib/postgresql/data" -d postgres:15
+docker run --name rasa-postgres -e POSTGRES_PASSWORD=postgres -p 5432:5432 -v "${PGDATA_PATH}:/var/lib/postgresql/data" -d pgvector/pgvector:pg15
 
 docker ps --filter name=rasa-postgres
 
@@ -60,7 +60,7 @@ Linux / macOS（在 `backend` 目录执行）：
 ```bash
 mkdir -p ../database/pgdata
 
-docker run --name rasa-postgres -e POSTGRES_PASSWORD=postgres -p 5432:5432 -v "$(pwd)/../database/pgdata:/var/lib/postgresql/data" -d postgres:15
+docker run --name rasa-postgres -e POSTGRES_PASSWORD=postgres -p 5432:5432 -v "$(pwd)/../database/pgdata:/var/lib/postgresql/data" -d pgvector/pgvector:pg15
 
 docker ps --filter name=rasa-postgres
 
@@ -75,6 +75,15 @@ docker exec -it rasa-postgres psql -U postgres -c "CREATE DATABASE rasa_ec_bot;"
   - `docker stop rasa-postgres`
   - `docker rm rasa-postgres`
   - 再执行上面的 `docker run` 命令
+
+已有 PostgreSQL 容器升级到 pgvector（保留数据）：
+
+1. 备份：`docker exec -t rasa-postgres pg_dump -U postgres -d rasa_ec_bot > rasa_ec_bot_backup.sql`
+2. 停止并删除旧容器：`docker stop rasa-postgres && docker rm rasa-postgres`
+3. 使用新镜像重建（挂载原 `pgdata`）：`pgvector/pgvector:pg15`
+4. 恢复并启用扩展：
+   - `docker exec -i rasa-postgres psql -U postgres -d rasa_ec_bot < rasa_ec_bot_backup.sql`
+   - `docker exec -it rasa-postgres psql -U postgres -d rasa_ec_bot -c "CREATE EXTENSION IF NOT EXISTS vector;"`
 
 ### 4.2 Redis（持久化 + 初始化脚本）
 在 `backend` 目录执行。
@@ -254,3 +263,63 @@ WHERE email IN (
   'merchant2@example.com'
 );
 ```
+
+## 10. 混合客服路由（新增）
+
+### 10.1 路由策略
+- `POST /api/v1/chat/send` 先尝试 Rasa intent parse。
+- 命中 `nlu_fallback`、低置信度（默认 `<0.72`）或复杂查询（多域/条件/并列目标）时，切换到 Agent 路由。
+- 高频意图（问候、订单、物流、售后、推荐）且高置信时继续走 Rasa。
+
+### 10.2 Agent 工具分级
+- Read tools：
+  - `query_orders_summary`
+  - `query_logistics_summary`
+  - `query_after_sales_summary`
+  - `query_price_protection`
+- Write tools：
+  - `draft_after_sales_request`（只生成待确认草案，不直接执行写操作）
+
+### 10.3 新增环境变量
+```env
+RASA_PARSE_PATH=/model/parse
+CHAT_ROUTER_ENABLE_AGENT=true
+CHAT_ROUTER_RASA_CONFIDENCE_THRESHOLD=0.72
+AGENT_OLLAMA_MODEL=qwen3.5:2b-lora
+AGENT_OLLAMA_TIMEOUT_SEC=45
+```
+
+### 10.4 可观测性
+- 每次聊天请求生成 `trace_id`。
+- 内部路由标记：`route=rule|agent`。
+- Agent 模式会记录工具调用日志（工具名/读写级别/参数/成功状态）。
+
+## 11. Multi-modal RAG（新增）
+
+### 11.1 环境变量
+在 `.env` 中新增：
+
+```env
+OLLAMA_EMBED_MODEL=mxbai-embed-large
+OLLAMA_VLM_MODEL=qwen3-vl:2b
+KB_EMBEDDING_DIM=1024
+KB_RETRIEVAL_TOP_K=4
+KB_CHUNK_SIZE=500
+KB_CHUNK_OVERLAP=80
+CHAT_UPLOAD_DIR=data/chat_uploads
+CHAT_UPLOAD_MAX_MB=8
+```
+
+### 11.2 新增接口
+- `POST /api/v1/chat/upload-image`
+  - `multipart/form-data`，字段名 `file`，仅支持 jpg/png/webp
+  - 返回：`attachment_id/mime/size_bytes/width/height`
+- `POST /api/v1/kb/index`
+  - 入库政策/说明书（分块 + embedding + upsert）
+- `POST /api/v1/chat/send`
+  - 请求体新增可选：`attachments: string[]`
+  - 带附件请求会强制走 Agent 路由
+
+### 11.3 安全与执行边界
+- 图片附件会校验归属，禁止跨用户读取。
+- 写操作仍保持“待确认草案”机制，不会由 Agent 直接落库执行退款/退换货。

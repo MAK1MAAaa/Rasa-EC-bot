@@ -1,5 +1,5 @@
-<script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+﻿<script setup lang="ts">
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import api from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 
@@ -44,22 +44,31 @@ interface ChatSendResponse {
   messages: ChatMessagePayload[]
 }
 
+interface ChatUploadImageResponse {
+  attachment_id: string
+}
+
 const authStore = useAuthStore()
 const sending = ref(false)
 const inputText = ref('')
 const chatLogRef = ref<HTMLElement | null>(null)
+const imageInputRef = ref<HTMLInputElement | null>(null)
+const selectedImageFile = ref<File | null>(null)
+const selectedImagePreviewUrl = ref('')
 
 const quickPrompts = [
-  '查询我的订单',
-  '查询物流进度',
-  '帮我下单 地址: 上海市浦东新区世纪大道100号',
-  '申请退款 ORD202604010001 原因: 尺寸不合适',
-  '推荐几款手机'
+  '鏌ヨ鎴戠殑璁㈠崟',
+  '鏌ヨ鐗╂祦杩涘害',
+  '甯垜涓嬪崟 鍦板潃: 涓婃捣甯傛郸涓滄柊鍖轰笘绾ぇ閬?00鍙?,
+  '鐢宠閫€娆?ORD202604010001 鍘熷洜: 灏哄涓嶅悎閫?,
+  '鎺ㄨ崘鍑犳鎵嬫満'
 ]
 
 const CHAT_GUEST_ID_KEY = 'chat_guest_id'
 const CHAT_STORAGE_PREFIX = 'chat_sessions_v2'
 const CHAT_ACTIVE_PREFIX = 'chat_active_session_v2'
+const MAX_IMAGE_UPLOAD_MB = 8
+const IMAGE_ACCEPT = ['image/jpeg', 'image/png', 'image/webp']
 
 const readOrCreateGuestId = () => {
   const existing = localStorage.getItem(CHAT_GUEST_ID_KEY)
@@ -132,12 +141,12 @@ const decisionModal = ref<{
 const buildWelcomeBubble = (): ChatBubble =>
   buildBubble(
     'bot',
-    '你好，我是商城客服。可以查订单/物流/售后，也可以帮你自动下单或发起退款申请。涉及资金和售后时，会弹出确认卡片供你确认或取消。'
+    '浣犲ソ锛屾垜鏄晢鍩庡鏈嶃€傚彲浠ユ煡璁㈠崟/鐗╂祦/鍞悗锛屼篃鍙互甯綘鑷姩涓嬪崟鎴栧彂璧烽€€娆剧敵璇枫€傛秹鍙婅祫閲戝拰鍞悗鏃讹紝浼氬脊鍑虹‘璁ゅ崱鐗囦緵浣犵‘璁ゆ垨鍙栨秷銆?
   )
 
 const deriveSessionTitle = (session: ChatSession) => {
   const firstUser = session.bubbles.find((item) => item.role === 'user' && item.text.trim())
-  if (!firstUser) return '新会话'
+  if (!firstUser) return '鏂颁細璇?
   const text = firstUser.text.trim().replace(/\s+/g, ' ')
   return text.length > 16 ? `${text.slice(0, 16)}...` : text
 }
@@ -146,7 +155,7 @@ const createSession = (): ChatSession => {
   const now = new Date().toISOString()
   return {
     id: `s-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    title: '新会话',
+    title: '鏂颁細璇?,
     createdAt: now,
     updatedAt: now,
     bubbles: [buildWelcomeBubble()]
@@ -180,7 +189,7 @@ const safeParseSessions = (raw: string | null): ChatSession[] => {
         const fallback = createSession()
         return {
           id: typeof item?.id === 'string' && item.id ? item.id : fallback.id,
-          title: typeof item?.title === 'string' && item.title ? item.title : '新会话',
+          title: typeof item?.title === 'string' && item.title ? item.title : '鏂颁細璇?,
           createdAt: typeof item?.createdAt === 'string' && item.createdAt ? item.createdAt : fallback.createdAt,
           updatedAt: typeof item?.updatedAt === 'string' && item.updatedAt ? item.updatedAt : fallback.updatedAt,
           bubbles: bubbles.length > 0 ? bubbles : [buildWelcomeBubble()]
@@ -202,13 +211,13 @@ const persistChatState = () => {
 const currentSession = computed(() => sessions.value.find((item) => item.id === activeSessionId.value) || null)
 const bubbles = computed(() => currentSession.value?.bubbles || [])
 
-const userLabel = computed(() => authStore.user?.username || '游客')
+const userLabel = computed(() => authStore.user?.username || '娓稿')
 const senderId = computed(() => `${principalId.value}:${activeSessionId.value || 'default'}`)
 
-const modalTitle = computed(() => (decisionModal.value.decision === 'confirm' ? '确认执行该操作？' : '确认取消该操作？'))
+const modalTitle = computed(() => (decisionModal.value.decision === 'confirm' ? '纭鎵ц璇ユ搷浣滐紵' : '纭鍙栨秷璇ユ搷浣滐紵'))
 const modalConfirmLabel = computed(() => {
-  if (decisionModal.value.loading) return '处理中...'
-  return decisionModal.value.decision === 'confirm' ? '确认执行' : '确认取消'
+  if (decisionModal.value.loading) return '澶勭悊涓?..'
+  return decisionModal.value.decision === 'confirm' ? '纭鎵ц' : '纭鍙栨秷'
 })
 
 const modalCardDetails = computed(() => {
@@ -261,7 +270,7 @@ const pushBubble = (role: ChatBubbleRole, text: string, cards: ChatCard[] = [], 
 const appendReplyMessages = (messages: ChatMessagePayload[]) => {
   const replies = Array.isArray(messages) ? messages : []
   if (replies.length === 0) {
-    pushBubble('bot', '暂时没有回复，请稍后重试。')
+    pushBubble('bot', '鏆傛椂娌℃湁鍥炲锛岃绋嶅悗閲嶈瘯銆?)
     return
   }
 
@@ -277,7 +286,7 @@ const appendReplyMessages = (messages: ChatMessagePayload[]) => {
   })
 
   if (!hasValidReply) {
-    pushBubble('bot', '暂时没有回复，请稍后重试。')
+    pushBubble('bot', '鏆傛椂娌℃湁鍥炲锛岃绋嶅悗閲嶈瘯銆?)
   }
 }
 
@@ -287,6 +296,7 @@ const createNewSession = () => {
   activeSessionId.value = created.id
   persistChatState()
   inputText.value = ''
+  clearImageSelection()
   scrollToBottom()
 }
 
@@ -294,6 +304,7 @@ const switchSession = (id: string) => {
   if (id === activeSessionId.value) return
   activeSessionId.value = id
   inputText.value = ''
+  clearImageSelection()
   persistChatState()
   scrollToBottom()
 }
@@ -301,8 +312,9 @@ const switchSession = (id: string) => {
 const clearCurrentSession = () => {
   const session = ensureCurrentSession()
   session.bubbles = [buildWelcomeBubble()]
-  session.title = '新会话'
+  session.title = '鏂颁細璇?
   session.updatedAt = new Date().toISOString()
+  clearImageSelection()
   persistChatState()
 }
 
@@ -411,27 +423,27 @@ const renderMessageHtml = (value: string) => {
 }
 
 const orderStatusLabel = (status: string) => {
-  if (status === 'pending_shipment') return '待发货'
-  if (status === 'shipped') return '已发货'
-  return status || '未知状态'
+  if (status === 'pending_shipment') return '寰呭彂璐?
+  if (status === 'shipped') return '宸插彂璐?
+  return status || '鏈煡鐘舵€?
 }
 
 const afterSalesStatusLabel = (status: string) => {
   const map: Record<string, string> = {
-    submitted: '待商家处理',
-    merchant_approved: '商家已同意',
-    processing: '处理中',
-    merchant_rejected: '商家已拒绝',
-    completed: '已完成',
-    cancelled: '已取消'
+    submitted: '寰呭晢瀹跺鐞?,
+    merchant_approved: '鍟嗗宸插悓鎰?,
+    processing: '澶勭悊涓?,
+    merchant_rejected: '鍟嗗宸叉嫆缁?,
+    completed: '宸插畬鎴?,
+    cancelled: '宸插彇娑?
   }
-  return map[status] || status || '未知状态'
+  return map[status] || status || '鏈煡鐘舵€?
 }
 
 const afterSalesTypeLabel = (value: string) => {
-  if (value === 'return') return '退货'
-  if (value === 'exchange') return '换货'
-  return value || '售后'
+  if (value === 'return') return '閫€璐?
+  if (value === 'exchange') return '鎹㈣揣'
+  return value || '鍞悗'
 }
 
 const getText = (value: any, fallback = '-') => {
@@ -445,7 +457,7 @@ const getNum = (value: any, fallback = 0) => {
   return Number.isFinite(num) ? num : fallback
 }
 
-const formatMoney = (value: any) => `¥ ${getNum(value).toFixed(2)}`
+const formatMoney = (value: any) => `楼 ${getNum(value).toFixed(2)}`
 
 const formatDateText = (value: any) => {
   if (typeof value !== 'string' || !value.trim()) return '-'
@@ -481,7 +493,7 @@ const submitPendingDecision = async () => {
   decisionModal.value.loading = true
 
   const decision = decisionModal.value.decision
-  pushBubble('user', decision === 'confirm' ? '确认执行' : '取消操作')
+  pushBubble('user', decision === 'confirm' ? '纭鎵ц' : '鍙栨秷鎿嶄綔')
 
   try {
     const response = await api.post<ChatSendResponse>('/chat/pending-action/decision', { decision })
@@ -489,7 +501,7 @@ const submitPendingDecision = async () => {
     decisionModal.value.visible = false
     decisionModal.value.card = null
   } catch (err: any) {
-    pushBubble('system', err.response?.data?.detail || '确认操作失败，请稍后再试。')
+    pushBubble('system', err.response?.data?.detail || '纭鎿嶄綔澶辫触锛岃绋嶅悗鍐嶈瘯銆?)
   } finally {
     decisionModal.value.loading = false
     await scrollToBottom()
@@ -509,7 +521,7 @@ const onBubbleAction = (action: ChatAction, cardContext?: ChatCard | null) => {
     return
   }
 
-  pushBubble('system', '该操作暂不支持。')
+  pushBubble('system', '璇ユ搷浣滄殏涓嶆敮鎸併€?)
 }
 
 const scrollToBottom = async () => {
@@ -517,20 +529,75 @@ const scrollToBottom = async () => {
   chatLogRef.value?.scrollTo({ top: chatLogRef.value.scrollHeight, behavior: 'smooth' })
 }
 
+const clearImageSelection = () => {
+  if (selectedImagePreviewUrl.value) {
+    URL.revokeObjectURL(selectedImagePreviewUrl.value)
+  }
+  selectedImagePreviewUrl.value = ''
+  selectedImageFile.value = null
+  if (imageInputRef.value) {
+    imageInputRef.value.value = ''
+  }
+}
+
+const triggerImagePicker = () => {
+  if (sending.value) return
+  imageInputRef.value?.click()
+}
+
+const onImageSelected = (event: Event) => {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) {
+    clearImageSelection()
+    return
+  }
+  if (!IMAGE_ACCEPT.includes(file.type)) {
+    pushBubble('system', '仅支持 JPG/PNG/WEBP 图片。')
+    clearImageSelection()
+    return
+  }
+  if (file.size > MAX_IMAGE_UPLOAD_MB * 1024 * 1024) {
+    pushBubble('system', `图片不能超过 ${MAX_IMAGE_UPLOAD_MB}MB。`)
+    clearImageSelection()
+    return
+  }
+
+  if (selectedImagePreviewUrl.value) {
+    URL.revokeObjectURL(selectedImagePreviewUrl.value)
+  }
+  selectedImageFile.value = file
+  selectedImagePreviewUrl.value = URL.createObjectURL(file)
+}
+
+const uploadSelectedImage = async (): Promise<string | null> => {
+  if (!selectedImageFile.value) return null
+  const formData = new FormData()
+  formData.append('file', selectedImageFile.value)
+  const response = await api.post<ChatUploadImageResponse>('/chat/upload-image', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  })
+  return response.data.attachment_id
+}
+
 const sendMessage = async (overrideText?: string) => {
   const message = (overrideText ?? inputText.value).trim()
-  if (!message || sending.value) return
+  if (sending.value || (!message && !selectedImageFile.value)) return
 
-  pushBubble('user', message)
+  pushBubble('user', message || '[图片]')
   inputText.value = ''
   sending.value = true
 
   try {
+    const attachmentId = await uploadSelectedImage()
+    const attachments = attachmentId ? [attachmentId] : []
     const response = await api.post<ChatSendResponse>('/chat/send', {
       message,
-      sender_id: senderId.value
+      sender_id: senderId.value,
+      attachments
     })
     appendReplyMessages(response.data.messages)
+    clearImageSelection()
   } catch (err: any) {
     pushBubble('system', err.response?.data?.detail || '客服服务暂不可用，请稍后再试。')
   } finally {
@@ -554,6 +621,10 @@ onMounted(async () => {
   await scrollToBottom()
 })
 
+onBeforeUnmount(() => {
+  clearImageSelection()
+})
+
 watch(
   () => authStore.user?.id,
   async () => {
@@ -567,7 +638,7 @@ watch(
   <section class="chat-page">
     <div class="hero">
       <div class="hero-head">
-        <h1>在线客服</h1>
+        <h1>鍦ㄧ嚎瀹㈡湇</h1>
         <span class="user-chip">{{ userLabel }}</span>
       </div>
       <div class="quick-actions">
@@ -580,10 +651,10 @@ watch(
     <div class="support-layout">
       <aside class="history-panel">
         <div class="history-head">
-          <h2>会话管理</h2>
+          <h2>浼氳瘽绠＄悊</h2>
           <div class="history-actions">
-            <button type="button" @click="createNewSession">新建</button>
-            <button type="button" @click="clearCurrentSession">清空当前</button>
+            <button type="button" @click="createNewSession">鏂板缓</button>
+            <button type="button" @click="clearCurrentSession">娓呯┖褰撳墠</button>
           </div>
         </div>
 
@@ -593,7 +664,7 @@ watch(
               <strong>{{ session.title }}</strong>
               <span>{{ formatSessionTime(session.updatedAt) }}</span>
             </button>
-            <button type="button" class="history-del" @click.stop="deleteSession(session.id)">删除</button>
+            <button type="button" class="history-del" @click.stop="deleteSession(session.id)">鍒犻櫎</button>
           </article>
         </div>
       </aside>
@@ -601,7 +672,7 @@ watch(
       <div class="chat-panel">
         <div ref="chatLogRef" class="chat-log" role="log" aria-live="polite">
           <article v-for="item in bubbles" :key="item.id" :class="`bubble ${item.role}`">
-            <span class="tag">{{ item.role === 'user' ? '我' : item.role === 'bot' ? '客服' : '系统' }}</span>
+            <span class="tag">{{ item.role === 'user' ? '鎴? : item.role === 'bot' ? '瀹㈡湇' : '绯荤粺' }}</span>
             <p v-if="item.text" v-html="renderMessageHtml(item.text)"></p>
 
             <div v-if="item.cards.length > 0" class="bubble-cards">
@@ -612,72 +683,72 @@ watch(
               >
                 <template v-if="card.type === 'product'">
                   <div class="card-head">
-                    <strong>{{ getText(card.data.name, '商品') }}</strong>
-                    <span class="pill">{{ getText(card.data.category, '未分类') }}</span>
+                    <strong>{{ getText(card.data.name, '鍟嗗搧') }}</strong>
+                    <span class="pill">{{ getText(card.data.category, '鏈垎绫?) }}</span>
                   </div>
                   <div class="card-row">
                     <span>{{ formatMoney(card.data.price) }}</span>
-                    <span>库存 {{ getNum(card.data.stock) }}</span>
+                    <span>搴撳瓨 {{ getNum(card.data.stock) }}</span>
                   </div>
                   <div class="card-row muted" v-if="card.data.shop_name">{{ card.data.shop_name }}</div>
                   <div class="card-actions" v-if="card.data.product_link">
-                    <button type="button" @click="openLink(card.data.product_link)">查看商品</button>
+                    <button type="button" @click="openLink(card.data.product_link)">鏌ョ湅鍟嗗搧</button>
                   </div>
                 </template>
 
                 <template v-else-if="card.type === 'order'">
                   <div class="card-head">
-                    <strong>订单 {{ getText(card.data.id) }}</strong>
+                    <strong>璁㈠崟 {{ getText(card.data.id) }}</strong>
                     <span class="pill">{{ getText(card.data.status_label, orderStatusLabel(getText(card.data.status, ''))) }}</span>
                   </div>
                   <div class="card-row">
-                    <span>{{ getNum(card.data.item_count) }} 件商品</span>
+                    <span>{{ getNum(card.data.item_count) }} 浠跺晢鍝?/span>
                     <span>{{ formatMoney(card.data.total_amount) }}</span>
                   </div>
                   <div class="card-row muted">{{ formatDateText(card.data.created_at) }}</div>
                   <div class="card-actions" v-if="card.data.order_link">
-                    <button type="button" @click="openLink(card.data.order_link)">查看订单</button>
+                    <button type="button" @click="openLink(card.data.order_link)">鏌ョ湅璁㈠崟</button>
                   </div>
                 </template>
 
                 <template v-else-if="card.type === 'logistics'">
                   <div class="card-head">
-                    <strong>物流 {{ getText(card.data.id) }}</strong>
+                    <strong>鐗╂祦 {{ getText(card.data.id) }}</strong>
                     <span class="pill">{{ getText(card.data.status_label, orderStatusLabel(getText(card.data.status, ''))) }}</span>
                   </div>
-                  <div class="card-row muted" v-if="card.data.tracking_no">运单号：{{ getText(card.data.tracking_no) }}</div>
-                  <div class="card-row muted" v-if="card.data.current_location">当前位置：{{ getText(card.data.current_location) }}</div>
+                  <div class="card-row muted" v-if="card.data.tracking_no">杩愬崟鍙凤細{{ getText(card.data.tracking_no) }}</div>
+                  <div class="card-row muted" v-if="card.data.current_location">褰撳墠浣嶇疆锛歿{ getText(card.data.current_location) }}</div>
                   <div class="card-row muted" v-if="card.data.estimated_delivery_text || card.data.estimated_delivery_at">
-                    预计送达：{{ getText(card.data.estimated_delivery_text, formatDateText(card.data.estimated_delivery_at)) }}
+                    棰勮閫佽揪锛歿{ getText(card.data.estimated_delivery_text, formatDateText(card.data.estimated_delivery_at)) }}
                   </div>
                   <div class="card-row muted" v-if="Array.isArray(card.data.route_plan) && card.data.route_plan.length > 0">
-                    途径：{{ card.data.route_plan.join(' -> ') }}
+                    閫斿緞锛歿{ card.data.route_plan.join(' -> ') }}
                   </div>
                   <div class="card-actions" v-if="card.data.order_link">
-                    <button type="button" @click="openLink(card.data.order_link)">查看订单</button>
+                    <button type="button" @click="openLink(card.data.order_link)">鏌ョ湅璁㈠崟</button>
                   </div>
                 </template>
 
                 <template v-else-if="card.type === 'after_sales'">
                   <div class="card-head">
-                    <strong>售后 {{ getText(card.data.id) }}</strong>
+                    <strong>鍞悗 {{ getText(card.data.id) }}</strong>
                     <span class="pill">{{ getText(card.data.status_label, afterSalesStatusLabel(getText(card.data.status, ''))) }}</span>
                   </div>
-                  <div class="card-row">订单号：{{ getText(card.data.order_id) }}</div>
-                  <div class="card-row">类型：{{ getText(card.data.type_label, afterSalesTypeLabel(getText(card.data.type, ''))) }}</div>
+                  <div class="card-row">璁㈠崟鍙凤細{{ getText(card.data.order_id) }}</div>
+                  <div class="card-row">绫诲瀷锛歿{ getText(card.data.type_label, afterSalesTypeLabel(getText(card.data.type, ''))) }}</div>
                   <div class="card-row muted" v-if="card.data.created_at_text || card.data.created_at">
-                    提交时间：{{ getText(card.data.created_at_text, formatDateText(card.data.created_at)) }}
+                    鎻愪氦鏃堕棿锛歿{ getText(card.data.created_at_text, formatDateText(card.data.created_at)) }}
                   </div>
-                  <div class="card-row muted" v-if="card.data.reason">原因：{{ getText(card.data.reason) }}</div>
+                  <div class="card-row muted" v-if="card.data.reason">鍘熷洜锛歿{ getText(card.data.reason) }}</div>
                   <div class="card-actions" v-if="card.data.order_link">
-                    <button type="button" @click="openLink(card.data.order_link)">查看订单</button>
+                    <button type="button" @click="openLink(card.data.order_link)">鏌ョ湅璁㈠崟</button>
                   </div>
                 </template>
 
                 <template v-else-if="card.type === 'pending_action'">
                   <div class="card-head">
-                    <strong>{{ getText(card.data.title, '待确认操作') }}</strong>
-                    <span class="pill warn">待确认</span>
+                    <strong>{{ getText(card.data.title, '寰呯‘璁ゆ搷浣?) }}</strong>
+                    <span class="pill warn">寰呯‘璁?/span>
                   </div>
                   <div class="card-row muted" v-if="card.data.description">{{ getText(card.data.description, '') }}</div>
                   <div v-if="Array.isArray(card.data.details)" class="detail-list">
@@ -687,8 +758,27 @@ watch(
                     </div>
                   </div>
                   <div class="card-actions">
-                    <button type="button" @click="openDecisionModal('confirm', card)">确认执行</button>
-                    <button type="button" class="danger" @click="openDecisionModal('cancel', card)">取消操作</button>
+                    <button type="button" @click="openDecisionModal('confirm', card)">纭鎵ц</button>
+                    <button type="button" class="danger" @click="openDecisionModal('cancel', card)">鍙栨秷鎿嶄綔</button>
+                  </div>
+                </template>
+
+                <template v-else-if="card.type === 'image_analysis'">
+                  <div class="card-head">
+                    <strong>图片分析结果</strong>
+                    <span class="pill">{{ getText(card.data.severity, 'medium') }}</span>
+                  </div>
+                  <div class="card-row">问题类型：{{ getText(card.data.issue_type, 'unknown') }}</div>
+                  <div class="card-row muted" v-if="card.data.evidence">依据：{{ getText(card.data.evidence) }}</div>
+                  <div class="card-row muted" v-if="card.data.suggested_action">建议：{{ getText(card.data.suggested_action) }}</div>
+                  <div class="card-row muted">置信度：{{ `${Math.round(getNum(card.data.confidence) * 100)}%` }}</div>
+                  <div class="card-actions">
+                    <button
+                      type="button"
+                      @click="sendMessage(`请根据图片分析结果生成售后待确认草案，附件ID：${getText(card.data.attachment_id, '')}`)"
+                    >
+                      生成售后草案
+                    </button>
                   </div>
                 </template>
 
@@ -717,13 +807,27 @@ watch(
 
         <div class="input-row">
           <input
+            ref="imageInputRef"
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            class="hidden-file-input"
+            @change="onImageSelected"
+          >
+          <div v-if="selectedImagePreviewUrl" class="attachment-preview">
+            <img :src="selectedImagePreviewUrl" alt="attachment preview">
+            <button type="button" class="danger" @click="clearImageSelection">移除图片</button>
+          </div>
+          <button type="button" class="upload-btn" :disabled="sending" @click="triggerImagePicker">
+            上传图片
+          </button>
+          <input
             v-model="inputText"
             type="text"
-            placeholder="输入问题..."
+            placeholder="杈撳叆闂..."
             @keyup.enter="sendMessage"
           >
-          <button type="button" :disabled="sending || !inputText.trim()" @click="sendMessage()">
-            {{ sending ? '发送中...' : '发送' }}
+          <button type="button" :disabled="sending || (!inputText.trim() && !selectedImageFile)" @click="sendMessage()">
+            {{ sending ? '鍙戦€佷腑...' : '鍙戦€? }}
           </button>
         </div>
       </div>
@@ -742,7 +846,7 @@ watch(
         </div>
 
         <div class="decision-actions">
-          <button type="button" class="ghost" :disabled="decisionModal.loading" @click="closeDecisionModal">返回</button>
+          <button type="button" class="ghost" :disabled="decisionModal.loading" @click="closeDecisionModal">杩斿洖</button>
           <button type="button" :class="decisionModal.decision === 'confirm' ? 'primary' : 'danger'" :disabled="decisionModal.loading" @click="submitPendingDecision">
             {{ modalConfirmLabel }}
           </button>
@@ -1092,9 +1196,38 @@ watch(
   margin-top: 0;
   padding: 10px 12px 12px;
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: auto 1fr auto;
   gap: 10px;
   background: transparent;
+}
+
+.hidden-file-input {
+  display: none;
+}
+
+.attachment-preview {
+  grid-column: 1 / 4;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.attachment-preview img {
+  width: 54px;
+  height: 54px;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid #d9c9ad;
+}
+
+.upload-btn {
+  border: none;
+  border-radius: 999px;
+  padding: 0 14px;
+  background: #315f58;
+  color: #f2fff8;
+  font-size: 12px;
+  cursor: pointer;
 }
 
 .input-row input {
@@ -1216,6 +1349,10 @@ watch(
     grid-template-columns: 1fr;
   }
 
+  .attachment-preview {
+    grid-column: 1;
+  }
+
   .input-row button {
     min-height: 42px;
   }
@@ -1225,4 +1362,5 @@ watch(
   }
 }
 </style>
+
 

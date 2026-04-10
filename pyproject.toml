@@ -23,4 +23,5 @@ dependencies = [
     "aioredis",
     "httpx",
     "bcrypt==3.2.0",
+    "pillow",
 ]

@@ -175,8 +175,9 @@ class MerchantProductUpdate(SQLModel):
 
 
 class ChatSendRequest(SQLModel):
-    message: str = Field(min_length=1, max_length=2000)
+    message: str = Field(default="", max_length=2000)
     sender_id: Optional[str] = None
+    attachments: List[str] = Field(default_factory=list)
 
 
 class ChatCard(SQLModel):
@@ -199,6 +200,32 @@ class ChatReplyMessage(SQLModel):
 
 class ChatSendResponse(SQLModel):
     messages: List[ChatReplyMessage]
+
+
+class ChatUploadImageResponse(SQLModel):
+    attachment_id: str
+    mime: str
+    size_bytes: int
+    width: Optional[int] = None
+    height: Optional[int] = None
+
+
+class KBIndexItem(SQLModel):
+    source_type: str
+    title: str
+    content: str
+    version: Optional[str] = None
+    status: str = "active"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class KBIndexRequest(SQLModel):
+    items: List[KBIndexItem]
+
+
+class KBIndexResponse(SQLModel):
+    indexed_documents: int
+    indexed_chunks: int
 
 
 class ChatPendingActionDecisionRequest(SQLModel):

@@ -1,6 +1,10 @@
 ﻿CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
+CREATE EXTENSION IF NOT EXISTS vector;
 
+DROP TABLE IF EXISTS kb_chunks CASCADE;
+DROP TABLE IF EXISTS kb_documents CASCADE;
+DROP TABLE IF EXISTS chat_attachments CASCADE;
 DROP TABLE IF EXISTS after_sales CASCADE;
 DROP TABLE IF EXISTS logistics CASCADE;
 DROP TABLE IF EXISTS order_items CASCADE;
@@ -133,4 +137,46 @@ CREATE TABLE after_sales (
 CREATE INDEX idx_after_sales_order_id ON after_sales(order_id);
 CREATE INDEX idx_after_sales_status_created_at ON after_sales(status, created_at DESC);
 
+CREATE TABLE kb_documents (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    source_type VARCHAR(32) NOT NULL CHECK (source_type IN ('policy', 'manual')),
+    title TEXT NOT NULL,
+    version VARCHAR(64),
+    status VARCHAR(32) NOT NULL DEFAULT 'active',
+    checksum CHAR(64) NOT NULL UNIQUE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
 
+CREATE INDEX idx_kb_documents_source_status ON kb_documents(source_type, status);
+CREATE INDEX idx_kb_documents_title ON kb_documents(title);
+
+CREATE TABLE kb_chunks (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    document_id UUID NOT NULL REFERENCES kb_documents(id) ON DELETE CASCADE,
+    chunk_order INT NOT NULL,
+    chunk_text TEXT NOT NULL,
+    embedding vector(1024) NOT NULL,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_kb_chunks_document_order ON kb_chunks(document_id, chunk_order);
+CREATE INDEX idx_kb_chunks_embedding_ivfflat ON kb_chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+CREATE INDEX idx_kb_chunks_text_fts ON kb_chunks USING GIN (to_tsvector('simple', chunk_text));
+
+CREATE TABLE chat_attachments (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    sender_id VARCHAR(255),
+    local_path TEXT NOT NULL,
+    mime VARCHAR(64) NOT NULL,
+    sha256 CHAR(64) NOT NULL,
+    width INT,
+    height INT,
+    size_bytes BIGINT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_chat_attachments_user_id ON chat_attachments(user_id, created_at DESC);
+CREATE INDEX idx_chat_attachments_sha256 ON chat_attachments(sha256);
