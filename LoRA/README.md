@@ -403,3 +403,19 @@ uv run python scripts/synthesize_react_data.py `
 2. schema 校验：`summary.json` 中 `schema_validation_errors.num_errors` 应接近 `0`。
 3. 分布校验：检查 `actual_action_counts` 与目标占比偏差（建议控制在 ±5%）。
 4. 训练兼容：将 `train_lora.py` 的 `train_file/eval_file` 指向 `react_agent` 或 `combined_react_agent` 后可正常开始训练。
+
+## 15. 2026-04-10 Training Input Normalization Update
+
+To support `data/processed/combined_react_agent/*.jsonl` with mixed columns, `scripts/train_lora.py` now normalizes each JSONL record before building the dataset.
+
+What changed:
+- The loader now keeps only training-required keys: `id`, `source`, `category`, `intent`, `messages`.
+- Extra keys (for example `action`, `generation_mode`, `origin_source`) are ignored automatically.
+- Invalid lines (bad JSON or invalid `messages`) are skipped and counted.
+- `run_summary.json` now includes:
+  - `train_records_skipped_in_normalization`
+  - `eval_records_skipped_in_normalization`
+
+Impact:
+- You can train directly from combined datasets without HuggingFace `CastError` caused by schema mismatch.
+- Existing pure SFT datasets are still compatible.

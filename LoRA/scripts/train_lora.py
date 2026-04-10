@@ -14,7 +14,7 @@ from typing import Any
 import numpy as np
 import torch
 import yaml
-from datasets import load_dataset
+from datasets import Dataset, DatasetDict
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from transformers import (
     AutoModelForCausalLM,
@@ -61,6 +61,54 @@ def format_chat(example: dict[str, Any], tokenizer: AutoTokenizer) -> dict[str, 
         example["messages"], tokenize=False, add_generation_prompt=False
     )
     return {"text": text}
+
+
+def normalize_messages(value: Any) -> list[dict[str, str]] | None:
+    if not isinstance(value, list):
+        return None
+    normalized: list[dict[str, str]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            return None
+        role = item.get("role")
+        content = item.get("content")
+        if not isinstance(role, str) or not isinstance(content, str):
+            return None
+        normalized.append({"role": role, "content": content})
+    if not normalized:
+        return None
+    return normalized
+
+
+def load_sft_records(path: Path) -> tuple[list[dict[str, Any]], int]:
+    records: list[dict[str, Any]] = []
+    skipped = 0
+    with path.open("r", encoding="utf-8") as f:
+        for line_no, raw_line in enumerate(f, start=1):
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                skipped += 1
+                continue
+            if not isinstance(payload, dict):
+                skipped += 1
+                continue
+            messages = normalize_messages(payload.get("messages"))
+            if messages is None:
+                skipped += 1
+                continue
+            record = {
+                "id": str(payload.get("id", f"{path.stem}-{line_no}")),
+                "source": str(payload.get("source", "unknown")),
+                "category": str(payload.get("category", "unknown")),
+                "intent": str(payload.get("intent", "unknown")),
+                "messages": messages,
+            }
+            records.append(record)
+    return records, skipped
 
 
 def main() -> None:
@@ -141,8 +189,24 @@ def main() -> None:
     model = get_peft_model(model, peft_cfg)
     model.print_trainable_parameters()
 
-    data_files = {"train": str(train_file), "validation": str(eval_file)}
-    raw_dataset = load_dataset("json", data_files=data_files)
+    train_records, train_skipped = load_sft_records(train_file)
+    eval_records, eval_skipped = load_sft_records(eval_file)
+    if not train_records:
+        raise ValueError(f"No valid train records found in {train_file}")
+    if not eval_records:
+        raise ValueError(f"No valid eval records found in {eval_file}")
+    if train_skipped > 0 or eval_skipped > 0:
+        print(
+            "Input normalization skipped invalid records: "
+            f"train_skipped={train_skipped}, eval_skipped={eval_skipped}"
+        )
+
+    raw_dataset = DatasetDict(
+        {
+            "train": Dataset.from_list(train_records),
+            "validation": Dataset.from_list(eval_records),
+        }
+    )
     processed = raw_dataset.map(
         lambda x: format_chat(x, tokenizer),
         remove_columns=raw_dataset["train"].column_names,
@@ -261,6 +325,8 @@ def main() -> None:
         "max_seq_len": max_seq_len,
         "train_samples": len(train_dataset),
         "eval_samples": len(eval_dataset),
+        "train_records_skipped_in_normalization": train_skipped,
+        "eval_records_skipped_in_normalization": eval_skipped,
         "evaluation_enabled": evaluation_enabled,
         "seed": seed,
     }
