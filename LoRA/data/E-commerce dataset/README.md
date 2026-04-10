@@ -1,14 +1,16 @@
-## Dataset
-We release E-commerce Dialogue Corpus, comprising a training data set, a development set and a test set for retrieval based chatbot. The statistics of E-commerical Conversation Corpus are shown in the following table. 
+﻿## 数据集说明
 
-|      |Train|Val| Test         | 
-| ------------- |:-------------:|:-------------:|:-------------:|
-| Session-response pairs  | 1m|10k| 10k |
-| Avg. positive response per session|1|1|1|  
-| Min turn per session|3|3|3| 
-| Max ture per session|10|10|10| 
-| Average turn per session|5.51|5.48|5.64
-| Average Word per utterance|7.02|6.99|7.11
+我们发布了电商对话语料（E-commerce Dialogue Corpus），包含用于检索式聊天机器人的训练集、开发集和测试集。数据规模统计如下：
 
-## Data template
-label \t conversation utterances (splited by \t) \t response
+| 指标 | 训练集 | 验证集 | 测试集 |
+| --- | ---: | ---: | ---: |
+| 会话-回复对数量 | 1,000,000 | 10,000 | 10,000 |
+| 每个会话平均正样本回复数 | 1 | 1 | 1 |
+| 每个会话最少轮次 | 3 | 3 | 3 |
+| 每个会话最多轮次 | 10 | 10 | 10 |
+| 每个会话平均轮次 | 5.51 | 5.48 | 5.64 |
+| 每个话语平均词数 | 7.02 | 6.99 | 7.11 |
+
+## 数据格式
+
+`label \t conversation utterances（以 \t 分隔） \t response`

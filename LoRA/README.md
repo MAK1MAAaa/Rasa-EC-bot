@@ -1,4 +1,4 @@
-# Qwen3.5-2B LoRA å¾®è°ƒè¯´æ˜ï¼ˆç”µå•†å®¢æœï¼‰
+ï»¿# Qwen3.5-2B LoRA å¾®è°ƒè¯´æ˜ï¼ˆç”µå•†å®¢æœï¼‰
 
 æœ¬ç›®å½•æä¾›ä¸€å¥—å®Œæ•´çš„ QLoRA å¾®è°ƒæµç¨‹ï¼Œç”¨äºåœ¨ä»¥ä¸‹æ•°æ®ä¸Šè®­ç»ƒ `Qwen/Qwen3.5-2B`ï¼š
 
@@ -214,7 +214,7 @@ ollama run qwen3.5-2b-lora-ec
 
 æ¯æ¬¡å®éªŒå¯è®°å½•å¦‚ä¸‹ï¼š
 
-| Run | Config | Train samples | Val samples | Test samples | Final loss | Pass rate | Hallucinated order ID | Missing confirmation | Notes |
+| è¿è¡Œæ‰¹æ¬¡ | é…ç½® | è®­ç»ƒæ ·æœ¬æ•° | éªŒè¯æ ·æœ¬æ•° | æµ‹è¯•æ ·æœ¬æ•° | æœ€ç»ˆæŸå¤± | é€šè¿‡ç‡ | å¹»è§‰è®¢å•å· | ç¼ºå¤±ç¡®è®¤ | å¤‡æ³¨ |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
 | smoke-001 | smoke.yaml |  |  |  |  |  |  |  |  |
 | full-001 | full.yaml |  |  |  |  |  |  |  |  |
@@ -336,18 +336,18 @@ uv run python scripts/eval_lora.py `
 
 è·¨è®¾å¤‡ä½¿ç”¨æ—¶ï¼Œè¯·æ‰‹åŠ¨å¤åˆ¶ä¸Šè¿°æ–‡ä»¶åˆ°ç›¸åŒè·¯å¾„ï¼Œå†æ‰§è¡Œé¢„å¤„ç†ä¸è®­ç»ƒå‘½ä»¤ã€‚
 
-## 16. QA -> ReAct Agent Êı¾İºÏ³É£¨½Ó¿ÚÇ¿¶ÔÆë + ·Ö²ã²ÉÑù£©
+## 16. QA -> ReAct Agent ï¿½ï¿½ï¿½İºÏ³É£ï¿½ï¿½Ó¿ï¿½Ç¿ï¿½ï¿½ï¿½ï¿½ + ï¿½Ö²ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 
-### 16.1 Ä¿±ê
-- ±£³ÖÏÖÓĞ SFT `messages=[system,user,assistant]` ½á¹¹²»±ä¡£
-- ½« `assistant` ×ªÎªÎå¶ÎÌå£º`Thought/Action/Action_Input/Observation/Response`¡£
-- `Observation` ²»ÓÉÄ£ĞÍ×ÔÓÉÉú³É£¬¶øÊÇÓÉ±¾µØ schema Ä£°å×¢Èë£¬È·±£Óëºó¶ËÕæÊµ½Ó¿Ú×Ö¶ÎÒ»ÖÂ¡£
+### 16.1 Ä¿ï¿½ï¿½
+- ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ SFT `messages=[system,user,assistant]` ï¿½á¹¹ï¿½ï¿½ï¿½ä¡£
+- ï¿½ï¿½ `assistant` ×ªÎªï¿½ï¿½ï¿½ï¿½å£º`Thought/Action/Action_Input/Observation/Response`ï¿½ï¿½
+- `Observation` ï¿½ï¿½ï¿½ï¿½Ä£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½É£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½É±ï¿½ï¿½ï¿½ schema Ä£ï¿½ï¿½×¢ï¿½ë£¬È·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Êµï¿½Ó¿ï¿½ï¿½Ö¶ï¿½Ò»ï¿½Â¡ï¿½
 
-### 16.2 ĞÂÔöÎÄ¼ş
+### 16.2 ï¿½ï¿½ï¿½ï¿½ï¿½Ä¼ï¿½
 - `configs/react_action_schemas.json`
 - `scripts/synthesize_react_data.py`
 
-### 16.3 Action Óëºó¶Ë½Ó¿ÚÓ³Éä
+### 16.3 Action ï¿½ï¿½ï¿½Ë½Ó¿ï¿½Ó³ï¿½ï¿½
 - `query_order_status` -> `GET /api/v1/orders/{order_id}` -> `OrderRead`
 - `query_logistics` -> `GET /api/v1/chat/internal/orders-logistics-summary` -> `ChatOrderLogisticsSummaryResponse`
 - `query_product_info` -> `GET /api/v1/products` -> `ProductListResponse`
@@ -355,18 +355,18 @@ uv run python scripts/eval_lora.py `
 - `query_refund_status` -> `GET /api/v1/chat/internal/after-sales-summary` -> `ChatAfterSalesSummaryResponse`
 - `query_orders_summary` -> `GET /api/v1/chat/internal/orders-summary` -> `ChatOrderSummaryResponse`
 
-### 16.4 Ä¬ÈÏ·Ö²¼²ßÂÔ
-- Ñù±¾×ÜÊı£º`1500`
-- ¶¯×÷¼¶Ä¿±êÕ¼±È£¨°´Ë³Ğò£©£º
+### 16.4 Ä¬ï¿½Ï·Ö²ï¿½ï¿½ï¿½ï¿½ï¿½
+- ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½`1500`
+- ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä¿ï¿½ï¿½Õ¼ï¿½È£ï¿½ï¿½ï¿½Ë³ï¿½ò£©£ï¿½
   - `query_order_status`: `28%`
   - `query_logistics`: `17%`
   - `query_product_info`: `20%`
   - `create_return_request`: `18%`
   - `query_refund_status`: `12%`
   - `query_orders_summary`: `5%`
-- ×é¼¶²Î¿¼Õ¼±È£¨ÓÃÓÚÍ³¼Æ¶ÔÕÕ£©£º`¶©µ¥/ÎïÁ÷ 45%`£¬`ÊÛºó 35%`£¬`ÉÌÆ· 20%`
+- ï¿½é¼¶ï¿½Î¿ï¿½Õ¼ï¿½È£ï¿½ï¿½ï¿½ï¿½ï¿½Í³ï¿½Æ¶ï¿½ï¿½Õ£ï¿½ï¿½ï¿½`ï¿½ï¿½ï¿½ï¿½/ï¿½ï¿½ï¿½ï¿½ 45%`ï¿½ï¿½`ï¿½Ûºï¿½ 35%`ï¿½ï¿½`ï¿½ï¿½Æ· 20%`
 
-### 16.5 ÔËĞĞÃüÁî
+### 16.5 ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 ```powershell
 cd LoRA
 uv run python scripts/synthesize_react_data.py `
@@ -378,44 +378,44 @@ uv run python scripts/synthesize_react_data.py `
   --combined-out-dir data/processed/combined_react_agent
 ```
 
-### 16.6 Ö÷Òª²ÎÊı
-- `--input-train/--input-val/--input-test`: »ù´¡ QA Êı¾İÊäÈë£¨Ä¬ÈÏ `data/processed/{train,val,test}.jsonl`£©
-- `--sample-size`: ºÏ³ÉÑù±¾×ÜÁ¿£¨Ä¬ÈÏ `1500`£©
-- `--schema-config`: Observation schema ÅäÖÃÎÄ¼şÂ·¾¶
-- `--max-retries`: µ¥ÌõÑù±¾ Ollama ×î´óÖØÊÔ´ÎÊı£¨Ä¬ÈÏ `4`£©
-- `--temperature`: Ollama ²ÉÑùÎÂ¶È£¨Ä¬ÈÏ `0.4`£©
-- `--dry-run`: ²»µ÷ÓÃ Ollama£¬½öÓÃ±¾µØ fallback Âß¼­Éú³É£¬ÓÃÓÚÁ÷Ë®ÏßÁªµ÷
+### 16.6 ï¿½ï¿½Òªï¿½ï¿½ï¿½ï¿½
+- `--input-train/--input-val/--input-test`: ï¿½ï¿½ï¿½ï¿½ QA ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ë£¨Ä¬ï¿½ï¿½ `data/processed/{train,val,test}.jsonl`ï¿½ï¿½
+- `--sample-size`: ï¿½Ï³ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä¬ï¿½ï¿½ `1500`ï¿½ï¿½
+- `--schema-config`: Observation schema ï¿½ï¿½ï¿½ï¿½ï¿½Ä¼ï¿½Â·ï¿½ï¿½
+- `--max-retries`: ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ Ollama ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ô´ï¿½ï¿½ï¿½ï¿½ï¿½Ä¬ï¿½ï¿½ `4`ï¿½ï¿½
+- `--temperature`: Ollama ï¿½ï¿½ï¿½ï¿½ï¿½Â¶È£ï¿½Ä¬ï¿½ï¿½ `0.4`ï¿½ï¿½
+- `--dry-run`: ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ Ollamaï¿½ï¿½ï¿½ï¿½ï¿½Ã±ï¿½ï¿½ï¿½ fallback ï¿½ß¼ï¿½ï¿½ï¿½ï¿½É£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ë®ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 
-### 16.7 Êä³ö²úÎï
-- ReAct ×Ó¼¯£º
+### 16.7 ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+- ReAct ï¿½Ó¼ï¿½ï¿½ï¿½
   - `data/processed/react_agent/train.jsonl`
   - `data/processed/react_agent/val.jsonl`
   - `data/processed/react_agent/test.jsonl`
-- ºÏ²¢¼¯£¨base + react£©£º
+- ï¿½Ï²ï¿½ï¿½ï¿½ï¿½ï¿½base + reactï¿½ï¿½ï¿½ï¿½
   - `data/processed/combined_react_agent/train.jsonl`
   - `data/processed/combined_react_agent/val.jsonl`
   - `data/processed/combined_react_agent/test.jsonl`
-- »ã×Ü±¨¸æ£º
+- ï¿½ï¿½ï¿½Ü±ï¿½ï¿½æ£º
   - `data/processed/react_agent/summary.json`
 
-### 16.8 ÑéÊÕ½¨Òé
-1. ½á¹¹Ğ£Ñé£ºÈ·ÈÏÃ¿ÌõÑù±¾¾ùÎªÎå¶ÎÌå£¬ÇÒ `Action_Input/Observation` ¿É JSON ½âÎö¡£
-2. schema Ğ£Ñé£º`summary.json` ÖĞ `schema_validation_errors.num_errors` Ó¦½Ó½ü `0`¡£
-3. ·Ö²¼Ğ£Ñé£º¼ì²é `actual_action_counts` ÓëÄ¿±êÕ¼±ÈÆ«²î£¨½¨Òé¿ØÖÆÔÚ ¡À5%£©¡£
-4. ÑµÁ·¼æÈİ£º½« `train_lora.py` µÄ `train_file/eval_file` Ö¸Ïò `react_agent` »ò `combined_react_agent` ºó¿ÉÕı³£¿ªÊ¼ÑµÁ·¡£
+### 16.8 ï¿½ï¿½ï¿½Õ½ï¿½ï¿½ï¿½
+1. ï¿½á¹¹Ğ£ï¿½é£ºÈ·ï¿½ï¿½Ã¿ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Îªï¿½ï¿½ï¿½ï¿½å£¬ï¿½ï¿½ `Action_Input/Observation` ï¿½ï¿½ JSON ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+2. schema Ğ£ï¿½é£º`summary.json` ï¿½ï¿½ `schema_validation_errors.num_errors` Ó¦ï¿½Ó½ï¿½ `0`ï¿½ï¿½
+3. ï¿½Ö²ï¿½Ğ£ï¿½é£ºï¿½ï¿½ï¿½ `actual_action_counts` ï¿½ï¿½Ä¿ï¿½ï¿½Õ¼ï¿½ï¿½Æ«ï¿½î£¨ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½5%ï¿½ï¿½ï¿½ï¿½
+4. Ñµï¿½ï¿½ï¿½ï¿½ï¿½İ£ï¿½ï¿½ï¿½ `train_lora.py` ï¿½ï¿½ `train_file/eval_file` Ö¸ï¿½ï¿½ `react_agent` ï¿½ï¿½ `combined_react_agent` ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê¼Ñµï¿½ï¿½ï¿½ï¿½
 
-## 15. 2026-04-10 Training Input Normalization Update
+## 15. 2026-04-10 è®­ç»ƒè¾“å…¥å½’ä¸€åŒ–æ›´æ–°
 
-To support `data/processed/combined_react_agent/*.jsonl` with mixed columns, `scripts/train_lora.py` now normalizes each JSONL record before building the dataset.
+ä¸ºæ”¯æŒ `data/processed/combined_react_agent/*.jsonl` è¿™ç±»æ··åˆå­—æ®µæ•°æ®ï¼Œ`scripts/train_lora.py` åœ¨æ„å»ºæ•°æ®é›†å‰ä¼šå…ˆå¯¹æ¯æ¡ JSONL è®°å½•åšå½’ä¸€åŒ–ã€‚
 
-What changed:
-- The loader now keeps only training-required keys: `id`, `source`, `category`, `intent`, `messages`.
-- Extra keys (for example `action`, `generation_mode`, `origin_source`) are ignored automatically.
-- Invalid lines (bad JSON or invalid `messages`) are skipped and counted.
-- `run_summary.json` now includes:
+å˜æ›´ç‚¹ï¼š
+- åŠ è½½å™¨ä»…ä¿ç•™è®­ç»ƒå¿…éœ€å­—æ®µï¼š`id`ã€`source`ã€`category`ã€`intent`ã€`messages`ã€‚
+- é¢å¤–å­—æ®µï¼ˆä¾‹å¦‚ `action`ã€`generation_mode`ã€`origin_source`ï¼‰ä¼šè‡ªåŠ¨å¿½ç•¥ã€‚
+- éæ³•è¡Œï¼ˆJSON æ ¼å¼é”™è¯¯æˆ– `messages` éæ³•ï¼‰ä¼šè¢«è·³è¿‡å¹¶è®¡æ•°ã€‚
+- `run_summary.json` æ–°å¢ç»Ÿè®¡å­—æ®µï¼š
   - `train_records_skipped_in_normalization`
   - `eval_records_skipped_in_normalization`
 
-Impact:
-- You can train directly from combined datasets without HuggingFace `CastError` caused by schema mismatch.
-- Existing pure SFT datasets are still compatible.
+å½±å“ï¼š
+- å¯ç›´æ¥ä½¿ç”¨æ··åˆæ•°æ®é›†è®­ç»ƒï¼Œä¸å†å›  schema ä¸ä¸€è‡´è§¦å‘ HuggingFace `CastError`ã€‚
+- ç°æœ‰çº¯ SFT æ•°æ®é›†ä¿æŒå…¼å®¹ã€‚
