@@ -5,6 +5,7 @@ CREATE EXTENSION IF NOT EXISTS vector;
 DROP TABLE IF EXISTS kb_chunks CASCADE;
 DROP TABLE IF EXISTS kb_documents CASCADE;
 DROP TABLE IF EXISTS chat_attachments CASCADE;
+DROP TABLE IF EXISTS geo_cache CASCADE;
 DROP TABLE IF EXISTS after_sales CASCADE;
 DROP TABLE IF EXISTS logistics CASCADE;
 DROP TABLE IF EXISTS order_items CASCADE;
@@ -119,11 +120,26 @@ CREATE TABLE logistics (
     tracking_no VARCHAR(100) UNIQUE,
     status VARCHAR(50) NOT NULL,
     current_location TEXT,
+    current_lng DOUBLE PRECISION,
+    current_lat DOUBLE PRECISION,
     estimated_delivery_at TIMESTAMP WITH TIME ZONE,
     route_plan JSONB NOT NULL DEFAULT '[]'::jsonb,
+    route_geo JSONB NOT NULL DEFAULT '[]'::jsonb,
     llm_raw_text TEXT,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE geo_cache (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    source_text VARCHAR(512) NOT NULL UNIQUE,
+    lng DOUBLE PRECISION NOT NULL,
+    lat DOUBLE PRECISION NOT NULL,
+    provider VARCHAR(32) NOT NULL DEFAULT 'amap',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_geo_cache_updated_at ON geo_cache(updated_at DESC);
 
 CREATE TABLE after_sales (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

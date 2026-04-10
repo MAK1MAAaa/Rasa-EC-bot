@@ -65,15 +65,30 @@ INSERT INTO order_items (order_id, product_id, product_name, unit_price, quantit
 ('ORD202603300001', '11111111-1111-1111-1111-111111111002', '静音豆 Pro 耳机', 899.00, 1, 899.00),
 ('ORD202603300002', '11111111-1111-1111-1111-111111111005', '视界 27 显示器', 1699.00, 1, 1699.00);
 
-INSERT INTO logistics (order_id, shipped_from_address_id, tracking_no, status, current_location, estimated_delivery_at, route_plan, llm_raw_text) VALUES
+INSERT INTO logistics (
+    order_id,
+    shipped_from_address_id,
+    tracking_no,
+    status,
+    current_location,
+    current_lng,
+    current_lat,
+    estimated_delivery_at,
+    route_plan,
+    route_geo,
+    llm_raw_text
+) VALUES
 (
     'ORD202603300002',
     '00000000-0000-0000-0000-000000000403',
     'SF123456789',
     'in_transit',
     '上海分拨中心',
+    121.473700,
+    31.230400,
     NOW() + INTERVAL '2 days',
     '["广州中转中心", "杭州中转站", "上海分拨中心"]'::jsonb,
+    '[{"name":"广州中转中心","lng":113.264400,"lat":23.129100},{"name":"杭州中转站","lng":120.155100,"lat":30.274100},{"name":"上海分拨中心","lng":121.473700,"lat":31.230400}]'::jsonb,
     '示例物流预测文本（种子数据）'
 );
 

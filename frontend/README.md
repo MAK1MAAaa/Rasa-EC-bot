@@ -77,3 +77,42 @@ pnpm build
 - 用户登录后可访问：`/cart`、`/checkout`、`/orders`
 - 商家登录后可访问：`/merchant`
 - 商家账号不允许访问 `/chat`（导航入口隐藏，手动访问会重定向到 `/merchant`）
+
+## 8. Logistics Map + Shipping UX Enhancements
+
+### 8.1 Frontend Env
+Create `.env` from `.env.sample` and configure:
+
+```env
+VITE_ENABLE_LOGISTICS_MAP=false
+VITE_AMAP_JS_KEY=
+VITE_AMAP_SECURITY_JS_CODE=
+```
+
+### 8.2 Order Detail Page
+- Added map card in logistics panel.
+- Map renders only when `VITE_ENABLE_LOGISTICS_MAP=true` and coordinates are available.
+- If map SDK/key/network fails, page auto-falls back to text route timeline.
+
+### 8.3 Merchant Page
+- Shipping/advance buttons now include animated loading indicator.
+- Slow-request hint appears when request lasts over ~1200ms.
+- Pending shipment card shows a processing-age badge (`Pending Xh / Xd Xh`) and highlights stale orders.
+
+### 8.4 AMap JS API & SecurityJsCode setup
+Frontend env file: `frontend/.env` (copy from `frontend/.env.sample`)
+
+```env
+VITE_ENABLE_LOGISTICS_MAP=true
+VITE_AMAP_JS_KEY=your_amap_js_key
+VITE_AMAP_SECURITY_JS_CODE=your_security_js_code
+```
+
+Behavior:
+- Map renders only when `VITE_ENABLE_LOGISTICS_MAP=true`.
+- `VITE_AMAP_SECURITY_JS_CODE` is injected to `window._AMapSecurityConfig` before JSAPI script load.
+- When key/network/sdk fails, UI falls back to text logistics route.
+
+Security recommendations:
+- Configure JS key domain whitelist in AMap console.
+- Do not place `AMAP_WEB_KEY` in frontend env.

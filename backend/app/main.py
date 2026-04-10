@@ -58,6 +58,8 @@ from .models import (
     CreateOrderRequest,
     KBIndexRequest,
     KBIndexResponse,
+    GeoPointRead,
+    GeoCache,
     Logistics,
     LogisticsRead,
     LoginRequest,
@@ -120,6 +122,10 @@ CHAT_UPLOAD_DIR = os.getenv("CHAT_UPLOAD_DIR", "data/chat_uploads")
 CHAT_UPLOAD_MAX_MB = int(os.getenv("CHAT_UPLOAD_MAX_MB", "8"))
 CHAT_UPLOAD_MAX_BYTES = CHAT_UPLOAD_MAX_MB * 1024 * 1024
 CHAT_UPLOAD_ALLOWED_MIME = {"image/jpeg", "image/png", "image/webp"}
+AMAP_WEB_KEY = os.getenv("AMAP_WEB_KEY", "").strip()
+AMAP_WEB_SIG = os.getenv("AMAP_WEB_SIG", "").strip()
+AMAP_TIMEOUT_MS = int(os.getenv("AMAP_TIMEOUT_MS", "3000"))
+AMAP_QPS_LIMIT = max(1, int(os.getenv("AMAP_QPS_LIMIT", "5")))
 CHAT_ROUTER_ENABLE_AGENT = os.getenv("CHAT_ROUTER_ENABLE_AGENT", "true").strip().lower() not in {"0", "false", "no"}
 CHAT_ROUTER_RASA_CONFIDENCE_THRESHOLD = float(os.getenv("CHAT_ROUTER_RASA_CONFIDENCE_THRESHOLD", "0.72"))
 FAST_ROUTER_INTENTS = {
@@ -144,6 +150,8 @@ UPLOAD_ROOT_DIR = (
 
 ORDER_STATUS_PENDING_SHIPMENT = "pending_shipment"
 ORDER_STATUS_SHIPPED = "shipped"
+LOGISTICS_STATUS_IN_TRANSIT = "in_transit"
+LOGISTICS_STATUS_DELIVERED = "delivered"
 
 AFTER_SALES_TYPE_RETURN = "return"
 AFTER_SALES_TYPE_EXCHANGE = "exchange"
@@ -183,6 +191,8 @@ CHAT_ACTION_TTL_SEC = int(os.getenv("CHAT_ACTION_TTL_SEC", "300"))
 CHAT_ACTION_TYPE_CHECKOUT = "checkout"
 CHAT_ACTION_TYPE_AFTER_SALES = "after_sales"
 PENDING_CHAT_ACTION_MEMORY: dict[str, dict[str, Any]] = {}
+_amap_throttle_lock = asyncio.Lock()
+_amap_last_call_time = 0.0
 
 
 @dataclass
@@ -267,9 +277,34 @@ class RealtimeConnectionManager:
 realtime_manager = RealtimeConnectionManager()
 
 
+async def ensure_logistics_geo_schema() -> None:
+    statements = [
+        'CREATE EXTENSION IF NOT EXISTS "pgcrypto"',
+        """
+        CREATE TABLE IF NOT EXISTS geo_cache (
+            id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+            source_text VARCHAR(512) NOT NULL UNIQUE,
+            lng DOUBLE PRECISION NOT NULL,
+            lat DOUBLE PRECISION NOT NULL,
+            provider VARCHAR(32) NOT NULL DEFAULT 'amap',
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_geo_cache_updated_at ON geo_cache(updated_at DESC)",
+        "ALTER TABLE logistics ADD COLUMN IF NOT EXISTS current_lng DOUBLE PRECISION",
+        "ALTER TABLE logistics ADD COLUMN IF NOT EXISTS current_lat DOUBLE PRECISION",
+        "ALTER TABLE logistics ADD COLUMN IF NOT EXISTS route_geo JSONB NOT NULL DEFAULT '[]'::jsonb",
+    ]
+    async with engine.begin() as conn:
+        for statement in statements:
+            await conn.execute(text(statement))
+
+
 @app.on_event("startup")
 async def on_startup() -> None:
     UPLOAD_ROOT_DIR.mkdir(parents=True, exist_ok=True)
+    await ensure_logistics_geo_schema()
     await cache.connect()
 
 
@@ -932,8 +967,14 @@ async def prepare_after_sales_chat_action(message: str, current_user: User, sess
     order = await get_order_or_404(session, order_id)
     if order.user_id != current_user.id:
         return build_chat_message("该订单不属于当前登录账号，无法为你发起售后。")
-    if order.status != ORDER_STATUS_SHIPPED:
-        return build_chat_message("订单未发货完成，当前还不能发起退款/换货。")
+    logistics = await get_logistics_by_order(session, order.id)
+    stage = resolve_after_sales_stage(order=order, logistics=logistics)
+    if stage == ORDER_STATUS_PENDING_SHIPMENT and request_type != AFTER_SALES_TYPE_RETURN:
+        return build_chat_message("订单未发货时仅支持申请退货，换货请在签收后发起。")
+    if stage == LOGISTICS_STATUS_IN_TRANSIT:
+        return build_chat_message("订单物流运输中，暂不支持申请退货/换货。请等待签收后再申请更多售后帮助。")
+    if stage == "unsupported":
+        return build_chat_message("当前订单状态暂不支持发起售后。")
     if await has_active_after_sales_request(session, order.id):
         return build_chat_message("该订单已有进行中的售后申请，请等待商家处理。")
 
@@ -1630,6 +1671,151 @@ def should_replace_with_fallback_location(current_location: str) -> bool:
     return not bool(re.search(r"[\u4e00-\u9fff]", text))
 
 
+def normalize_geo_cache_text(address_text: str) -> str:
+    cleaned = re.sub(r"\s+", " ", (address_text or "").strip())
+    return cleaned[:512]
+
+
+def to_valid_coordinate(value: Any) -> float | None:
+    try:
+        converted = float(value)
+    except Exception:
+        return None
+    if converted < -180 or converted > 180:
+        return None
+    return round(converted, 6)
+
+
+def normalize_route_geo(raw_points: Any) -> list[GeoPointRead]:
+    if not isinstance(raw_points, list):
+        return []
+    normalized: list[GeoPointRead] = []
+    for item in raw_points:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        lng = to_valid_coordinate(item.get("lng"))
+        lat = to_valid_coordinate(item.get("lat"))
+        if not name or lng is None or lat is None:
+            continue
+        normalized.append(GeoPointRead(name=name, lng=lng, lat=lat))
+    return normalized
+
+
+async def throttle_amap_requests() -> None:
+    global _amap_last_call_time
+    min_interval = 1.0 / float(AMAP_QPS_LIMIT)
+    async with _amap_throttle_lock:
+        loop = asyncio.get_running_loop()
+        now = loop.time()
+        wait_time = (_amap_last_call_time + min_interval) - now
+        if wait_time > 0:
+            await asyncio.sleep(wait_time)
+        _amap_last_call_time = loop.time()
+
+
+async def call_amap_geocode(address_text: str) -> tuple[float, float] | None:
+    if not AMAP_WEB_KEY:
+        return None
+
+    await throttle_amap_requests()
+    params: dict[str, Any] = {
+        "key": AMAP_WEB_KEY,
+        "address": address_text,
+        "output": "JSON",
+    }
+    if AMAP_WEB_SIG:
+        params["sig"] = AMAP_WEB_SIG
+
+    timeout_sec = max(1.0, AMAP_TIMEOUT_MS / 1000.0)
+    try:
+        async with httpx.AsyncClient(timeout=timeout_sec) as client:
+            response = await client.get("https://restapi.amap.com/v3/geocode/geo", params=params)
+        response.raise_for_status()
+        payload = response.json()
+        if str(payload.get("status")) != "1":
+            return None
+        geocodes = payload.get("geocodes")
+        if not isinstance(geocodes, list) or not geocodes:
+            return None
+        location_text = str(geocodes[0].get("location") or "").strip()
+        if "," not in location_text:
+            return None
+        lng_text, lat_text = location_text.split(",", 1)
+        lng = to_valid_coordinate(lng_text)
+        lat = to_valid_coordinate(lat_text)
+        if lng is None or lat is None:
+            return None
+        return lng, lat
+    except Exception:
+        return None
+
+
+async def get_geo_cache_entry(session: AsyncSession, source_text: str) -> GeoCache | None:
+    statement = select(GeoCache).where(GeoCache.source_text == source_text)
+    result = await session.execute(statement)
+    return result.scalar_one_or_none()
+
+
+async def upsert_geo_cache_entry(session: AsyncSession, source_text: str, lng: float, lat: float) -> None:
+    await session.execute(
+        text(
+            """
+            INSERT INTO geo_cache (source_text, lng, lat, provider, created_at, updated_at)
+            VALUES (:source_text, :lng, :lat, 'amap', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ON CONFLICT (source_text)
+            DO UPDATE SET
+                lng = EXCLUDED.lng,
+                lat = EXCLUDED.lat,
+                provider = EXCLUDED.provider,
+                updated_at = CURRENT_TIMESTAMP
+            """
+        ),
+        {"source_text": source_text, "lng": lng, "lat": lat},
+    )
+
+
+async def geocode_with_cache(session: AsyncSession, address_text: str) -> tuple[float, float] | None:
+    normalized_text = normalize_geo_cache_text(address_text)
+    if not normalized_text:
+        return None
+
+    cached = await get_geo_cache_entry(session, normalized_text)
+    if cached:
+        lng = to_valid_coordinate(cached.lng)
+        lat = to_valid_coordinate(cached.lat)
+        if lng is not None and lat is not None:
+            return lng, lat
+
+    coords = await call_amap_geocode(normalized_text)
+    if not coords:
+        return None
+
+    await upsert_geo_cache_entry(session, normalized_text, coords[0], coords[1])
+    return coords
+
+
+async def build_route_geo(session: AsyncSession, route_points: list[str]) -> list[GeoPointRead]:
+    points = normalize_route_points(route_points)
+    geo_points: list[GeoPointRead] = []
+    for point in points:
+        coords = await geocode_with_cache(session, point)
+        if not coords:
+            continue
+        geo_points.append(GeoPointRead(name=point, lng=coords[0], lat=coords[1]))
+    return geo_points
+
+
+def pick_geo_from_route(route_geo: list[GeoPointRead], location: str) -> tuple[float, float] | None:
+    cleaned_location = (location or "").strip()
+    if not cleaned_location:
+        return None
+    for item in route_geo:
+        if item.name == cleaned_location:
+            return item.lng, item.lat
+    return None
+
+
 async def get_user_shop(session: AsyncSession, user_id: UUID) -> Shop | None:
     statement = select(Shop).where(Shop.owner_user_id == user_id, Shop.is_active == True)  # noqa: E712
     result = await session.execute(statement)
@@ -1874,6 +2060,75 @@ async def get_after_sales_by_order(session: AsyncSession, order_id: str) -> list
     return result.scalars().all()
 
 
+def normalize_route_points(route_plan: list[str] | None) -> list[str]:
+    if not isinstance(route_plan, list):
+        return []
+    points: list[str] = []
+    for item in route_plan:
+        if not isinstance(item, str):
+            continue
+        cleaned = item.strip()
+        if cleaned:
+            points.append(cleaned)
+    return points
+
+
+def compute_next_logistics_state(logistics: Logistics) -> tuple[str, str]:
+    route_points = normalize_route_points(list(logistics.route_plan or []))
+    if not route_points:
+        raise HTTPException(status_code=400, detail="No logistics route available for this order")
+
+    current_location = (logistics.current_location or "").strip()
+    if not current_location:
+        if len(route_points) == 1:
+            return route_points[0], LOGISTICS_STATUS_DELIVERED
+        return route_points[0], LOGISTICS_STATUS_IN_TRANSIT
+
+    if current_location in route_points:
+        current_idx = route_points.index(current_location)
+        if current_idx >= len(route_points) - 1:
+            return route_points[-1], LOGISTICS_STATUS_DELIVERED
+        next_idx = current_idx + 1
+        next_status = LOGISTICS_STATUS_DELIVERED if next_idx == len(route_points) - 1 else LOGISTICS_STATUS_IN_TRANSIT
+        return route_points[next_idx], next_status
+
+    if len(route_points) == 1:
+        return route_points[0], LOGISTICS_STATUS_DELIVERED
+    return route_points[0], LOGISTICS_STATUS_IN_TRANSIT
+
+
+def resolve_after_sales_stage(*, order: Order, logistics: Logistics | None) -> str:
+    if order.status == ORDER_STATUS_PENDING_SHIPMENT:
+        return ORDER_STATUS_PENDING_SHIPMENT
+    if order.status != ORDER_STATUS_SHIPPED:
+        return "unsupported"
+
+    logistics_status = (logistics.status or "").strip().lower() if logistics else ""
+    if logistics_status == LOGISTICS_STATUS_DELIVERED:
+        return LOGISTICS_STATUS_DELIVERED
+    return LOGISTICS_STATUS_IN_TRANSIT
+
+
+def allowed_after_sales_types(stage: str) -> set[str]:
+    if stage == ORDER_STATUS_PENDING_SHIPMENT:
+        return {AFTER_SALES_TYPE_RETURN}
+    if stage == LOGISTICS_STATUS_DELIVERED:
+        return set(AFTER_SALES_ALLOWED_TYPES)
+    return set()
+
+
+def validate_after_sales_rule(*, request_type: str, stage: str) -> None:
+    allowed_types = allowed_after_sales_types(stage)
+    if not allowed_types:
+        if stage == LOGISTICS_STATUS_IN_TRANSIT:
+            raise HTTPException(status_code=400, detail="Order is in transit; please apply after-sales after delivery")
+        raise HTTPException(status_code=400, detail="Current order status does not support after-sales request")
+    if request_type not in allowed_types:
+        if stage == ORDER_STATUS_PENDING_SHIPMENT:
+            raise HTTPException(status_code=400, detail="Before shipment, only return request is supported")
+        raise HTTPException(status_code=400, detail="This after-sales type is not allowed at current stage")
+
+
 def to_after_sales_read(item: AfterSales) -> AfterSalesRead:
     return AfterSalesRead(
         id=item.id,
@@ -1914,12 +2169,16 @@ async def build_order_detail(session: AsyncSession, order: Order) -> OrderRead:
     after_sales = await get_after_sales_by_order(session, order.id)
     logistics_read = None
     if logistics:
+        normalized_route_geo = normalize_route_geo(list(logistics.route_geo or []))
         logistics_read = LogisticsRead(
             tracking_no=logistics.tracking_no,
             status=logistics.status,
             current_location=logistics.current_location,
+            current_lng=to_valid_coordinate(logistics.current_lng),
+            current_lat=to_valid_coordinate(logistics.current_lat),
             estimated_delivery_at=logistics.estimated_delivery_at,
             route_plan=list(logistics.route_plan or []),
+            route_geo=normalized_route_geo,
             updated_at=logistics.updated_at,
         )
 
@@ -2545,7 +2804,7 @@ async def chat_internal_orders_logistics_summary(
     items = [
         ChatOrderLogisticsSummaryItem(
             id=order.id,
-            status=order.status,
+            status=(logistics.status if logistics and (logistics.status or "").strip() else order.status),
             created_at=order.created_at,
             order_link=f"{base_url}/orders?orderId={order.id}",
             tracking_no=(logistics.tracking_no if logistics else None),
@@ -3039,12 +3298,13 @@ async def create_after_sales_request(
     order = await get_order_or_404(session, order_id)
     if order.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Forbidden")
-    if order.status != ORDER_STATUS_SHIPPED:
-        raise HTTPException(status_code=400, detail="After-sales is available after shipment")
 
     request_type = normalize_after_sales_type(payload.type)
     if request_type not in AFTER_SALES_ALLOWED_TYPES:
         raise HTTPException(status_code=400, detail="type must be return or exchange")
+    logistics = await get_logistics_by_order(session, order.id)
+    stage = resolve_after_sales_stage(order=order, logistics=logistics)
+    validate_after_sales_rule(request_type=request_type, stage=stage)
 
     reason = (payload.reason or "").strip()
     if not reason:
@@ -3443,16 +3703,29 @@ async def merchant_ship_order(
     ship_from_text = build_full_address(address)
     ship_to_text = order.address
     eta, current_location, route_points, llm_raw_text = await predict_logistics(ship_from_text, ship_to_text, now)
+    current_location_value = (payload.current_location or "").strip() or current_location
+    route_geo_points = await build_route_geo(session, route_points)
+    route_geo_payload = [dump_response_model(item) for item in route_geo_points]
+    current_geo = pick_geo_from_route(route_geo_points, current_location_value)
+    if not current_geo:
+        current_geo = await geocode_with_cache(session, current_location_value)
+    if not current_geo and route_geo_points:
+        current_geo = (route_geo_points[0].lng, route_geo_points[0].lat)
+    current_lng = current_geo[0] if current_geo else None
+    current_lat = current_geo[1] if current_geo else None
 
     logistics = await get_logistics_by_order(session, order.id)
     tracking_no = generate_tracking_no()
 
     if logistics:
         logistics.shipped_from_address_id = address.id
-        logistics.status = "in_transit"
-        logistics.current_location = (payload.current_location or "").strip() or current_location
+        logistics.status = LOGISTICS_STATUS_IN_TRANSIT
+        logistics.current_location = current_location_value
+        logistics.current_lng = current_lng
+        logistics.current_lat = current_lat
         logistics.estimated_delivery_at = eta
         logistics.route_plan = route_points
+        logistics.route_geo = route_geo_payload
         logistics.llm_raw_text = llm_raw_text
         logistics.updated_at = now
         if not logistics.tracking_no:
@@ -3462,10 +3735,13 @@ async def merchant_ship_order(
             order_id=order.id,
             shipped_from_address_id=address.id,
             tracking_no=tracking_no,
-            status="in_transit",
-            current_location=(payload.current_location or "").strip() or current_location,
+            status=LOGISTICS_STATUS_IN_TRANSIT,
+            current_location=current_location_value,
+            current_lng=current_lng,
+            current_lat=current_lat,
             estimated_delivery_at=eta,
             route_plan=route_points,
+            route_geo=route_geo_payload,
             llm_raw_text=llm_raw_text,
             updated_at=now,
         )
@@ -3495,6 +3771,57 @@ async def merchant_ship_order(
         shop_id=order.shop_id,
         status=order.status,
         reason="shipped",
+    )
+
+    return await build_order_detail(session, order)
+
+
+@app.post("/api/v1/merchant/orders/{order_id}/logistics/advance", response_model=OrderRead)
+async def merchant_advance_order_logistics(
+    order_id: str = Path(...),
+    shop: Shop = Depends(get_current_merchant_shop),
+    session: AsyncSession = Depends(get_session),
+):
+    order = await get_order_or_404(session, order_id)
+    if order.shop_id != shop.id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if order.status != ORDER_STATUS_SHIPPED:
+        raise HTTPException(status_code=400, detail="Order must be shipped before advancing logistics")
+
+    logistics = await get_logistics_by_order(session, order.id)
+    if not logistics:
+        raise HTTPException(status_code=404, detail="Logistics not found for this order")
+    if (logistics.status or "").strip().lower() == LOGISTICS_STATUS_DELIVERED:
+        raise HTTPException(status_code=400, detail="Logistics is already delivered")
+
+    now = datetime.utcnow()
+    next_location, next_status = compute_next_logistics_state(logistics)
+    route_geo_points = normalize_route_geo(list(logistics.route_geo or []))
+    if not route_geo_points:
+        route_geo_points = await build_route_geo(session, list(logistics.route_plan or []))
+        logistics.route_geo = [dump_response_model(item) for item in route_geo_points]
+    current_geo = pick_geo_from_route(route_geo_points, next_location)
+    if not current_geo:
+        current_geo = await geocode_with_cache(session, next_location)
+    if not current_geo and route_geo_points:
+        current_geo = (route_geo_points[-1].lng, route_geo_points[-1].lat)
+
+    logistics.current_location = next_location
+    logistics.current_lng = current_geo[0] if current_geo else None
+    logistics.current_lat = current_geo[1] if current_geo else None
+    logistics.status = next_status
+    logistics.updated_at = now
+    if next_status == LOGISTICS_STATUS_DELIVERED:
+        logistics.estimated_delivery_at = now
+
+    await session.commit()
+    await invalidate_chat_cache_for_user(order.user_id, orders=True, logistics=True)
+    await publish_order_changed(
+        order_id=order.id,
+        user_id=order.user_id,
+        shop_id=order.shop_id,
+        status=order.status,
+        reason=f"logistics_advanced:{next_status}",
     )
 
     return await build_order_detail(session, order)

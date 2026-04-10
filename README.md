@@ -2,11 +2,12 @@
 
 一个可运行的电商平台示例，集成了：
 - 用户端商城（浏览、筛选、购物车、下单、订单、售后）
-- 商家端控制台（商品管理、发货地址、手动发货、售后处理）
+- 商家端控制台（商品管理、发货地址、手动发货、物流下一站推进、售后处理）
 - 智能客服（Rasa + 本地 Ollama `qwen3.5:2b`）
 - Redis 缓存层（商品筛选元数据 + 客服订单/物流/售后汇总）
 
 > 客服前端已升级：商家账号不可访问客服；买家/游客客服消息支持商品、订单、物流、售后卡片；自动执行二次确认改为弹窗按钮确认/取消。
+> 订单售后规则已升级：未发货可直接申请退货；运输中不可申请退货/换货；送达后可申请更多售后帮助。
 
 ## 1. 项目结构
 - `backend/`: FastAPI 后端与数据库脚本
@@ -186,3 +187,41 @@ pnpm dev
   - `retrieve_manual_knowledge`
   - `analyze_uploaded_image_vlm`（固定模型 `qwen3-vl:2b`）
 - 返回协议保持不变：`messages[].text/cards/actions`。
+
+## 9. Logistics Visualization & Shipping Experience Upgrade
+
+### 9.1 What Changed
+- Customer order detail now supports map-based logistics visualization (AMap JSAPI), with text fallback.
+- Backend now enriches logistics with coordinates and route geo points.
+- Merchant shipping panel now has slow-operation hints + animated loading states.
+
+### 9.2 New Config
+- Backend (`backend/.env`): `AMAP_WEB_KEY`, `AMAP_WEB_SIG`, `AMAP_TIMEOUT_MS`, `AMAP_QPS_LIMIT`
+- Frontend (`frontend/.env`): `VITE_ENABLE_LOGISTICS_MAP`, `VITE_AMAP_JS_KEY`, `VITE_AMAP_SECURITY_JS_CODE`
+
+### 9.3 Compatibility
+- Existing API paths are unchanged.
+- Existing response contract remains compatible; logistics object only adds optional fields.
+- Existing after-sales stage rules are unchanged.
+
+### 9.4 AMap env quick-reference
+Backend (`backend/.env`):
+
+```env
+AMAP_WEB_KEY=your_amap_web_service_key
+AMAP_WEB_SIG=optional_signature
+AMAP_TIMEOUT_MS=3000
+AMAP_QPS_LIMIT=5
+```
+
+Frontend (`frontend/.env`):
+
+```env
+VITE_ENABLE_LOGISTICS_MAP=true
+VITE_AMAP_JS_KEY=your_amap_js_key
+VITE_AMAP_SECURITY_JS_CODE=your_security_js_code
+```
+
+Usage split:
+- `AMAP_WEB_KEY`: backend geocoding only.
+- `VITE_AMAP_JS_KEY` + `VITE_AMAP_SECURITY_JS_CODE`: frontend JSAPI rendering.

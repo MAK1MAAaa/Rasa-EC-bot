@@ -107,6 +107,12 @@ const orders = ref<MerchantOrder[]>([])
 const orderFilter = ref<'pending_shipment' | 'shipped' | 'all'>('pending_shipment')
 const shipAddressByOrder = ref<Record<string, string>>({})
 const shippingOrderState = ref<Record<string, boolean>>({})
+const advancingLogisticsState = ref<Record<string, boolean>>({})
+const shippingSlowHintState = ref<Record<string, boolean>>({})
+const advancingSlowHintState = ref<Record<string, boolean>>({})
+const slowHintTimers = ref<Record<string, ReturnType<typeof setTimeout>>>({})
+const SLOW_HINT_DELAY_MS = 1200
+const SLOW_SHIPMENT_HOURS = 24
 
 const afterSalesItems = ref<MerchantAfterSalesItem[]>([])
 const afterSalesFilter = ref<AfterSalesFilter>('open')
@@ -155,7 +161,51 @@ const showToast = (type: ToastKind, message: string) => {
 }
 
 const isShippingOrder = (orderId: string) => !!shippingOrderState.value[orderId]
+const isAdvancingLogistics = (orderId: string) => !!advancingLogisticsState.value[orderId]
 const isAfterSalesActing = (requestId: string) => !!afterSalesActionState.value[requestId]
+const isSlowShipment = (order: MerchantOrder) => {
+  if (order.status !== 'pending_shipment') return false
+  const createdAtMs = new Date(order.created_at).getTime()
+  if (!Number.isFinite(createdAtMs)) return false
+  const hours = (Date.now() - createdAtMs) / (1000 * 60 * 60)
+  return hours >= SLOW_SHIPMENT_HOURS
+}
+
+const pendingHoursLabel = (createdAt: string) => {
+  const createdAtMs = new Date(createdAt).getTime()
+  if (!Number.isFinite(createdAtMs)) return '-'
+  const hours = Math.max(0, Math.floor((Date.now() - createdAtMs) / (1000 * 60 * 60)))
+  if (hours >= 24) {
+    const days = Math.floor(hours / 24)
+    const rest = hours % 24
+    return `${days}d ${rest}h`
+  }
+  return `${hours}h`
+}
+
+const clearSlowHintTimer = (timerKey: string) => {
+  const timer = slowHintTimers.value[timerKey]
+  if (timer) {
+    clearTimeout(timer)
+    delete slowHintTimers.value[timerKey]
+  }
+}
+
+const startSlowHintTimer = (
+  timerKey: string,
+  targetState: { value: Record<string, boolean> },
+  orderId: string,
+  messageWhenDone = true
+) => {
+  clearSlowHintTimer(timerKey)
+  targetState.value[orderId] = false
+  slowHintTimers.value[timerKey] = setTimeout(() => {
+    if (messageWhenDone) {
+      targetState.value[orderId] = true
+    }
+    delete slowHintTimers.value[timerKey]
+  }, SLOW_HINT_DELAY_MS)
+}
 
 const clearNotice = () => {
   error.value = ''
@@ -182,6 +232,12 @@ const orderStatusLabel = (status: string) => {
   if (status === 'pending_shipment') return '待发货'
   if (status === 'shipped') return '已发货'
   return status
+}
+
+const logisticsStatusLabel = (status: string) => {
+  if (status === 'in_transit') return '运输中'
+  if (status === 'delivered') return '已送达'
+  return status || '-'
 }
 
 const afterSalesTypeLabel = (type: string) => {
@@ -256,6 +312,13 @@ const loadOrders = async () => {
     params: { status_filter: orderFilter.value }
   })
   orders.value = response.data.items || []
+  const activeOrderIds = new Set(orders.value.map((item) => item.id))
+  shippingSlowHintState.value = Object.fromEntries(
+    Object.entries(shippingSlowHintState.value).filter(([orderId]) => activeOrderIds.has(orderId))
+  )
+  advancingSlowHintState.value = Object.fromEntries(
+    Object.entries(advancingSlowHintState.value).filter(([orderId]) => activeOrderIds.has(orderId))
+  )
 
   const map: Record<string, string> = {}
   for (const order of orders.value) {
@@ -383,6 +446,7 @@ const shipOrder = async (order: MerchantOrder) => {
   }
   const addressId = shipAddressByOrder.value[order.id]
 
+  startSlowHintTimer(`ship:${order.id}`, shippingSlowHintState, order.id)
   shippingOrderState.value[order.id] = true
   try {
     await api.post(
@@ -399,7 +463,28 @@ const shipOrder = async (order: MerchantOrder) => {
   } catch (err: any) {
     showToast('error', parseErr(err, '发货失败'))
   } finally {
+    clearSlowHintTimer(`ship:${order.id}`)
+    shippingSlowHintState.value[order.id] = false
     shippingOrderState.value[order.id] = false
+  }
+}
+
+const advanceLogistics = async (order: MerchantOrder) => {
+  if (isAdvancingLogistics(order.id)) {
+    return
+  }
+  startSlowHintTimer(`advance:${order.id}`, advancingSlowHintState, order.id)
+  advancingLogisticsState.value[order.id] = true
+  try {
+    await api.post(`/merchant/orders/${order.id}/logistics/advance`)
+    showToast('success', `订单 ${order.id} 物流已推进到下一站`)
+    await loadOrders()
+  } catch (err: any) {
+    showToast('error', parseErr(err, '推进物流失败'))
+  } finally {
+    clearSlowHintTimer(`advance:${order.id}`)
+    advancingSlowHintState.value[order.id] = false
+    advancingLogisticsState.value[order.id] = false
   }
 }
 
@@ -472,6 +557,9 @@ onMounted(async () => {
   })
 })
 onBeforeUnmount(() => {
+  for (const timerKey of Object.keys(slowHintTimers.value)) {
+    clearSlowHintTimer(timerKey)
+  }
   if (pageToastTimer) {
     clearTimeout(pageToastTimer)
     pageToastTimer = null
@@ -529,7 +617,15 @@ onBeforeUnmount(() => {
         <article v-for="order in orders" :key="order.id" class="order-card">
           <div class="row">
             <strong>{{ order.id }}</strong>
-            <span class="status">{{ orderStatusLabel(order.status) }}</span>
+            <div class="order-meta">
+              <span class="status">{{ orderStatusLabel(order.status) }}</span>
+              <span
+                v-if="order.status === 'pending_shipment'"
+                :class="['age-badge', { 'is-slow': isSlowShipment(order) }]"
+              >
+                待处理 {{ pendingHoursLabel(order.created_at) }}
+              </span>
+            </div>
           </div>
           <p class="muted">收货地址：{{ order.address }}</p>
           <p class="muted">售后申请：{{ order.after_sales?.length || 0 }} 条</p>
@@ -555,16 +651,35 @@ onBeforeUnmount(() => {
                 {{ addr.label }} · {{ addr.province }}{{ addr.city }}{{ addr.district }}{{ addr.address_line }}
               </option>
             </select>
-            <button :disabled="actionLoading || isShippingOrder(order.id)" @click="shipOrder(order)">
-              {{ isShippingOrder(order.id) ? '发货中...' : '发货' }}
+            <button
+              :class="{ 'btn-busy': isShippingOrder(order.id) }"
+              :disabled="actionLoading || isShippingOrder(order.id)"
+              @click="shipOrder(order)"
+            >
+              <span v-if="isShippingOrder(order.id)" class="cute-loader" aria-hidden="true"></span>
+              <span>{{ isShippingOrder(order.id) ? '发货中...' : '发货' }}</span>
             </button>
+            <p v-if="shippingSlowHintState[order.id]" class="slow-hint">正在联系仓库并同步物流，请稍候...</p>
+            <div v-if="isShippingOrder(order.id)" class="slow-skeleton"></div>
           </div>
 
           <div v-if="order.logistics" class="logistics">
             <p><strong>运单号：</strong>{{ order.logistics.tracking_no || '待生成' }}</p>
+            <p><strong>物流状态：</strong>{{ logisticsStatusLabel(order.logistics.status) }}</p>
             <p><strong>当前位置：</strong>{{ order.logistics.current_location || '-' }}</p>
             <p><strong>预计送达：</strong>{{ order.logistics.estimated_delivery_at ? new Date(order.logistics.estimated_delivery_at).toLocaleString() : '-' }}</p>
             <p><strong>途径：</strong>{{ (order.logistics.route_plan || []).join(' -> ') || '-' }}</p>
+            <div class="logistics-actions">
+              <button
+                :class="{ 'btn-busy': isAdvancingLogistics(order.id) }"
+                :disabled="actionLoading || isAdvancingLogistics(order.id) || order.logistics.status === 'delivered'"
+                @click="advanceLogistics(order)"
+              >
+                <span v-if="isAdvancingLogistics(order.id)" class="cute-loader" aria-hidden="true"></span>
+                <span>{{ isAdvancingLogistics(order.id) ? '推进中...' : (order.logistics.status === 'delivered' ? '已送达' : '推进到下一站') }}</span>
+              </button>
+              <p v-if="advancingSlowHintState[order.id]" class="slow-hint">正在同步下一站轨迹，请稍候...</p>
+            </div>
           </div>
         </article>
       </section>
@@ -805,6 +920,12 @@ onBeforeUnmount(() => {
   gap: 8px;
 }
 
+.order-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .status,
 .badge {
   background: #f1dfbd;
@@ -812,6 +933,21 @@ onBeforeUnmount(() => {
   border-radius: 999px;
   font-size: 12px;
   padding: 4px 10px;
+}
+
+.age-badge {
+  background: #fdf3e2;
+  border: 1px solid #f2d6a3;
+  color: #5b3e16;
+  border-radius: 999px;
+  font-size: 12px;
+  padding: 4px 10px;
+}
+
+.age-badge.is-slow {
+  background: #fff1f2;
+  border-color: #fda4af;
+  color: #9f1239;
 }
 
 .items {
@@ -846,10 +982,79 @@ onBeforeUnmount(() => {
   gap: 8px;
 }
 
+.ship-row .slow-hint,
+.ship-row .slow-skeleton {
+  grid-column: 1 / -1;
+}
+
 .logistics {
   border-top: 1px dashed #d6c7ad;
   padding-top: 8px;
   color: #4f4538;
+}
+
+.logistics-actions {
+  margin-top: 8px;
+}
+
+.logistics-actions .slow-hint {
+  margin-top: 6px;
+}
+
+.logistics-actions button {
+  border: none;
+  border-radius: 10px;
+  padding: 8px 12px;
+  background: #315f58;
+  color: #f2fff8;
+}
+
+.btn-busy {
+  opacity: 0.95;
+}
+
+.cute-loader {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  border-top-color: #fff;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 6px;
+  animation: spin-loader 0.8s linear infinite;
+  vertical-align: middle;
+}
+
+.slow-hint {
+  margin: 0;
+  color: #6e5f45;
+  font-size: 12px;
+}
+
+.slow-skeleton {
+  height: 10px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #f6ede0 25%, #fff8eb 45%, #f6ede0 65%);
+  background-size: 280% 100%;
+  animation: ship-shimmer 1.2s linear infinite;
+}
+
+@keyframes spin-loader {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes ship-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
 }
 
 .reason {
@@ -961,3 +1166,4 @@ onBeforeUnmount(() => {
   }
 }
 </style>
+

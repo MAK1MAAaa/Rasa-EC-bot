@@ -260,6 +260,12 @@ class ChatOrderLogisticsSummaryResponse(SQLModel):
     items: List[ChatOrderLogisticsSummaryItem]
 
 
+class GeoPointRead(SQLModel):
+    name: str
+    lng: float
+    lat: float
+
+
 class ChatAfterSalesSummaryItem(SQLModel):
     id: UUID
     order_id: str
@@ -344,8 +350,11 @@ class Logistics(SQLModel, table=True):
     tracking_no: Optional[str] = None
     status: str
     current_location: Optional[str] = None
+    current_lng: Optional[float] = None
+    current_lat: Optional[float] = None
     estimated_delivery_at: Optional[datetime] = None
     route_plan: List[str] = Field(default_factory=list, sa_column=Column(JSONB, nullable=False))
+    route_geo: List[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSONB, nullable=False))
     llm_raw_text: Optional[str] = None
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -359,6 +368,18 @@ class AfterSales(SQLModel, table=True):
     reason: Optional[str] = None
     status: str
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class GeoCache(SQLModel, table=True):
+    __tablename__ = "geo_cache"
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    source_text: str = Field(index=True, unique=True, max_length=512)
+    lng: float
+    lat: float
+    provider: str = Field(default="amap", max_length=32)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 class CreateOrderRequest(SQLModel):
@@ -380,8 +401,11 @@ class LogisticsRead(SQLModel):
     tracking_no: Optional[str] = None
     status: str
     current_location: Optional[str] = None
+    current_lng: Optional[float] = None
+    current_lat: Optional[float] = None
     estimated_delivery_at: Optional[datetime] = None
     route_plan: List[str] = Field(default_factory=list)
+    route_geo: List[GeoPointRead] = Field(default_factory=list)
     updated_at: datetime
 
 

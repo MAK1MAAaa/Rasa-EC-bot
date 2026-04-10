@@ -425,6 +425,8 @@ const renderMessageHtml = (value: string) => {
 const orderStatusLabel = (status: string) => {
   if (status === 'pending_shipment') return '寰呭彂璐?
   if (status === 'shipped') return '宸插彂璐?
+  if (status === 'in_transit') return '运输中'
+  if (status === 'delivered') return '已送达'
   return status || '鏈煡鐘舵€?
 }
 

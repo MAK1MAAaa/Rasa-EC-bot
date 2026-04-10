@@ -202,6 +202,11 @@ uv run uvicorn app.main:app --reload
 - `GET /api/v1/orders/{order_id}/after-sales`
 - `POST /api/v1/orders/{order_id}/after-sales`
 
+用户售后阶段规则：
+- 未发货（`pending_shipment`）：允许直接申请`return`。
+- 物流运输中（`logistics.status=in_transit`）：暂不允许申请退货/换货。
+- 已送达（`logistics.status=delivered`）：允许申请`return`或`exchange`。
+
 ### 8.2 商家侧
 - `GET /api/v1/merchant/shop`
 - `GET /api/v1/merchant/addresses`
@@ -212,6 +217,7 @@ uv run uvicorn app.main:app --reload
 - `PATCH /api/v1/merchant/products/{product_id}`
 - `GET /api/v1/merchant/orders?status_filter=pending_shipment|shipped|all`
 - `POST /api/v1/merchant/orders/{order_id}/ship`
+- `POST /api/v1/merchant/orders/{order_id}/logistics/advance`
 - `GET /api/v1/merchant/after-sales?status_filter=open|all|...`
 - `PATCH /api/v1/merchant/after-sales/{after_sales_id}`
 
@@ -323,3 +329,71 @@ CHAT_UPLOAD_MAX_MB=8
 ### 11.3 安全与执行边界
 - 图片附件会校验归属，禁止跨用户读取。
 - 写操作仍保持“待确认草案”机制，不会由 Agent 直接落库执行退款/退换货。
+
+## 12. Logistics Map Integration (New)
+
+### 12.1 Env Vars
+Add the following to `backend/.env`:
+
+```env
+AMAP_WEB_KEY=
+AMAP_WEB_SIG=
+AMAP_TIMEOUT_MS=3000
+AMAP_QPS_LIMIT=5
+```
+
+### 12.2 Data Model Extensions
+- `logistics` fields:
+  - `current_lng`
+  - `current_lat`
+  - `route_geo` (JSON array, item shape: `name/lng/lat`)
+- New table: `geo_cache` (address geocode cache).
+
+### 12.3 Runtime Behavior
+- Merchant shipping and logistics advancing will try to enrich coordinates:
+  - query `geo_cache` first
+  - fallback to AMap geocoding on cache miss
+  - geocode failure will not block shipping, and text tracking still works
+- Startup includes lightweight schema ensure (`CREATE TABLE IF NOT EXISTS` + `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`).
+
+### 12.4 Backward Compatibility
+API paths are unchanged. `logistics` response is extended only with optional fields:
+- `current_lng?: number`
+- `current_lat?: number`
+- `route_geo?: { name: string; lng: number; lat: number }[]`
+
+### 12.5 AMap Key Placement (Important)
+This project uses **both** AMap key types:
+
+1. Web Service Key (backend geocoding)
+2. JS API Key (frontend map rendering)
+
+Backend `.env` values (copy from `backend/.env.sample`):
+
+```env
+AMAP_WEB_KEY=your_amap_web_service_key
+AMAP_WEB_SIG=optional_signature
+AMAP_TIMEOUT_MS=3000
+AMAP_QPS_LIMIT=5
+```
+
+Notes:
+- `AMAP_WEB_KEY` is server-side only. Do not expose it to frontend.
+- `AMAP_WEB_SIG` is optional. Enable it if your AMap console requires request signature.
+
+### 12.6 JS Security Key (`securityJsCode`) usage
+`securityJsCode` is for **JS API** security enhancement and should be configured in frontend env:
+
+```env
+VITE_ENABLE_LOGISTICS_MAP=true
+VITE_AMAP_JS_KEY=your_amap_js_key
+VITE_AMAP_SECURITY_JS_CODE=your_security_js_code
+```
+
+Frontend loader already applies:
+- `window._AMapSecurityConfig = { securityJsCode: ... }` before JSAPI script load.
+
+Optional production-hardening:
+- use `serviceHost` reverse proxy mode in `window._AMapSecurityConfig`
+- restrict JS key by domain whitelist in AMap console
+- keep Web Service key restricted to backend server usage

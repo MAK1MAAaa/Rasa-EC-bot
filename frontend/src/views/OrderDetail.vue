@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import api from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 import { createRealtimeClient, type RealtimeEvent } from '@/utils/realtime'
+import { isAmapEnabled, loadAmap } from '@/utils/amap'
 
 interface OrderDetailItem {
   id: string
@@ -19,8 +20,12 @@ interface OrderLogistics {
   tracking_no?: string | null
   status: string
   current_location?: string | null
+  current_lng?: number | null
+  current_lat?: number | null
   estimated_delivery_at?: string | null
+  updated_at?: string | null
   route_plan: string[]
+  route_geo?: Array<{ name: string; lng: number; lat: number }>
 }
 
 interface AfterSalesItem {
@@ -46,6 +51,10 @@ interface OrderDetail {
   after_sales: AfterSalesItem[]
 }
 
+type AfterSalesStage = 'pending_shipment' | 'in_transit' | 'delivered' | 'unsupported'
+type RouteNodeState = 'done' | 'current' | 'pending'
+type RouteGeoPoint = { name: string; lng: number; lat: number }
+
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
@@ -55,6 +64,11 @@ const order = ref<OrderDetail | null>(null)
 const error = ref('')
 let realtimeClient: ReturnType<typeof createRealtimeClient> | null = null
 let realtimeRefreshTimer: ReturnType<typeof setTimeout> | null = null
+const mapContainerRef = ref<HTMLElement | null>(null)
+const mapLoading = ref(false)
+const mapError = ref('')
+const mapEnabled = isAmapEnabled()
+let amapInstance: any | null = null
 
 const afterSalesSubmitting = ref(false)
 const afterSalesError = ref('')
@@ -72,10 +86,158 @@ const hasActiveAfterSales = computed(() => {
   return order.value.after_sales.some((item) => !terminalAfterSalesStatus.has(item.status))
 })
 
+const logisticsStatus = computed(() => {
+  return (order.value?.logistics?.status || '').trim().toLowerCase()
+})
+
+const afterSalesStage = computed<AfterSalesStage>(() => {
+  if (!order.value) return 'unsupported'
+  if (order.value.status === 'pending_shipment') return 'pending_shipment'
+  if (order.value.status !== 'shipped') return 'unsupported'
+  if (logisticsStatus.value === 'delivered') return 'delivered'
+  return 'in_transit'
+})
+
+const availableAfterSalesTypes = computed<Array<'return' | 'exchange'>>(() => {
+  if (afterSalesStage.value === 'pending_shipment') return ['return']
+  if (afterSalesStage.value === 'delivered') return ['return', 'exchange']
+  return []
+})
+
 const canApplyAfterSales = computed(() => {
   if (!order.value) return false
-  return order.value.status === 'shipped' && !hasActiveAfterSales.value
+  return availableAfterSalesTypes.value.length > 0 && !hasActiveAfterSales.value
 })
+
+const afterSalesHint = computed(() => {
+  if (!order.value) return '当前订单暂不支持售后申请'
+  if (hasActiveAfterSales.value) return '当前已有进行中的售后申请，请等待商家处理'
+  if (afterSalesStage.value === 'pending_shipment') return '商品未发货：可直接申请退货'
+  if (afterSalesStage.value === 'in_transit') return '商品运输中：暂不支持退货，请签收后申请更多售后帮助'
+  if (afterSalesStage.value === 'delivered') return '商品已送达：可申请退货或换货等售后帮助'
+  return '当前订单暂不支持售后申请'
+})
+
+const logisticsStatusLabel = (status: string) => {
+  if (status === 'in_transit') return '运输中'
+  if (status === 'delivered') return '已送达'
+  return status || '-'
+}
+
+const logisticsRouteNodes = computed<Array<{ point: string; state: RouteNodeState }>>(() => {
+  const routePlan = order.value?.logistics?.route_plan || []
+  if (!Array.isArray(routePlan) || routePlan.length === 0) return []
+
+  const cleanedPlan = routePlan.map((item) => String(item || '').trim()).filter((item) => !!item)
+  if (cleanedPlan.length === 0) return []
+
+  const currentLocation = (order.value?.logistics?.current_location || '').trim()
+  let currentIndex = cleanedPlan.findIndex((item) => item === currentLocation)
+  if (logisticsStatus.value === 'delivered') {
+    currentIndex = cleanedPlan.length - 1
+  } else if (currentIndex < 0) {
+    currentIndex = 0
+  }
+
+  return cleanedPlan.map((point, index) => {
+    if (index < currentIndex) return { point, state: 'done' as RouteNodeState }
+    if (index === currentIndex) return { point, state: 'current' as RouteNodeState }
+    return { point, state: 'pending' as RouteNodeState }
+  })
+})
+
+const logisticsRouteGeo = computed<RouteGeoPoint[]>(() => {
+  const points = order.value?.logistics?.route_geo
+  if (!Array.isArray(points)) return []
+  return points
+    .map((item) => ({
+      name: String(item?.name || '').trim(),
+      lng: Number(item?.lng),
+      lat: Number(item?.lat)
+    }))
+    .filter((item) => item.name && Number.isFinite(item.lng) && Number.isFinite(item.lat))
+})
+
+const hasMapCoordinates = computed(() => logisticsRouteGeo.value.length > 0)
+
+const currentMapCenter = computed<[number, number] | null>(() => {
+  const lng = Number(order.value?.logistics?.current_lng)
+  const lat = Number(order.value?.logistics?.current_lat)
+  if (Number.isFinite(lng) && Number.isFinite(lat)) return [lng, lat]
+  if (logisticsRouteGeo.value.length === 0) return null
+  const last = logisticsRouteGeo.value[logisticsRouteGeo.value.length - 1]
+  return [last.lng, last.lat]
+})
+
+const renderLogisticsMap = async () => {
+  if (!mapEnabled || !mapContainerRef.value) return
+  if (!order.value?.logistics) {
+    mapError.value = ''
+    if (amapInstance) {
+      amapInstance.destroy()
+      amapInstance = null
+    }
+    return
+  }
+  if (!hasMapCoordinates.value) {
+    mapError.value = ''
+    if (amapInstance) {
+      amapInstance.destroy()
+      amapInstance = null
+    }
+    return
+  }
+  mapLoading.value = true
+  mapError.value = ''
+  try {
+    const AMap = await loadAmap()
+    await nextTick()
+    if (!mapContainerRef.value) return
+
+    if (!amapInstance) {
+      amapInstance = new AMap.Map(mapContainerRef.value, {
+        zoom: 5,
+        resizeEnable: true
+      })
+    } else {
+      amapInstance.clearMap()
+    }
+
+    const path = logisticsRouteGeo.value.map((item) => [item.lng, item.lat])
+    const overlays: any[] = []
+
+    if (path.length > 1) {
+      const polyline = new AMap.Polyline({
+        path,
+        strokeColor: '#315f58',
+        strokeWeight: 6,
+        strokeOpacity: 0.9
+      })
+      overlays.push(polyline)
+    }
+
+    const currentCenter = currentMapCenter.value
+    if (currentCenter) {
+      const marker = new AMap.Marker({
+        position: currentCenter,
+        title: order.value.logistics.current_location || 'Current Location'
+      })
+      overlays.push(marker)
+    }
+
+    if (overlays.length > 0) {
+      amapInstance.add(overlays)
+      amapInstance.setFitView(overlays, false, [40, 40, 40, 40], 12)
+    } else if (currentCenter) {
+      amapInstance.setCenter(currentCenter)
+      amapInstance.setZoom(9)
+    }
+  } catch {
+    mapError.value = '地图加载失败，已自动降级为文本轨迹。'
+  } finally {
+    mapLoading.value = false
+  }
+}
 
 const orderStatusLabel = (status: string) => {
   if (status === 'pending_shipment') return '待发货'
@@ -142,6 +304,10 @@ const loadOrder = async (id: string) => {
 const submitAfterSales = async () => {
   if (!order.value) return
   clearAfterSalesNotice()
+  if (!availableAfterSalesTypes.value.includes(afterSalesForm.type)) {
+    afterSalesError.value = '当前阶段不支持该售后类型，请调整后重试'
+    return
+  }
 
   const reason = afterSalesForm.reason.trim()
   if (!reason) {
@@ -194,8 +360,33 @@ watch(orderId, (id) => {
   loadOrder(id)
 })
 
+watch(availableAfterSalesTypes, (types) => {
+  if (types.length === 0) return
+  if (!types.includes(afterSalesForm.type)) {
+    afterSalesForm.type = types[0]
+  }
+})
+
+watch(
+  () => [
+    order.value?.id,
+    order.value?.logistics?.updated_at,
+    order.value?.logistics?.current_lng,
+    order.value?.logistics?.current_lat,
+    logisticsRouteGeo.value.length
+  ],
+  () => {
+    if (!mapEnabled) return
+    void renderLogisticsMap()
+  },
+  { flush: 'post' }
+)
+
 onMounted(async () => {
   await loadOrder(orderId.value)
+  if (mapEnabled) {
+    await renderLogisticsMap()
+  }
   realtimeClient = createRealtimeClient({
     token: authStore.token,
     onEvent: handleRealtimeEvent
@@ -206,6 +397,10 @@ onBeforeUnmount(() => {
   if (realtimeRefreshTimer) {
     clearTimeout(realtimeRefreshTimer)
     realtimeRefreshTimer = null
+  }
+  if (amapInstance) {
+    amapInstance.destroy()
+    amapInstance = null
   }
   realtimeClient?.close()
   realtimeClient = null
@@ -248,21 +443,35 @@ onBeforeUnmount(() => {
           </ul>
         </article>
 
-        <article class="panel" v-if="order.logistics">
+        <article class="panel">
           <h2>物流轨迹</h2>
-          <p><strong>运单号：</strong>{{ order.logistics.tracking_no || '-' }}</p>
-          <p><strong>状态：</strong>{{ order.logistics.status }}</p>
-          <p><strong>当前位置：</strong>{{ order.logistics.current_location || '-' }}</p>
-          <p>
-            <strong>预计送达：</strong>
-            {{ order.logistics.estimated_delivery_at ? new Date(order.logistics.estimated_delivery_at).toLocaleString() : '-' }}
-          </p>
-          <div class="route-list">
-            <span v-for="(point, idx) in order.logistics.route_plan || []" :key="`${point}-${idx}`" class="route-chip">
-              {{ point }}
-            </span>
-            <span v-if="!order.logistics.route_plan || order.logistics.route_plan.length === 0" class="muted-small">暂无路线信息</span>
-          </div>
+          <template v-if="order.logistics">
+            <p><strong>运单号：</strong>{{ order.logistics.tracking_no || '-' }}</p>
+            <p><strong>状态：</strong>{{ logisticsStatusLabel(order.logistics.status) }}</p>
+            <p><strong>当前位置：</strong>{{ order.logistics.current_location || '-' }}</p>
+            <p>
+              <strong>预计送达：</strong>
+              {{ order.logistics.estimated_delivery_at ? new Date(order.logistics.estimated_delivery_at).toLocaleString() : '-' }}
+            </p>
+            <div class="route-list">
+              <span
+                v-for="(node, idx) in logisticsRouteNodes"
+                :key="`${node.point}-${idx}`"
+                :class="['route-chip', `state-${node.state}`]"
+              >
+                {{ node.point }}
+              </span>
+              <span v-if="logisticsRouteNodes.length === 0" class="muted-small">暂无路线信息</span>
+            </div>
+            <div v-if="mapEnabled" class="map-card">
+              <p class="map-title">地图预览</p>
+              <div v-if="mapLoading" class="map-skeleton"></div>
+              <p v-else-if="mapError" class="muted-small">{{ mapError }}</p>
+              <div v-else-if="hasMapCoordinates" ref="mapContainerRef" class="map-container"></div>
+              <p v-else class="muted-small">暂无可用坐标，已使用文本轨迹展示。</p>
+            </div>
+          </template>
+          <p v-else class="muted-small">订单暂未发货，暂无物流轨迹</p>
         </article>
 
         <article class="panel">
@@ -282,12 +491,13 @@ onBeforeUnmount(() => {
             </li>
           </ul>
 
+          <p class="muted-small">{{ afterSalesHint }}</p>
           <form v-if="canApplyAfterSales" class="after-sales-form" @submit.prevent="submitAfterSales">
             <label>
               售后类型
               <select v-model="afterSalesForm.type">
-                <option value="return">退货</option>
-                <option value="exchange">换货</option>
+                <option v-if="availableAfterSalesTypes.includes('return')" value="return">退货</option>
+                <option v-if="availableAfterSalesTypes.includes('exchange')" value="exchange">换货</option>
               </select>
             </label>
             <label>
@@ -303,9 +513,6 @@ onBeforeUnmount(() => {
               {{ afterSalesSubmitting ? '提交中...' : '提交售后申请' }}
             </button>
           </form>
-          <p v-else class="muted-small">
-            {{ order.status !== 'shipped' ? '订单发货后才可申请退货/换货' : '当前已有进行中的售后申请，请等待商家处理' }}
-          </p>
         </article>
       </section>
     </template>
@@ -432,6 +639,48 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
 }
 
+.map-card {
+  margin-top: 12px;
+  border: 1px solid #d8cbb4;
+  border-radius: 12px;
+  background: #fffdf8;
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.map-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: #5b4f3a;
+}
+
+.map-container {
+  width: 100%;
+  height: 230px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid #e6d9bf;
+}
+
+.map-skeleton {
+  height: 230px;
+  border-radius: 10px;
+  background: linear-gradient(90deg, #f6ede0 25%, #fff8eb 45%, #f6ede0 65%);
+  background-size: 300% 100%;
+  animation: map-shimmer 1.2s linear infinite;
+}
+
+@keyframes map-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+
 .route-chip {
   border-radius: 999px;
   border: 1px solid #d8cbb4;
@@ -439,6 +688,19 @@ onBeforeUnmount(() => {
   color: #5d523f;
   padding: 4px 10px;
   font-size: 12px;
+}
+
+.route-chip.state-done {
+  background: #ecfdf3;
+  border-color: #86efac;
+  color: #166534;
+}
+
+.route-chip.state-current {
+  background: #e0f2fe;
+  border-color: #7dd3fc;
+  color: #0c4a6e;
+  font-weight: 700;
 }
 
 .row {
@@ -519,5 +781,11 @@ onBeforeUnmount(() => {
   .detail-layout {
     grid-template-columns: 1fr;
   }
+
+  .map-container,
+  .map-skeleton {
+    height: 190px;
+  }
 }
 </style>
+
