@@ -5,6 +5,7 @@ Supported sources:
 - Bitext CSV (instruction -> response)
 - Ecommerce FAQ JSON (patterns x responses)
 - E-commerce Dialogue Corpus TXT (label + context turns + candidate response)
+- Dianshang JSONL (conversation list with from/value)
 - ECM emotional dialogue JSONL (history -> response)
 - ECM2 emotional TSV (A + B -> C, with emotion label)
 """
@@ -510,6 +511,116 @@ def load_ecommerce_dialogue_txt(
     return records
 
 
+def normalize_role(value: Any) -> str:
+    role = str(value or "").strip().lower()
+    if role in {"user", "human", "customer", "buyer"}:
+        return "user"
+    if role in {"assistant", "agent", "bot", "seller"}:
+        return "assistant"
+    return ""
+
+
+def parse_dianshang_turns(value: Any) -> list[tuple[str, str]]:
+    payload = value
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return []
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            return []
+    if not isinstance(payload, list):
+        return []
+
+    turns: list[tuple[str, str]] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        role = normalize_role(item.get("from"))
+        if not role:
+            continue
+        text = str(item.get("value", "")).strip()
+        if not text:
+            continue
+        turns.append((role, text))
+    return turns
+
+
+def load_dianshang_jsonl(
+    jsonl_path: Path,
+    source_name: str,
+    max_user_chars: int,
+    max_assistant_chars: int,
+    max_history_turns: int,
+    max_records: int,
+    seed: int,
+    conversations_field: str = "conversations",
+) -> list[dict[str, Any]]:
+    """Load conversation JSONL and create SFT pairs.
+
+    Expected JSONL row example:
+      {"conversations": "[{\"from\":\"user\",\"value\":\"...\"}, ...]"}
+    """
+    records: list[dict[str, Any]] = []
+    seen_pairs: set[str] = set()
+    unique_count = 0
+    rng = random.Random(seed)
+
+    for raw_line in read_lines_with_fallback(
+        jsonl_path, encodings=("utf-8", "utf-8-sig", "gb18030", "gbk", "latin-1")
+    ):
+        line = raw_line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(obj, dict):
+            continue
+
+        turns = parse_dianshang_turns(obj.get(conversations_field))
+        if len(turns) < 2:
+            continue
+
+        for idx, (role, assistant_text) in enumerate(turns):
+            if role != "assistant" or idx == 0:
+                continue
+            context_values = [x[1] for x in turns[:idx] if x[1].strip()]
+            if not context_values:
+                continue
+            if max_history_turns > 0:
+                context_values = context_values[-max_history_turns:]
+            user_text = format_dialogue_context(context_values)
+            rec = make_record(
+                user_text=user_text,
+                assistant_text=assistant_text,
+                source=source_name,
+                category="ecommerce_dialogue_positive",
+                intent="multi_turn_reply",
+                max_user_chars=max_user_chars,
+                max_assistant_chars=max_assistant_chars,
+            )
+            if rec is None:
+                continue
+
+            fp = record_fingerprint(
+                rec["messages"][1]["content"], rec["messages"][2]["content"]
+            )
+            if fp in seen_pairs:
+                continue
+            seen_pairs.add(fp)
+            unique_count += 1
+            if max_records <= 0 or len(records) < max_records:
+                records.append(rec)
+            else:
+                replace_idx = rng.randint(0, unique_count - 1)
+                if replace_idx < max_records:
+                    records[replace_idx] = rec
+    return records
+
+
 def deduplicate(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     seen: set[tuple[str, str]] = set()
     unique: list[dict[str, Any]] = []
@@ -591,6 +702,24 @@ def parse_args() -> argparse.Namespace:
         help="E-commerce Dialogue Corpus test.txt (optional).",
     )
     parser.add_argument(
+        "--ec-train-jsonl",
+        type=Path,
+        default=None,
+        help="Dianshang JSONL train file, e.g. data/dianshang_dataset/output.jsonl (optional).",
+    )
+    parser.add_argument(
+        "--ec-dev-jsonl",
+        type=Path,
+        default=None,
+        help="Dianshang JSONL dev file (optional).",
+    )
+    parser.add_argument(
+        "--ec-test-jsonl",
+        type=Path,
+        default=None,
+        help="Dianshang JSONL test file (optional).",
+    )
+    parser.add_argument(
         "--ecm-train-txt",
         type=Path,
         default=None,
@@ -630,6 +759,12 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=7,
         help="Keep latest N context turns from E-commerce Dialogue Corpus.",
+    )
+    parser.add_argument(
+        "--ec-conversations-field",
+        type=str,
+        default="conversations",
+        help="Field name of conversations in Dianshang JSONL.",
     )
     parser.add_argument(
         "--ec-max-samples",
@@ -704,6 +839,27 @@ def main() -> None:
                 seed=args.seed + 100 + idx,
             )
         )
+
+    ec_jsonl_inputs: list[tuple[Path | None, str]] = [
+        (args.ec_train_jsonl, "ecommerce_dialogue_train"),
+        (args.ec_dev_jsonl, "ecommerce_dialogue_dev"),
+        (args.ec_test_jsonl, "ecommerce_dialogue_test"),
+    ]
+    for idx, (ec_path, source_name) in enumerate(ec_jsonl_inputs):
+        if ec_path is None:
+            continue
+        ec_records.extend(
+            load_dianshang_jsonl(
+                jsonl_path=ec_path,
+                source_name=source_name,
+                max_user_chars=args.max_user_chars,
+                max_assistant_chars=args.max_assistant_chars,
+                max_history_turns=args.ec_max_history_turns,
+                max_records=max(0, args.ec_max_samples),
+                seed=args.seed + 200 + idx,
+                conversations_field=args.ec_conversations_field,
+            )
+        )
     ec_records = deduplicate(ec_records)
     if args.ec_max_samples > 0 and len(ec_records) > args.ec_max_samples:
         ec_records = rng.sample(ec_records, args.ec_max_samples)
@@ -765,7 +921,7 @@ def main() -> None:
     if not merged:
         raise ValueError(
             "No training data loaded. Provide at least one source: --bitext-csv, "
-            "--faq-json, --ec-*-txt, --ecm-*-txt, or --ecm2-*-txt."
+            "--faq-json, --ec-*-txt/--ec-*-jsonl, --ecm-*-txt, or --ecm2-*-txt."
         )
     train, val, test = split_records(merged, seed=args.seed)
 

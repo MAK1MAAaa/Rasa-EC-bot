@@ -1,21 +1,21 @@
 base_model: Qwen/Qwen3.5-2B
-train_file: data/processed/train.jsonl
-eval_file: data/processed/val.jsonl
-output_dir: outputs/full
+train_file: data/processed/ec_faq_only/train.jsonl
+eval_file: data/processed/ec_faq_only/val.jsonl
+output_dir: outputs/smoke_ec_faq_only
 
 seed: 42
-max_seq_len: 2048
-num_train_epochs: 2
+max_seq_len: 1024
+num_train_epochs: 1
 per_device_train_batch_size: 1
-per_device_eval_batch_size: 2
-gradient_accumulation_steps: 16
-learning_rate: 2.0e-4
+per_device_eval_batch_size: 4
+gradient_accumulation_steps: 8
+learning_rate: 1.0e-5
 lr_scheduler_type: cosine
-warmup_steps: 800
+warmup_steps: 200
 logging_steps: 20
-save_steps: 1000
-eval_steps: 1000
-max_eval_samples: 2000
+save_steps: 500
+eval_steps: 500
+max_eval_samples: 1000
 save_total_limit: 2
 
 bf16: true
