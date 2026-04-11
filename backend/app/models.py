@@ -12,6 +12,31 @@ class ShopBrief(SQLModel):
     name: str
 
 
+class ShopCatalogFields(SQLModel):
+    logo_url: Optional[str] = None
+    rating: Optional[float] = Field(default=None, ge=0, le=5)
+    service_score: Optional[float] = Field(default=None, ge=0, le=5)
+    logistics_score: Optional[float] = Field(default=None, ge=0, le=5)
+    after_sales_score: Optional[float] = Field(default=None, ge=0, le=5)
+    shipping_city: Optional[str] = None
+    featured_categories: List[str] = Field(default_factory=list)
+    service_tags: List[str] = Field(default_factory=list)
+
+
+class ProductCatalogFields(SQLModel):
+    brand: Optional[str] = None
+    model: Optional[str] = None
+    sku_code: Optional[str] = None
+    original_price: Optional[float] = Field(default=None, ge=0)
+    rating: Optional[float] = Field(default=None, ge=0, le=5)
+    review_count: int = Field(default=0, ge=0)
+    monthly_sales: int = Field(default=0, ge=0)
+    ship_in_hours: int = Field(default=0, ge=0)
+    warranty_days: int = Field(default=0, ge=0)
+    tags: List[str] = Field(default_factory=list)
+    spec_highlights: List[str] = Field(default_factory=list)
+
+
 class UserBase(SQLModel):
     username: str = Field(index=True)
     email: str = Field(unique=True, index=True)
@@ -42,7 +67,7 @@ class LoginRequest(SQLModel):
     password: str
 
 
-class Shop(SQLModel, table=True):
+class Shop(ShopCatalogFields, table=True):
     __tablename__ = "shops"
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
@@ -51,11 +76,13 @@ class Shop(SQLModel, table=True):
     description: Optional[str] = None
     contact_email: Optional[str] = None
     contact_phone: Optional[str] = None
+    featured_categories: List[str] = Field(default_factory=list, sa_column=Column(JSONB, nullable=False))
+    service_tags: List[str] = Field(default_factory=list, sa_column=Column(JSONB, nullable=False))
     is_active: bool = True
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
-class ShopRead(SQLModel):
+class ShopRead(ShopCatalogFields):
     id: UUID
     name: str
     description: Optional[str] = None
@@ -63,6 +90,16 @@ class ShopRead(SQLModel):
     contact_phone: Optional[str] = None
     is_active: bool
     created_at: datetime
+
+
+class MerchantShopUpdate(SQLModel):
+    logo_url: Optional[str] = None
+    description: Optional[str] = None
+    contact_email: Optional[str] = None
+    contact_phone: Optional[str] = None
+    shipping_city: Optional[str] = None
+    featured_categories: Optional[List[str]] = None
+    service_tags: Optional[List[str]] = None
 
 
 class ShopAddress(SQLModel, table=True):
@@ -121,9 +158,9 @@ class ShopAddressRead(SQLModel):
     created_at: datetime
 
 
-class ProductBase(SQLModel):
+class ProductBase(ProductCatalogFields):
     name: str
-    price: float
+    price: float = Field(ge=0)
     description: Optional[str] = None
     image_url: Optional[str] = None
     category: Optional[str] = None
@@ -135,6 +172,8 @@ class Product(ProductBase, table=True):
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     shop_id: UUID = Field(foreign_key="shops.id", index=True)
+    tags: List[str] = Field(default_factory=list, sa_column=Column(JSONB, nullable=False))
+    spec_highlights: List[str] = Field(default_factory=list, sa_column=Column(JSONB, nullable=False))
     stock: int = Field(default=0, ge=0)
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -143,6 +182,15 @@ class ProductRead(ProductBase):
     id: UUID
     shop_id: UUID
     shop_name: str
+    shop_description: Optional[str] = None
+    shop_logo_url: Optional[str] = None
+    shop_rating: Optional[float] = None
+    shop_service_score: Optional[float] = None
+    shop_logistics_score: Optional[float] = None
+    shop_after_sales_score: Optional[float] = None
+    shop_shipping_city: Optional[str] = None
+    shop_featured_categories: List[str] = Field(default_factory=list)
+    shop_service_tags: List[str] = Field(default_factory=list)
     stock: int
     created_at: datetime
 
@@ -154,8 +202,18 @@ class ProductListResponse(SQLModel):
     page_size: int
 
 
+class ProductFilterShopOption(SQLModel):
+    id: UUID
+    name: str
+    rating: Optional[float] = None
+    shipping_city: Optional[str] = None
+    active_product_count: int
+
+
 class ProductFilterMetaResponse(SQLModel):
     categories: List[str]
+    brands: List[str]
+    shops: List[ProductFilterShopOption]
     price_min: float
     price_max: float
 
@@ -170,6 +228,17 @@ class MerchantProductUpdate(SQLModel):
     description: Optional[str] = None
     image_url: Optional[str] = None
     category: Optional[str] = None
+    brand: Optional[str] = None
+    model: Optional[str] = None
+    sku_code: Optional[str] = None
+    original_price: Optional[float] = Field(default=None, ge=0)
+    rating: Optional[float] = Field(default=None, ge=0, le=5)
+    review_count: Optional[int] = Field(default=None, ge=0)
+    monthly_sales: Optional[int] = Field(default=None, ge=0)
+    ship_in_hours: Optional[int] = Field(default=None, ge=0)
+    warranty_days: Optional[int] = Field(default=None, ge=0)
+    tags: Optional[List[str]] = None
+    spec_highlights: Optional[List[str]] = None
     stock: Optional[int] = Field(default=None, ge=0)
     is_active: Optional[bool] = None
 

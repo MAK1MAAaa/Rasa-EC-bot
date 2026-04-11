@@ -172,3 +172,47 @@ uv run python scripts/eval_lora.py `
 - `base_contains_forbidden_keywords / tuned_contains_forbidden_keywords`: `0 / 0`
 
 说明：本次微调后在 20 条离线约束集上未超过基座（少通过 1 条）。
+
+## 9. 导出为 Ollama 模型（用于系统形态 Benchmark）
+
+为了让 LoRA 微调后的模型参与接口级 benchmark，需要先把 adapter 注册为 Ollama 模型。
+
+新增脚本：`scripts/export_ollama_model.py`
+
+### 9.1 生成 Modelfile
+
+```powershell
+cd LoRA
+uv run python scripts/export_ollama_model.py `
+  --adapter-dir outputs/smoke_ec_faq_only/adapter `
+  --base-model qwen3.5:2b `
+  --model-name qwen3.5:2b-lora `
+  --output-dir outputs/smoke_ec_faq_only/ollama_export
+```
+
+输出：
+
+- `outputs/smoke_ec_faq_only/ollama_export/Modelfile`
+
+### 9.2 注册到 Ollama
+
+```powershell
+ollama create qwen3.5:2b-lora -f outputs/smoke_ec_faq_only/ollama_export/Modelfile
+ollama run qwen3.5:2b-lora "你好"
+```
+
+如果你希望脚本直接执行 `ollama create`，可以追加：
+
+```powershell
+uv run python scripts/export_ollama_model.py `
+  --adapter-dir outputs/smoke_ec_faq_only/adapter `
+  --base-model qwen3.5:2b `
+  --model-name qwen3.5:2b-lora `
+  --output-dir outputs/smoke_ec_faq_only/ollama_export `
+  --run-create
+```
+
+说明：
+
+- `--base-model` 必须是本机 `ollama list` 中已经存在的基础模型名。
+- benchmark 脚本只消费已经能被 `ollama /api/chat` 调用的模型，不负责训练。

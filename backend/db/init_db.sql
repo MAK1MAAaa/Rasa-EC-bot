@@ -1,4 +1,4 @@
-﻿CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE EXTENSION IF NOT EXISTS vector;
 
@@ -35,6 +35,14 @@ CREATE TABLE shops (
     description TEXT,
     contact_email VARCHAR(255),
     contact_phone VARCHAR(30),
+    logo_url TEXT,
+    rating DOUBLE PRECISION CHECK (rating IS NULL OR (rating >= 0 AND rating <= 5)),
+    service_score DOUBLE PRECISION CHECK (service_score IS NULL OR (service_score >= 0 AND service_score <= 5)),
+    logistics_score DOUBLE PRECISION CHECK (logistics_score IS NULL OR (logistics_score >= 0 AND logistics_score <= 5)),
+    after_sales_score DOUBLE PRECISION CHECK (after_sales_score IS NULL OR (after_sales_score >= 0 AND after_sales_score <= 5)),
+    shipping_city VARCHAR(120),
+    featured_categories JSONB NOT NULL DEFAULT '[]'::jsonb,
+    service_tags JSONB NOT NULL DEFAULT '[]'::jsonb,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -65,7 +73,18 @@ CREATE TABLE products (
     description TEXT,
     image_url TEXT,
     category VARCHAR(100),
+    brand VARCHAR(120),
+    model VARCHAR(160),
+    sku_code VARCHAR(120),
     price DECIMAL(10, 2) NOT NULL CHECK (price >= 0),
+    original_price DECIMAL(10, 2) CHECK (original_price IS NULL OR original_price >= price),
+    rating DOUBLE PRECISION CHECK (rating IS NULL OR (rating >= 0 AND rating <= 5)),
+    review_count INT NOT NULL DEFAULT 0 CHECK (review_count >= 0),
+    monthly_sales INT NOT NULL DEFAULT 0 CHECK (monthly_sales >= 0),
+    ship_in_hours INT NOT NULL DEFAULT 0 CHECK (ship_in_hours >= 0),
+    warranty_days INT NOT NULL DEFAULT 0 CHECK (warranty_days >= 0),
+    tags JSONB NOT NULL DEFAULT '[]'::jsonb,
+    spec_highlights JSONB NOT NULL DEFAULT '[]'::jsonb,
     stock INT NOT NULL DEFAULT 0 CHECK (stock >= 0),
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -73,7 +92,10 @@ CREATE TABLE products (
 
 CREATE INDEX idx_products_shop_id ON products(shop_id);
 CREATE INDEX idx_products_category ON products(category);
+CREATE INDEX idx_products_brand ON products(brand);
 CREATE INDEX idx_products_active_created_at ON products(is_active, created_at DESC);
+CREATE INDEX idx_products_monthly_sales ON products(monthly_sales DESC);
+CREATE INDEX idx_products_rating ON products(rating DESC);
 
 CREATE TABLE orders (
     id VARCHAR(50) PRIMARY KEY,

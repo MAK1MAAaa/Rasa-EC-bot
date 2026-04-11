@@ -1,5 +1,0 @@
-﻿rasa>=3.6,<3.8
-rasa-sdk>=3.6,<3.8
-requests>=2.31,<3
-python-dotenv>=1.0,<2
-jieba>=0.42,<1

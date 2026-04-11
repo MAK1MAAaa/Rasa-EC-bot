@@ -10,6 +10,14 @@ interface ShopInfo {
   description?: string | null
   contact_email?: string | null
   contact_phone?: string | null
+  logo_url?: string | null
+  rating?: number | null
+  service_score?: number | null
+  logistics_score?: number | null
+  after_sales_score?: number | null
+  shipping_city?: string | null
+  featured_categories: string[]
+  service_tags: string[]
 }
 
 interface AddressItem {
@@ -34,7 +42,18 @@ interface MerchantProduct {
   description?: string
   image_url?: string
   category?: string
+  brand?: string
+  model?: string
+  sku_code?: string
   price: number
+  original_price?: number | null
+  rating?: number | null
+  review_count: number
+  monthly_sales: number
+  ship_in_hours: number
+  warranty_days: number
+  tags: string[]
+  spec_highlights: string[]
   stock: number
   is_active: boolean
 }
@@ -130,10 +149,30 @@ let realtimeRefreshTimer: ReturnType<typeof setTimeout> | null = null
 const productForm = reactive({
   name: '',
   category: '',
+  brand: '',
+  model: '',
   price: 0,
+  original_price: 0,
+  rating: 4.5,
+  review_count: 0,
+  monthly_sales: 0,
+  ship_in_hours: 24,
+  warranty_days: 365,
   stock: 0,
   image_url: '',
-  description: ''
+  description: '',
+  tags: '',
+  spec_highlights: ''
+})
+
+const shopForm = reactive({
+  logo_url: '',
+  description: '',
+  contact_email: '',
+  contact_phone: '',
+  shipping_city: '',
+  featured_categories: '',
+  service_tags: ''
 })
 
 const addressForm = reactive({
@@ -149,6 +188,33 @@ const addressForm = reactive({
 })
 
 const shopDisplay = computed(() => shop.value?.name || authStore.user?.shop?.name || '商家店铺')
+
+const splitMultiValue = (raw: string) =>
+  raw
+    .split(/\r?\n|,|，/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+
+const formatScore = (value?: number | null) => {
+  const score = Number(value)
+  return Number.isFinite(score) ? score.toFixed(1) : '-'
+}
+
+const formatShipHours = (value?: number | null) => {
+  const hours = Number(value)
+  if (!Number.isFinite(hours) || hours < 0) return '-'
+  return hours === 0 ? '即时发货' : `${hours} 小时发货`
+}
+
+const fillShopForm = (value: ShopInfo | null) => {
+  shopForm.logo_url = value?.logo_url || ''
+  shopForm.description = value?.description || ''
+  shopForm.contact_email = value?.contact_email || ''
+  shopForm.contact_phone = value?.contact_phone || ''
+  shopForm.shipping_city = value?.shipping_city || ''
+  shopForm.featured_categories = (value?.featured_categories || []).join('，')
+  shopForm.service_tags = (value?.service_tags || []).join('，')
+}
 
 const showToast = (type: ToastKind, message: string) => {
   if (pageToastTimer) {
@@ -278,6 +344,7 @@ const afterSalesActions = (item: MerchantAfterSalesItem) => {
 const loadShop = async () => {
   const response = await api.get('/merchant/shop')
   shop.value = response.data
+  fillShopForm(shop.value)
 }
 
 const loadAddresses = async () => {
@@ -360,22 +427,65 @@ const createProduct = async () => {
     await api.post('/merchant/products', {
       name: productForm.name,
       category: productForm.category || null,
+      brand: productForm.brand || null,
+      model: productForm.model || null,
       price: Number(productForm.price),
+      original_price: Number(productForm.original_price) || null,
+      rating: Number(productForm.rating),
+      review_count: Number(productForm.review_count),
+      monthly_sales: Number(productForm.monthly_sales),
+      ship_in_hours: Number(productForm.ship_in_hours),
+      warranty_days: Number(productForm.warranty_days),
       stock: Number(productForm.stock),
       image_url: productForm.image_url || null,
       description: productForm.description || null,
+      tags: splitMultiValue(productForm.tags),
+      spec_highlights: splitMultiValue(productForm.spec_highlights),
       is_active: true
     })
     success.value = '商品已上架'
     productForm.name = ''
     productForm.category = ''
+    productForm.brand = ''
+    productForm.model = ''
     productForm.price = 0
+    productForm.original_price = 0
+    productForm.rating = 4.5
+    productForm.review_count = 0
+    productForm.monthly_sales = 0
+    productForm.ship_in_hours = 24
+    productForm.warranty_days = 365
     productForm.stock = 0
     productForm.image_url = ''
     productForm.description = ''
+    productForm.tags = ''
+    productForm.spec_highlights = ''
     await loadProducts()
   } catch (err: any) {
     error.value = parseErr(err, '商品上架失败')
+  } finally {
+    actionLoading.value = false
+  }
+}
+
+const saveShopProfile = async () => {
+  clearNotice()
+  actionLoading.value = true
+  try {
+    const response = await api.patch('/merchant/shop', {
+      logo_url: shopForm.logo_url || null,
+      description: shopForm.description || null,
+      contact_email: shopForm.contact_email || null,
+      contact_phone: shopForm.contact_phone || null,
+      shipping_city: shopForm.shipping_city || null,
+      featured_categories: splitMultiValue(shopForm.featured_categories),
+      service_tags: splitMultiValue(shopForm.service_tags)
+    })
+    shop.value = response.data
+    fillShopForm(shop.value)
+    success.value = '店铺资料已更新'
+  } catch (err: any) {
+    error.value = parseErr(err, '更新店铺资料失败')
   } finally {
     actionLoading.value = false
   }
@@ -727,8 +837,52 @@ onBeforeUnmount(() => {
       </section>
 
       <section v-if="activeTab === 'products'" class="panel">
+        <div class="panel-head">
+          <h2>店铺资料</h2>
+          <div class="score-tags" v-if="shop">
+            <span class="badge">评分 {{ formatScore(shop.rating) }}</span>
+            <span class="badge">服务 {{ formatScore(shop.service_score) }}</span>
+            <span class="badge">物流 {{ formatScore(shop.logistics_score) }}</span>
+            <span class="badge">售后 {{ formatScore(shop.after_sales_score) }}</span>
+          </div>
+        </div>
+        <div v-if="shop" class="shop-meta">
+          <article class="shop-meta-card">
+            <strong>{{ shop.shipping_city || '未设置发货城市' }}</strong>
+            <p class="muted">发货城市</p>
+          </article>
+          <article class="shop-meta-card">
+            <strong>{{ shop.featured_categories?.length ? shop.featured_categories.join(' / ') : '未设置主营类目' }}</strong>
+            <p class="muted">主营类目</p>
+          </article>
+          <article class="shop-meta-card">
+            <strong>{{ shop.service_tags?.length ? shop.service_tags.join(' / ') : '未设置服务标签' }}</strong>
+            <p class="muted">服务标签</p>
+          </article>
+        </div>
+        <form class="grid-form" @submit.prevent="saveShopProfile">
+          <input v-model="shopForm.logo_url" placeholder="店铺 Logo URL">
+          <input v-model="shopForm.contact_email" placeholder="联系邮箱">
+          <input v-model="shopForm.contact_phone" placeholder="联系电话">
+          <input v-model="shopForm.shipping_city" placeholder="发货城市">
+          <textarea v-model="shopForm.description" rows="2" placeholder="店铺简介"></textarea>
+          <textarea v-model="shopForm.featured_categories" rows="2" placeholder="主营类目，用逗号或换行分隔"></textarea>
+          <textarea v-model="shopForm.service_tags" rows="2" placeholder="服务标签，用逗号或换行分隔"></textarea>
+          <button :disabled="actionLoading" type="submit">保存店铺资料</button>
+        </form>
         <h2>上架商品</h2>
+        <p class="muted">标签、核心参数、主营类目和服务标签支持用中英文逗号或换行提交多值。</p>
         <form class="grid-form" @submit.prevent="createProduct">
+          <textarea v-model="productForm.tags" rows="2" placeholder="标签，用逗号或换行分隔"></textarea>
+          <textarea v-model="productForm.spec_highlights" rows="2" placeholder="核心参数，用逗号或换行分隔"></textarea>
+          <input v-model="productForm.brand" placeholder="品牌">
+          <input v-model="productForm.model" placeholder="型号">
+          <input v-model.number="productForm.original_price" min="0" step="0.01" type="number" placeholder="原价">
+          <input v-model.number="productForm.rating" min="0" max="5" step="0.1" type="number" placeholder="评分">
+          <input v-model.number="productForm.review_count" min="0" step="1" type="number" placeholder="评价数">
+          <input v-model.number="productForm.monthly_sales" min="0" step="1" type="number" placeholder="月销量">
+          <input v-model.number="productForm.ship_in_hours" min="0" step="1" type="number" placeholder="发货时效(小时)">
+          <input v-model.number="productForm.warranty_days" min="0" step="1" type="number" placeholder="保修天数">
           <input v-model="productForm.name" required placeholder="商品名称">
           <input v-model="productForm.category" placeholder="分类">
           <input v-model.number="productForm.price" min="0" step="0.01" type="number" required placeholder="价格">
@@ -743,7 +897,12 @@ onBeforeUnmount(() => {
           <article v-for="item in products" :key="item.id" class="product-row">
             <div>
               <strong>{{ item.name }}</strong>
+              <p class="muted">{{ item.brand || '未设品牌' }} {{ item.model || '' }} · SKU {{ item.sku_code || '-' }}</p>
+              <p class="muted">评分 {{ formatScore(item.rating) }} · 月销 {{ item.monthly_sales }} · {{ formatShipHours(item.ship_in_hours) }}</p>
+              <p class="muted" v-if="item.spec_highlights?.length">{{ item.spec_highlights.join(' / ') }}</p>
+              <p class="muted" v-if="item.tags?.length">{{ item.tags.join(' / ') }}</p>
               <p class="muted">{{ item.category || '未分类' }} · 库存 {{ item.stock }} · ¥ {{ item.price.toFixed(2) }}</p>
+              <p class="muted">保修 {{ item.warranty_days }} 天<span v-if="item.original_price && item.original_price > item.price"> · 原价 ¥ {{ item.original_price.toFixed(2) }}</span></p>
             </div>
             <button :disabled="actionLoading" @click="toggleProductActive(item)">
               {{ item.is_active ? '下架' : '上架' }}
@@ -850,6 +1009,34 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   align-items: center;
   gap: 10px;
+}
+
+.score-tags {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.shop-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.shop-meta-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  background: #fffcf6;
+  display: grid;
+  gap: 4px;
+}
+
+.shop-meta-card strong {
+  color: #3f3017;
+  font-size: 14px;
+  line-height: 1.5;
 }
 
 .filter-row {
@@ -1157,6 +1344,7 @@ onBeforeUnmount(() => {
     grid-template-columns: 1fr;
   }
 
+  .shop-meta,
   .ship-row,
   .product-row,
   .address-row,

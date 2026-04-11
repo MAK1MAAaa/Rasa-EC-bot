@@ -1,0 +1,49 @@
+version: "3.1"
+
+intents:
+  - greet
+  - goodbye
+  - thanks
+  - ask_order_help
+  - ask_shipping_help
+  - ask_product_recommendation
+  - ask_after_sales_help
+  - chitchat
+  - bot_challenge
+  - nlu_fallback
+
+entities:
+  - category
+
+slots:
+  category:
+    type: text
+    mappings:
+      - type: from_entity
+        entity: category
+
+responses:
+  utter_greet:
+    - text: "你好，我是纯 Rasa 规则客服，可以帮你查订单、物流、售后和商品推荐。"
+
+  utter_goodbye:
+    - text: "好的，有需要再来找我。"
+
+  utter_you_are_welcome:
+    - text: "不客气。"
+
+  utter_iamabot:
+    - text: "我是用于 benchmark 对照实验的纯 Rasa 客服实例。"
+
+  utter_default:
+    - text: "我目前只能处理订单、物流、售后和商品推荐相关问题。你可以直接说明要查订单、查物流、查售后，或让我要推荐商品。"
+
+actions:
+  - action_recommend_products
+  - action_query_my_orders
+  - action_query_order_logistics
+  - action_query_after_sales
+
+session_config:
+  session_expiration_time: 60
+  carry_over_slots_to_new_session: true

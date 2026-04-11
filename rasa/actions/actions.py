@@ -174,7 +174,7 @@ class ActionRecommendProducts(Action):
         params: dict[str, Any] = {
             'page': 1,
             'page_size': 5,
-            'sort_by': 'newest',
+            'sort_by': 'sales_desc',
             'in_stock': True,
         }
         if category:
@@ -210,8 +210,14 @@ class ActionRecommendProducts(Action):
                         'id': product_id,
                         'name': name,
                         'category': cat,
+                        'brand': _safe_text(item.get('brand')),
                         'price': price,
                         'stock': _safe_int(item.get('stock')),
+                        'rating': _safe_float(item.get('rating')),
+                        'review_count': _safe_int(item.get('review_count')),
+                        'monthly_sales': _safe_int(item.get('monthly_sales')),
+                        'ship_in_hours': _safe_int(item.get('ship_in_hours')),
+                        'tags': item.get('tags') if isinstance(item.get('tags'), list) else [],
                         'shop_name': _safe_text(item.get('shop_name')),
                         'product_link': product_link,
                         'image_url': _safe_text(item.get('image_url')),

@@ -10,21 +10,41 @@ interface Product {
   id: string
   shop_id: string
   shop_name: string
+  shop_rating?: number | null
+  shop_shipping_city?: string | null
   name: string
   description?: string
   image_url?: string
   category?: string
+  brand?: string
+  model?: string
   price: number
+  original_price?: number | null
+  rating?: number | null
+  review_count: number
+  monthly_sales: number
+  ship_in_hours: number
+  tags: string[]
   stock: number
+}
+
+interface FilterShopOption {
+  id: string
+  name: string
+  rating?: number | null
+  shipping_city?: string | null
+  active_product_count: number
 }
 
 interface ProductFilterMetaResponse {
   categories: string[]
+  brands: string[]
+  shops: FilterShopOption[]
   price_min: number
   price_max: number
 }
 
-type SortBy = 'newest' | 'price_asc' | 'price_desc'
+type SortBy = 'newest' | 'price_asc' | 'price_desc' | 'rating_desc' | 'sales_desc'
 
 const route = useRoute()
 const router = useRouter()
@@ -45,6 +65,10 @@ const fallbackCategories = ['手机', '电脑', '音频', '外设', '显示器',
 const availableCategories = ref<string[]>([...fallbackCategories])
 const selectedCategory = ref('')
 const appliedCategory = ref('')
+const availableBrands = ref<string[]>([])
+const selectedBrand = ref('')
+const appliedBrand = ref('')
+const shopOptions = ref<FilterShopOption[]>([])
 
 const showFilters = ref(false)
 const minPriceInput = ref('')
@@ -62,10 +86,12 @@ let realtimeClient: ReturnType<typeof createRealtimeClient> | null = null
 let realtimeRefreshTimer: ReturnType<typeof setTimeout> | null = null
 
 const categoryOptions = computed(() => ['全部', ...availableCategories.value])
+const brandOptions = computed(() => ['全部品牌', ...availableBrands.value])
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
 const hasActiveFilters = computed(
   () =>
     !!appliedCategory.value ||
+    !!appliedBrand.value ||
     appliedMinPrice.value !== null ||
     appliedMaxPrice.value !== null ||
     onlyInStock.value ||
@@ -92,14 +118,24 @@ const loadFilterMeta = async () => {
       ? response.data.categories.filter((item) => typeof item === 'string' && item.trim().length > 0)
       : []
     availableCategories.value = categories.length > 0 ? categories : [...fallbackCategories]
+    availableBrands.value = Array.isArray(response.data.brands)
+      ? response.data.brands.filter((item) => typeof item === 'string' && item.trim().length > 0)
+      : []
+    shopOptions.value = Array.isArray(response.data.shops) ? response.data.shops : []
 
     const rangeMin = Number(response.data.price_min ?? 0)
     const rangeMax = Number(response.data.price_max ?? 0)
     if (Number.isFinite(rangeMin) && Number.isFinite(rangeMax) && rangeMax >= rangeMin) {
       priceRange.value = { min: rangeMin, max: rangeMax }
     }
+    if (appliedShopId.value) {
+      const matched = shopOptions.value.find((item) => item.id === appliedShopId.value)
+      appliedShopName.value = matched?.name || appliedShopName.value
+    }
   } catch {
     availableCategories.value = [...fallbackCategories]
+    availableBrands.value = []
+    shopOptions.value = []
   }
 }
 
@@ -113,6 +149,7 @@ const loadProducts = async () => {
       page_size: pageSize,
       keyword: keyword.value,
       category: appliedCategory.value,
+      brand: appliedBrand.value,
       in_stock: onlyInStock.value,
       sort_by: sortBy.value
     }
@@ -160,15 +197,23 @@ const applyFilters = () => {
   }
 
   appliedCategory.value = selectedCategory.value
+  appliedBrand.value = selectedBrand.value
   appliedMinPrice.value = minPrice
   appliedMaxPrice.value = maxPrice
   page.value = 1
+  if (appliedShopId.value) {
+    const matched = shopOptions.value.find((item) => item.id === appliedShopId.value)
+    appliedShopName.value = matched?.name || appliedShopName.value
+  }
+  router.replace({ path: '/products', query: appliedShopId.value ? { shop_id: appliedShopId.value } : {} })
   loadProducts()
 }
 
 const resetFilters = () => {
   selectedCategory.value = ''
   appliedCategory.value = ''
+  selectedBrand.value = ''
+  appliedBrand.value = ''
   minPriceInput.value = ''
   maxPriceInput.value = ''
   appliedMinPrice.value = null
@@ -189,6 +234,18 @@ const filterByShop = (shopId: string, shopName: string) => {
   page.value = 1
   router.replace({ path: '/products', query: { shop_id: shopId } })
   loadProducts()
+}
+
+const formatRating = (value?: number | null) => {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '暂无评分'
+  return `${value.toFixed(1)} 分`
+}
+
+const formatShipHours = (value: number) => {
+  if (!Number.isFinite(value) || value <= 0) return '时效待补充'
+  if (value < 24) return `${value} 小时发货`
+  if (value % 24 === 0) return `${value / 24} 天内发货`
+  return `${value} 小时发货`
 }
 
 const addCart = async (productId: string) => {
@@ -236,8 +293,13 @@ watch(
   (shopId) => {
     if (typeof shopId === 'string' && shopId.trim()) {
       appliedShopId.value = shopId
+      const matched = shopOptions.value.find((item) => item.id === shopId)
+      appliedShopName.value = matched?.name || appliedShopName.value
       page.value = 1
       loadProducts()
+    } else {
+      appliedShopId.value = ''
+      appliedShopName.value = ''
     }
   }
 )
@@ -245,10 +307,13 @@ watch(
 onMounted(async () => {
   await loadFilterMeta()
   selectedCategory.value = appliedCategory.value
+  selectedBrand.value = appliedBrand.value
 
   const queryShopId = typeof route.query.shop_id === 'string' ? route.query.shop_id : ''
   if (queryShopId) {
     appliedShopId.value = queryShopId
+    const matched = shopOptions.value.find((item) => item.id === queryShopId)
+    appliedShopName.value = matched?.name || ''
   }
 
   await loadProducts()
@@ -303,6 +368,23 @@ onBeforeUnmount(() => {
 
         <div class="filter-grid">
           <label>
+            <span>品牌</span>
+            <select v-model="selectedBrand">
+              <option v-for="item in brandOptions" :key="item" :value="item === '全部品牌' ? '' : item">
+                {{ item }}
+              </option>
+            </select>
+          </label>
+          <label>
+            <span>店铺</span>
+            <select v-model="appliedShopId">
+              <option value="">全部店铺</option>
+              <option v-for="item in shopOptions" :key="item.id" :value="item.id">
+                {{ item.name }} · {{ item.active_product_count }} 件
+              </option>
+            </select>
+          </label>
+          <label>
             <span>最低价</span>
             <input
               v-model="minPriceInput"
@@ -328,6 +410,8 @@ onBeforeUnmount(() => {
               <option value="newest">最新</option>
               <option value="price_asc">价格低到高</option>
               <option value="price_desc">价格高到低</option>
+              <option value="rating_desc">评分优先</option>
+              <option value="sales_desc">销量优先</option>
             </select>
           </label>
         </div>
@@ -358,13 +442,37 @@ onBeforeUnmount(() => {
       <article v-for="product in products" :key="product.id" class="product-card">
         <img :src="product.image_url || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=800&q=80'" :alt="product.name" class="thumb">
         <div class="content">
-          <span class="category">{{ product.category || '未分类' }}</span>
+          <div class="top-meta">
+            <span class="category">{{ product.category || '未分类' }}</span>
+            <span v-if="product.brand" class="brand">{{ product.brand }}</span>
+          </div>
           <h3>{{ product.name }}</h3>
+          <p class="product-desc">{{ product.description }}</p>
           <button class="shop-link" type="button" @click="filterByShop(product.shop_id, product.shop_name)">
             {{ product.shop_name }}
           </button>
+          <div class="shop-meta" v-if="product.shop_rating || product.shop_shipping_city">
+            <span v-if="product.shop_rating">店铺 {{ formatRating(product.shop_rating) }}</span>
+            <span v-if="product.shop_shipping_city">{{ product.shop_shipping_city }} 发货</span>
+          </div>
+          <div class="metric-row">
+            <span>{{ formatRating(product.rating) }}</span>
+            <span>{{ product.review_count }} 条评价</span>
+          </div>
+          <div class="metric-row">
+            <span>月销 {{ product.monthly_sales }}</span>
+            <span>{{ formatShipHours(product.ship_in_hours) }}</span>
+          </div>
+          <div v-if="product.tags?.length" class="tag-list">
+            <span v-for="tag in product.tags.slice(0, 3)" :key="tag" class="tag-chip">{{ tag }}</span>
+          </div>
           <div class="bottom-row">
-            <span class="price">¥ {{ product.price.toFixed(2) }}</span>
+            <div class="price-stack">
+              <span class="price">¥ {{ product.price.toFixed(2) }}</span>
+              <span v-if="product.original_price && product.original_price > product.price" class="original-price">
+                ¥ {{ product.original_price.toFixed(2) }}
+              </span>
+            </div>
             <span class="stock">库存 {{ product.stock }}</span>
           </div>
           <div class="actions">
@@ -598,16 +706,39 @@ onBeforeUnmount(() => {
   padding: 14px;
 }
 
+.top-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+}
+
 .category {
   color: #826d46;
   font-size: 12px;
   font-weight: 600;
 }
 
+.brand {
+  color: #6f5a34;
+  font-size: 12px;
+  background: #f5ead2;
+  border-radius: 999px;
+  padding: 4px 8px;
+}
+
 .content h3 {
   margin: 0;
   color: #2b2317;
   font-size: 18px;
+}
+
+.product-desc {
+  margin: 0;
+  color: #6c6357;
+  font-size: 13px;
+  line-height: 1.5;
+  min-height: 40px;
 }
 
 .shop-link {
@@ -620,15 +751,49 @@ onBeforeUnmount(() => {
   font-size: 12px;
 }
 
+.shop-meta,
+.metric-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: #746c5d;
+  font-size: 12px;
+}
+
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tag-chip {
+  border-radius: 999px;
+  background: #f8efdf;
+  color: #5e4b2d;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
 .bottom-row {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
 }
 
+.price-stack {
+  display: grid;
+  gap: 2px;
+}
+
 .price {
   color: #3f2b10;
   font-weight: 700;
+}
+
+.original-price {
+  color: #9c8d74;
+  text-decoration: line-through;
+  font-size: 12px;
 }
 
 .stock {

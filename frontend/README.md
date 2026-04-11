@@ -1,14 +1,14 @@
-﻿# Rasa-EC-bot Frontend (Vue 3)
+﻿# Rasa-EC-bot 前端（Vue 3）
 
 前端已覆盖用户商城、商家中心、客服对话三个场景，并与后端/客服系统联通。
 
 ## 1. 技术栈
-- Vue 3 + Composition API
-- Vite
-- Pinia
-- Vue Router
-- Axios
-- Tailwind CSS
+- Vue 3（Composition API）
+- Vite（构建工具）
+- Pinia（状态管理）
+- Vue Router（路由）
+- Axios（HTTP 客户端）
+- Tailwind CSS（样式系统）
 
 ## 2. 页面与路由
 - `/products`：商品列表（分类/价格/库存筛选，支持展开筛选面板）
@@ -37,6 +37,7 @@
 - 对话区布局优化（消息气泡自适应高度）
 - 消息区滚动条与历史消息浏览
 - 支持结构化卡片消息（商品、订单、物流、售后、待确认操作）
+- 支持图片上传链路，可把单张售后图片提交到后端并触发图片售后分析
 - 自动兼容旧文本消息中的订单/商品链接渲染
 - 二次确认改为弹窗确认卡片（确认/取消按钮），无需手动输入确认码
 - 快捷提问入口（查订单、查物流、查售后、商品推荐）
@@ -72,16 +73,22 @@ pnpm build
 - Rasa Server：`http://127.0.0.1:5005`
 - Action Server：`http://127.0.0.1:5055`
 
+若要联调系统形态 benchmark 中的双后端对照，还需要额外启动：
+
+- LoRA 后端实例：`http://127.0.0.1:8001`
+- 纯 Rasa benchmark 实例：`http://127.0.0.1:5006`
+
 ## 7. 权限说明
 - 未登录可访问：`/products`、`/products/:id`、`/chat`、`/login`、`/register`
 - 用户登录后可访问：`/cart`、`/checkout`、`/orders`
 - 商家登录后可访问：`/merchant`
 - 商家账号不允许访问 `/chat`（导航入口隐藏，手动访问会重定向到 `/merchant`）
+- 图片售后入口只在聊天页对买家/游客显示，最终提交权限仍以后端校验为准
 
-## 8. Logistics Map + Shipping UX Enhancements
+## 8. 物流地图与发货体验增强
 
-### 8.1 Frontend Env
-Create `.env` from `.env.sample` and configure:
+### 8.1 前端环境变量
+先从 `.env.sample` 复制 `.env`，并配置：
 
 ```env
 VITE_ENABLE_LOGISTICS_MAP=false
@@ -89,18 +96,18 @@ VITE_AMAP_JS_KEY=
 VITE_AMAP_SECURITY_JS_CODE=
 ```
 
-### 8.2 Order Detail Page
-- Added map card in logistics panel.
-- Map renders only when `VITE_ENABLE_LOGISTICS_MAP=true` and coordinates are available.
-- If map SDK/key/network fails, page auto-falls back to text route timeline.
+### 8.2 订单详情页
+- 在物流面板新增地图卡片。
+- 仅当 `VITE_ENABLE_LOGISTICS_MAP=true` 且后端返回坐标时才渲染地图。
+- 若地图 SDK / Key / 网络失败，页面会自动降级为文本物流路线。
 
-### 8.3 Merchant Page
-- Shipping/advance buttons now include animated loading indicator.
-- Slow-request hint appears when request lasts over ~1200ms.
-- Pending shipment card shows a processing-age badge (`Pending Xh / Xd Xh`) and highlights stale orders.
+### 8.3 商家页面
+- 发货/推进物流按钮加入加载动效。
+- 请求超过约 1200ms 时显示慢请求提示。
+- 待发货卡片显示处理时长徽标（`待处理 Xh / Xd Xh`），并高亮超时订单。
 
-### 8.4 AMap JS API & SecurityJsCode setup
-Frontend env file: `frontend/.env` (copy from `frontend/.env.sample`)
+### 8.4 AMap JS API 与 SecurityJsCode 配置
+前端环境文件：`frontend/.env`（从 `frontend/.env.sample` 复制）
 
 ```env
 VITE_ENABLE_LOGISTICS_MAP=true
@@ -108,11 +115,28 @@ VITE_AMAP_JS_KEY=your_amap_js_key
 VITE_AMAP_SECURITY_JS_CODE=your_security_js_code
 ```
 
-Behavior:
-- Map renders only when `VITE_ENABLE_LOGISTICS_MAP=true`.
-- `VITE_AMAP_SECURITY_JS_CODE` is injected to `window._AMapSecurityConfig` before JSAPI script load.
-- When key/network/sdk fails, UI falls back to text logistics route.
+行为说明：
+- 仅当 `VITE_ENABLE_LOGISTICS_MAP=true` 时启用地图渲染。
+- `VITE_AMAP_SECURITY_JS_CODE` 会在加载 JSAPI 前注入到 `window._AMapSecurityConfig`。
+- 当 key / 网络 / SDK 失败时，界面自动降级为文本物流路线。
 
-Security recommendations:
-- Configure JS key domain whitelist in AMap console.
-- Do not place `AMAP_WEB_KEY` in frontend env.
+安全建议：
+- 在高德控制台为 JS Key 配置域名白名单。
+- 不要把 `AMAP_WEB_KEY` 放到前端环境变量中。
+
+## 9. 商品/店铺比较展示升级
+
+- 商品列表页：
+  - 新增品牌筛选、店铺筛选
+  - 新增评分优先、销量优先排序
+  - 商品卡片展示品牌、评分、月销、发货时效、标签、原价
+- 商品详情页：
+  - 新增“核心参数”“服务保障”“店铺画像”三个信息区
+  - 展示规格亮点、保修、销量口碑、店铺评分、发货城市、服务标签
+- 商家中心：
+  - 新增店铺资料编辑区，可维护 Logo、简介、联系方式、发货城市、主营类目、服务标签
+  - 商品录入表单新增品牌、型号、原价、评分、评价数、月销、发货时效、保修、标签、核心参数
+  - `tags`、`spec_highlights`、`featured_categories`、`service_tags` 均支持用中英文逗号或换行输入多值
+- 聊天页：
+  - 商品推荐卡片同步展示品牌、评分、月销、发货时效、标签
+  - 客服在“推荐几款手机 / 比较两家店的显示器”场景下可直接输出更易比较的商品卡片

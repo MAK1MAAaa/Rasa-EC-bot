@@ -1,18 +1,43 @@
----
-license: Apache License 2.0
----
-数据集文件元信息以及数据文件，请浏览“数据集文件”页面获取。
+# `dianshang_dataset` 目录说明
 
-当前数据集卡片使用的是默认模版，数据集的贡献者未提供更加详细的数据集介绍，但是您可以通过如下GIT Clone命令，或者ModelScope SDK来下载数据集
+本目录用于存放从 ModelScope 下载的原始电商对话数据。  
+它是 LoRA 数据准备阶段的上游输入之一，不是在线服务资源，也不是 benchmark 直接消费的文件。
 
-#### 下载方法 
-:modelscope-code[]{type="sdk"}
-:modelscope-code[]{type="git"}
+## 1. 作用
 
-本数据集包含了两个字段：
+- 作为 `LoRA/scripts/prepare_data.py` 的输入数据源
+- 与 FAQ intents 等数据一起整理为统一的 SFT JSONL
+- 为 LoRA 微调提供更贴近电商客服场景的多轮对话样本
 
-conversations：经过GPT-4o翻译后的对话，可以用于训练一个古文话痨模型
-origin：原对话，去掉了最后的user（使assistant在对话中最后出现）
-注意conversations和origin的对话长度未必完全一致，有时候GPT-4o会增加一截对话。
+## 2. 获取方式
 
-对话样例：
+建议在仓库根目录执行：
+
+```powershell
+uv run modelscope download --dataset xuri2004/dianshang_dataset --local_dir LoRA/data/dianshang_dataset
+```
+
+下载完成后，典型输入文件为：
+
+- `LoRA/data/dianshang_dataset/output.jsonl`
+
+## 3. 使用方式
+
+在 `LoRA/` 目录执行：
+
+```powershell
+uv run python scripts/prepare_data.py `
+  --faq-json data/Ecommerce_FAQ_intents.json `
+  --ec-train-jsonl data/dianshang_dataset/output.jsonl `
+  --out-dir data/processed `
+  --faq-upsample 6 `
+  --ec-upsample 1 `
+  --ec-max-samples 120000 `
+  --seed 42
+```
+
+## 4. 注意事项
+
+- 原始大文件不要提交到 Git。
+- 若跨设备迁移，请手动复制该目录下的大文件。
+- 该目录只是原始数据落盘位置，字段定义以上游数据集为准。

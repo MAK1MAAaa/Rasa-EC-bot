@@ -20,7 +20,7 @@ import httpx
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Path, Query, Request, UploadFile, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
-from sqlalchemy import func, or_, text
+from sqlalchemy import String, cast, func, or_, text
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -70,6 +70,7 @@ from .models import (
     MerchantOrderShipRequest,
     MerchantProductCreate,
     MerchantProductUpdate,
+    MerchantShopUpdate,
     Order,
     OrderItem,
     OrderItemRead,
@@ -78,6 +79,7 @@ from .models import (
     OrderRead,
     Product,
     ProductFilterMetaResponse,
+    ProductFilterShopOption,
     ProductListResponse,
     ProductRead,
     Shop,
@@ -186,7 +188,7 @@ app.add_middleware(
 
 cache = RedisCache(redis_url=REDIS_URL, default_ttl_sec=REDIS_CACHE_TTL_SEC)
 
-PRODUCT_FILTER_CACHE_KEY = "products:filters:v1"
+PRODUCT_FILTER_CACHE_KEY = "products:filters:v2"
 CHAT_ACTION_TTL_SEC = int(os.getenv("CHAT_ACTION_TTL_SEC", "300"))
 CHAT_ACTION_TYPE_CHECKOUT = "checkout"
 CHAT_ACTION_TYPE_AFTER_SALES = "after_sales"
@@ -301,10 +303,53 @@ async def ensure_logistics_geo_schema() -> None:
             await conn.execute(text(statement))
 
 
+async def ensure_catalog_schema() -> None:
+    statements = [
+        "ALTER TABLE shops ADD COLUMN IF NOT EXISTS logo_url TEXT",
+        "ALTER TABLE shops ADD COLUMN IF NOT EXISTS rating DOUBLE PRECISION",
+        "ALTER TABLE shops ADD COLUMN IF NOT EXISTS service_score DOUBLE PRECISION",
+        "ALTER TABLE shops ADD COLUMN IF NOT EXISTS logistics_score DOUBLE PRECISION",
+        "ALTER TABLE shops ADD COLUMN IF NOT EXISTS after_sales_score DOUBLE PRECISION",
+        "ALTER TABLE shops ADD COLUMN IF NOT EXISTS shipping_city VARCHAR(120)",
+        "ALTER TABLE shops ADD COLUMN IF NOT EXISTS featured_categories JSONB NOT NULL DEFAULT '[]'::jsonb",
+        "ALTER TABLE shops ADD COLUMN IF NOT EXISTS service_tags JSONB NOT NULL DEFAULT '[]'::jsonb",
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS brand VARCHAR(120)",
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS model VARCHAR(160)",
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS sku_code VARCHAR(120)",
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS original_price DECIMAL(10, 2)",
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS rating DOUBLE PRECISION",
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS review_count INT NOT NULL DEFAULT 0",
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS monthly_sales INT NOT NULL DEFAULT 0",
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS ship_in_hours INT NOT NULL DEFAULT 0",
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS warranty_days INT NOT NULL DEFAULT 0",
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS tags JSONB NOT NULL DEFAULT '[]'::jsonb",
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS spec_highlights JSONB NOT NULL DEFAULT '[]'::jsonb",
+        "CREATE INDEX IF NOT EXISTS idx_products_brand ON products(brand)",
+        "CREATE INDEX IF NOT EXISTS idx_products_monthly_sales ON products(monthly_sales DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_products_rating ON products(rating DESC)",
+        """
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint WHERE conname = 'chk_products_original_price'
+            ) THEN
+                ALTER TABLE products
+                ADD CONSTRAINT chk_products_original_price
+                CHECK (original_price IS NULL OR original_price >= price);
+            END IF;
+        END $$;
+        """,
+    ]
+    async with engine.begin() as conn:
+        for statement in statements:
+            await conn.execute(text(statement))
+
+
 @app.on_event("startup")
 async def on_startup() -> None:
     UPLOAD_ROOT_DIR.mkdir(parents=True, exist_ok=True)
     await ensure_logistics_geo_schema()
+    await ensure_catalog_schema()
     await cache.connect()
 
 
@@ -1594,6 +1639,36 @@ def normalize_role(role: str | None) -> str:
     return normalized if normalized in {"customer", "merchant"} else "customer"
 
 
+def normalize_optional_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
+def normalize_string_list(values: list[str] | None) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw_value in values or []:
+        if not isinstance(raw_value, str):
+            continue
+        cleaned = raw_value.strip()
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        normalized.append(cleaned)
+    return normalized
+
+
+def normalize_original_price(*, price: float, original_price: float | None) -> float | None:
+    if original_price is None:
+        return None
+    normalized = round(float(original_price), 2)
+    if normalized < round(float(price), 2):
+        raise HTTPException(status_code=400, detail="original_price cannot be lower than price")
+    return normalized
+
+
 def build_full_address(address: ShopAddress) -> str:
     return f"{address.province} {address.city} {address.district} {address.address_line}".strip()
 
@@ -1968,20 +2043,72 @@ async def get_current_merchant_shop(
     return shop
 
 
-def to_product_read(product: Product, shop_name: str) -> ProductRead:
+def to_shop_read(shop: Shop) -> ShopRead:
+    return ShopRead(
+        id=shop.id,
+        name=shop.name,
+        description=shop.description,
+        contact_email=shop.contact_email,
+        contact_phone=shop.contact_phone,
+        logo_url=shop.logo_url,
+        rating=shop.rating,
+        service_score=shop.service_score,
+        logistics_score=shop.logistics_score,
+        after_sales_score=shop.after_sales_score,
+        shipping_city=shop.shipping_city,
+        featured_categories=list(shop.featured_categories or []),
+        service_tags=list(shop.service_tags or []),
+        is_active=shop.is_active,
+        created_at=shop.created_at,
+    )
+
+
+def to_product_read(product: Product, shop: Shop | None = None, shop_name: str | None = None) -> ProductRead:
+    resolved_shop_name = shop.name if shop else (shop_name or "Unknown Shop")
     return ProductRead(
         id=product.id,
         shop_id=product.shop_id,
-        shop_name=shop_name,
+        shop_name=resolved_shop_name,
+        shop_description=shop.description if shop else None,
+        shop_logo_url=shop.logo_url if shop else None,
+        shop_rating=shop.rating if shop else None,
+        shop_service_score=shop.service_score if shop else None,
+        shop_logistics_score=shop.logistics_score if shop else None,
+        shop_after_sales_score=shop.after_sales_score if shop else None,
+        shop_shipping_city=shop.shipping_city if shop else None,
+        shop_featured_categories=list(shop.featured_categories or []) if shop else [],
+        shop_service_tags=list(shop.service_tags or []) if shop else [],
         name=product.name,
         price=float(product.price),
         description=product.description,
         image_url=product.image_url,
         category=product.category,
+        brand=product.brand,
+        model=product.model,
+        sku_code=product.sku_code,
+        original_price=float(product.original_price) if product.original_price is not None else None,
+        rating=product.rating,
+        review_count=product.review_count,
+        monthly_sales=product.monthly_sales,
+        ship_in_hours=product.ship_in_hours,
+        warranty_days=product.warranty_days,
+        tags=list(product.tags or []),
+        spec_highlights=list(product.spec_highlights or []),
         is_active=product.is_active,
         stock=product.stock,
         created_at=product.created_at,
     )
+
+
+async def get_shop_map(session: AsyncSession, shop_ids: list[UUID]) -> dict[UUID, Shop]:
+    unique_ids = list({shop_id for shop_id in shop_ids})
+    if not unique_ids:
+        return {}
+
+    statement = select(Shop).where(Shop.id.in_(unique_ids))
+    result = await session.execute(statement)
+    shops = result.scalars().all()
+    return {shop.id: shop for shop in shops}
 
 
 async def get_shop_name_map(session: AsyncSession, shop_ids: list[UUID]) -> dict[UUID, str]:
@@ -2329,6 +2456,106 @@ def to_shop_address_read(address: ShopAddress) -> ShopAddressRead:
         is_default=address.is_default,
         created_at=address.created_at,
     )
+
+
+def build_product_create_values(payload: MerchantProductCreate) -> dict[str, Any]:
+    cleaned_name = (payload.name or "").strip()
+    if not cleaned_name:
+        raise HTTPException(status_code=400, detail="name is required")
+
+    normalized_price = round(float(payload.price), 2)
+    normalized_original_price = normalize_original_price(
+        price=normalized_price,
+        original_price=payload.original_price,
+    )
+    return {
+        "name": cleaned_name,
+        "description": normalize_optional_text(payload.description),
+        "image_url": normalize_optional_text(payload.image_url),
+        "category": normalize_optional_text(payload.category),
+        "brand": normalize_optional_text(payload.brand),
+        "model": normalize_optional_text(payload.model),
+        "sku_code": normalize_optional_text(payload.sku_code),
+        "price": normalized_price,
+        "original_price": normalized_original_price,
+        "rating": payload.rating,
+        "review_count": payload.review_count,
+        "monthly_sales": payload.monthly_sales,
+        "ship_in_hours": payload.ship_in_hours,
+        "warranty_days": payload.warranty_days,
+        "tags": normalize_string_list(payload.tags),
+        "spec_highlights": normalize_string_list(payload.spec_highlights),
+        "stock": payload.stock,
+        "is_active": payload.is_active,
+    }
+
+
+def apply_product_update_payload(product: Product, payload: MerchantProductUpdate) -> None:
+    if payload.name is not None:
+        cleaned_name = payload.name.strip()
+        if not cleaned_name:
+            raise HTTPException(status_code=400, detail="name is required")
+        product.name = cleaned_name
+    if payload.description is not None:
+        product.description = normalize_optional_text(payload.description)
+    if payload.image_url is not None:
+        product.image_url = normalize_optional_text(payload.image_url)
+    if payload.category is not None:
+        product.category = normalize_optional_text(payload.category)
+    if payload.brand is not None:
+        product.brand = normalize_optional_text(payload.brand)
+    if payload.model is not None:
+        product.model = normalize_optional_text(payload.model)
+    if payload.sku_code is not None:
+        product.sku_code = normalize_optional_text(payload.sku_code)
+    if payload.price is not None:
+        product.price = round(float(payload.price), 2)
+    if payload.original_price is not None:
+        product.original_price = normalize_original_price(
+            price=float(product.price),
+            original_price=payload.original_price,
+        )
+    elif payload.price is not None and product.original_price is not None:
+        product.original_price = normalize_original_price(
+            price=float(product.price),
+            original_price=float(product.original_price),
+        )
+    if payload.rating is not None:
+        product.rating = payload.rating
+    if payload.review_count is not None:
+        product.review_count = payload.review_count
+    if payload.monthly_sales is not None:
+        product.monthly_sales = payload.monthly_sales
+    if payload.ship_in_hours is not None:
+        product.ship_in_hours = payload.ship_in_hours
+    if payload.warranty_days is not None:
+        product.warranty_days = payload.warranty_days
+    if payload.tags is not None:
+        product.tags = normalize_string_list(payload.tags)
+    if payload.spec_highlights is not None:
+        product.spec_highlights = normalize_string_list(payload.spec_highlights)
+    if payload.stock is not None:
+        product.stock = payload.stock
+    if payload.is_active is not None:
+        product.is_active = payload.is_active
+
+
+def apply_shop_update_payload(shop: Shop, payload: MerchantShopUpdate) -> None:
+    if payload.logo_url is not None:
+        shop.logo_url = normalize_optional_text(payload.logo_url)
+    if payload.description is not None:
+        shop.description = normalize_optional_text(payload.description)
+    if payload.contact_email is not None:
+        normalized_email = normalize_optional_text(payload.contact_email)
+        shop.contact_email = normalize_email(normalized_email) if normalized_email else None
+    if payload.contact_phone is not None:
+        shop.contact_phone = normalize_optional_text(payload.contact_phone)
+    if payload.shipping_city is not None:
+        shop.shipping_city = normalize_optional_text(payload.shipping_city)
+    if payload.featured_categories is not None:
+        shop.featured_categories = normalize_string_list(payload.featured_categories)
+    if payload.service_tags is not None:
+        shop.service_tags = normalize_string_list(payload.service_tags)
 
 
 def normalize_after_sales_type(raw: str) -> str:
@@ -2943,12 +3170,48 @@ async def get_product_filter_meta(session: AsyncSession = Depends(get_session)):
     categories_result = await session.execute(categories_statement)
     categories = [category for category in categories_result.scalars().all() if category]
 
+    brands_statement = (
+        select(Product.brand)
+        .where(*active_filters, Product.brand.is_not(None), Product.brand != "")
+        .distinct()
+        .order_by(Product.brand.asc())
+    )
+    brands_result = await session.execute(brands_statement)
+    brands = [brand for brand in brands_result.scalars().all() if brand]
+
     price_range_statement = select(func.min(Product.price), func.max(Product.price)).where(*active_filters)
     price_range_result = await session.execute(price_range_statement)
     price_min, price_max = price_range_result.one()
 
+    shop_statement = (
+        select(
+            Shop.id,
+            Shop.name,
+            Shop.rating,
+            Shop.shipping_city,
+            func.count(Product.id).label("active_product_count"),
+        )
+        .join(Product, Product.shop_id == Shop.id)
+        .where(Product.is_active == True, Shop.is_active == True)  # noqa: E712
+        .group_by(Shop.id, Shop.name, Shop.rating, Shop.shipping_city)
+        .order_by(func.count(Product.id).desc(), Shop.rating.desc().nullslast(), Shop.name.asc())
+    )
+    shop_result = await session.execute(shop_statement)
+    shops = [
+        ProductFilterShopOption(
+            id=shop_id,
+            name=name,
+            rating=rating,
+            shipping_city=shipping_city,
+            active_product_count=int(active_product_count or 0),
+        )
+        for shop_id, name, rating, shipping_city, active_product_count in shop_result.all()
+    ]
+
     response = ProductFilterMetaResponse(
         categories=categories,
+        brands=brands,
+        shops=shops,
         price_min=float(price_min or 0),
         price_max=float(price_max or 0),
     )
@@ -2962,22 +3225,35 @@ async def list_products(
     page_size: int = Query(default=12, ge=1, le=50),
     keyword: str = Query(default=""),
     category: str = Query(default=""),
+    brand: str = Query(default=""),
     shop_id: UUID | None = Query(default=None),
     min_price: float | None = Query(default=None, ge=0),
     max_price: float | None = Query(default=None, ge=0),
     in_stock: bool = Query(default=False),
-    sort_by: Literal["newest", "price_asc", "price_desc"] = Query(default="newest"),
+    sort_by: Literal["newest", "price_asc", "price_desc", "rating_desc", "sales_desc"] = Query(default="newest"),
     session: AsyncSession = Depends(get_session),
 ):
     filters = [Product.is_active == True]  # noqa: E712
     cleaned_keyword = keyword.strip()
     cleaned_category = category.strip()
+    cleaned_brand = brand.strip()
 
     if cleaned_keyword:
         pattern = f"%{cleaned_keyword}%"
-        filters.append(or_(Product.name.ilike(pattern), Product.description.ilike(pattern)))
+        filters.append(
+            or_(
+                Product.name.ilike(pattern),
+                Product.brand.ilike(pattern),
+                Product.model.ilike(pattern),
+                Product.sku_code.ilike(pattern),
+                Product.description.ilike(pattern),
+                cast(Product.tags, String).ilike(pattern),
+            )
+        )
     if cleaned_category:
         filters.append(Product.category == cleaned_category)
+    if cleaned_brand:
+        filters.append(Product.brand == cleaned_brand)
     if shop_id is not None:
         filters.append(Product.shop_id == shop_id)
     if min_price is not None:
@@ -2990,24 +3266,31 @@ async def list_products(
         filters.append(Product.stock > 0)
 
     if sort_by == "price_asc":
-        order_by = Product.price.asc()
+        order_by = (Product.price.asc(), Product.created_at.desc())
     elif sort_by == "price_desc":
-        order_by = Product.price.desc()
+        order_by = (Product.price.desc(), Product.created_at.desc())
+    elif sort_by == "rating_desc":
+        order_by = (Product.rating.desc().nullslast(), Product.review_count.desc(), Product.created_at.desc())
+    elif sort_by == "sales_desc":
+        order_by = (Product.monthly_sales.desc(), Product.rating.desc().nullslast(), Product.created_at.desc())
     else:
-        order_by = Product.created_at.desc()
+        order_by = (Product.created_at.desc(),)
 
     count_statement = select(func.count()).select_from(Product).where(*filters)
     count_result = await session.execute(count_statement)
     total = int(count_result.scalar_one() or 0)
 
     offset = (page - 1) * page_size
-    statement = select(Product).where(*filters).order_by(order_by).offset(offset).limit(page_size)
+    statement = select(Product).where(*filters).order_by(*order_by).offset(offset).limit(page_size)
     result = await session.execute(statement)
     products = result.scalars().all()
 
-    shop_name_map = await get_shop_name_map(session, [product.shop_id for product in products])
+    shop_map = await get_shop_map(session, [product.shop_id for product in products])
     return ProductListResponse(
-        items=[to_product_read(product, shop_name_map.get(product.shop_id, "Unknown Shop")) for product in products],
+        items=[
+            to_product_read(product, shop=shop_map.get(product.shop_id), shop_name="Unknown Shop")
+            for product in products
+        ],
         total=total,
         page=page,
         page_size=page_size,
@@ -3023,7 +3306,7 @@ async def get_product(
     shop = await session.get(Shop, product.shop_id)
     if not shop:
         raise HTTPException(status_code=500, detail="Shop not found for product")
-    return to_product_read(product, shop.name)
+    return to_product_read(product, shop=shop)
 
 
 @app.get("/api/v1/cart", response_model=CartResponse)
@@ -3434,15 +3717,21 @@ async def merchant_update_after_sales(
 
 @app.get("/api/v1/merchant/shop", response_model=ShopRead)
 async def merchant_get_shop(shop: Shop = Depends(get_current_merchant_shop)):
-    return ShopRead(
-        id=shop.id,
-        name=shop.name,
-        description=shop.description,
-        contact_email=shop.contact_email,
-        contact_phone=shop.contact_phone,
-        is_active=shop.is_active,
-        created_at=shop.created_at,
-    )
+    return to_shop_read(shop)
+
+
+@app.patch("/api/v1/merchant/shop", response_model=ShopRead)
+async def merchant_update_shop(
+    payload: MerchantShopUpdate,
+    shop: Shop = Depends(get_current_merchant_shop),
+    session: AsyncSession = Depends(get_session),
+):
+    apply_shop_update_payload(shop, payload)
+    await session.commit()
+    await session.refresh(shop)
+    await invalidate_product_filter_cache()
+    await publish_inventory_changed(reason="shop_updated", shop_id=shop.id)
+    return to_shop_read(shop)
 
 
 @app.get("/api/v1/merchant/addresses", response_model=list[ShopAddressRead])
@@ -3549,7 +3838,15 @@ async def merchant_list_products(
     cleaned_keyword = keyword.strip()
     if cleaned_keyword:
         pattern = f"%{cleaned_keyword}%"
-        filters.append(or_(Product.name.ilike(pattern), Product.description.ilike(pattern)))
+        filters.append(
+            or_(
+                Product.name.ilike(pattern),
+                Product.brand.ilike(pattern),
+                Product.model.ilike(pattern),
+                Product.sku_code.ilike(pattern),
+                Product.description.ilike(pattern),
+            )
+        )
 
     count_statement = select(func.count()).select_from(Product).where(*filters)
     count_result = await session.execute(count_statement)
@@ -3567,7 +3864,7 @@ async def merchant_list_products(
     products = result.scalars().all()
 
     return ProductListResponse(
-        items=[to_product_read(product, shop.name) for product in products],
+        items=[to_product_read(product, shop=shop) for product in products],
         total=total,
         page=page,
         page_size=page_size,
@@ -3580,16 +3877,7 @@ async def merchant_create_product(
     shop: Shop = Depends(get_current_merchant_shop),
     session: AsyncSession = Depends(get_session),
 ):
-    product = Product(
-        shop_id=shop.id,
-        name=payload.name.strip(),
-        description=(payload.description or "").strip() or None,
-        image_url=(payload.image_url or "").strip() or None,
-        category=(payload.category or "").strip() or None,
-        price=payload.price,
-        stock=payload.stock,
-        is_active=payload.is_active,
-    )
+    product = Product(shop_id=shop.id, **build_product_create_values(payload))
     session.add(product)
     await session.commit()
     await session.refresh(product)
@@ -3599,7 +3887,7 @@ async def merchant_create_product(
         shop_id=shop.id,
         product_ids=[product.id],
     )
-    return to_product_read(product, shop.name)
+    return to_product_read(product, shop=shop)
 
 
 @app.patch("/api/v1/merchant/products/{product_id}", response_model=ProductRead)
@@ -3615,20 +3903,7 @@ async def merchant_update_product(
     if product.shop_id != shop.id:
         raise HTTPException(status_code=403, detail="Forbidden")
 
-    if payload.name is not None:
-        product.name = payload.name.strip()
-    if payload.description is not None:
-        product.description = payload.description.strip() or None
-    if payload.image_url is not None:
-        product.image_url = payload.image_url.strip() or None
-    if payload.category is not None:
-        product.category = payload.category.strip() or None
-    if payload.price is not None:
-        product.price = payload.price
-    if payload.stock is not None:
-        product.stock = payload.stock
-    if payload.is_active is not None:
-        product.is_active = payload.is_active
+    apply_product_update_payload(product, payload)
 
     await session.commit()
     await session.refresh(product)
@@ -3638,7 +3913,7 @@ async def merchant_update_product(
         shop_id=shop.id,
         product_ids=[product.id],
     )
-    return to_product_read(product, shop.name)
+    return to_product_read(product, shop=shop)
 
 
 @app.get("/api/v1/merchant/orders", response_model=MerchantOrderListResponse)

@@ -10,11 +10,31 @@ interface Product {
   id: string
   shop_id: string
   shop_name: string
+  shop_description?: string | null
+  shop_logo_url?: string | null
+  shop_rating?: number | null
+  shop_service_score?: number | null
+  shop_logistics_score?: number | null
+  shop_after_sales_score?: number | null
+  shop_shipping_city?: string | null
+  shop_featured_categories: string[]
+  shop_service_tags: string[]
   name: string
   description?: string
   image_url?: string
   category?: string
+  brand?: string
+  model?: string
+  sku_code?: string
   price: number
+  original_price?: number | null
+  rating?: number | null
+  review_count: number
+  monthly_sales: number
+  ship_in_hours: number
+  warranty_days: number
+  tags: string[]
+  spec_highlights: string[]
   stock: number
   created_at: string
 }
@@ -33,6 +53,27 @@ let realtimeRefreshTimer: ReturnType<typeof setTimeout> | null = null
 
 const canBuy = computed(() => Boolean(product.value && product.value.stock > 0 && authStore.isCustomer))
 const fromSource = computed(() => (typeof route.query.from === 'string' ? route.query.from.trim() : ''))
+const shopScores = computed(() => {
+  if (!product.value) return []
+  return [
+    { label: '店铺评分', value: product.value.shop_rating },
+    { label: '服务', value: product.value.shop_service_score },
+    { label: '物流', value: product.value.shop_logistics_score },
+    { label: '售后', value: product.value.shop_after_sales_score }
+  ]
+})
+
+const formatRating = (value?: number | null) => {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '暂无评分'
+  return `${value.toFixed(1)} 分`
+}
+
+const formatShipHours = (value: number) => {
+  if (!Number.isFinite(value) || value <= 0) return '时效待补充'
+  if (value < 24) return `${value} 小时内发货`
+  if (value % 24 === 0) return `${value / 24} 天内发货`
+  return `${value} 小时内发货`
+}
 
 const loadProduct = async () => {
   loading.value = true
@@ -143,11 +184,31 @@ onBeforeUnmount(() => {
       <div class="info">
         <span class="category">{{ product.category || '未分类' }}</span>
         <h1>{{ product.name }}</h1>
+        <div class="headline-meta">
+          <span v-if="product.brand">{{ product.brand }}</span>
+          <span v-if="product.model">{{ product.model }}</span>
+          <span v-if="product.sku_code">SKU {{ product.sku_code }}</span>
+        </div>
         <button class="shop-btn" type="button" @click="jumpToShop">{{ product.shop_name }}</button>
+        <p v-if="product.description" class="summary">{{ product.description }}</p>
+        <div v-if="product.tags?.length" class="tag-list">
+          <span v-for="tag in product.tags" :key="tag" class="tag-chip">{{ tag }}</span>
+        </div>
 
         <div class="price-row">
-          <span class="price">¥ {{ product.price.toFixed(2) }}</span>
+          <div class="price-stack">
+            <span class="price">¥ {{ product.price.toFixed(2) }}</span>
+            <span v-if="product.original_price && product.original_price > product.price" class="original-price">
+              ¥ {{ product.original_price.toFixed(2) }}
+            </span>
+          </div>
           <span class="stock">库存 {{ product.stock }}</span>
+        </div>
+
+        <div class="score-row">
+          <span>{{ formatRating(product.rating) }}</span>
+          <span>{{ product.review_count }} 条评价</span>
+          <span>月销 {{ product.monthly_sales }}</span>
         </div>
 
         <div class="buy-box">
@@ -156,6 +217,49 @@ onBeforeUnmount(() => {
           <button type="button" :disabled="!canBuy" @click="addToCart">
             {{ canBuy ? '加入购物车' : authStore.isMerchant ? '商家账号不可购买' : '已售罄' }}
           </button>
+        </div>
+
+        <div class="detail-sections">
+          <section class="detail-block">
+            <h2>核心参数</h2>
+            <ul class="detail-list">
+              <li v-for="item in product.spec_highlights" :key="item">{{ item }}</li>
+            </ul>
+          </section>
+
+          <section class="detail-block">
+            <h2>服务保障</h2>
+            <ul class="detail-list">
+              <li>{{ formatShipHours(product.ship_in_hours) }}</li>
+              <li>{{ product.warranty_days }} 天保修</li>
+              <li>库存 {{ product.stock }}</li>
+            </ul>
+          </section>
+
+          <section class="detail-block">
+            <h2>店铺画像</h2>
+            <div class="shop-profile">
+              <img
+                v-if="product.shop_logo_url"
+                :src="product.shop_logo_url"
+                :alt="product.shop_name"
+                class="shop-logo"
+              >
+              <div class="shop-copy">
+                <p>{{ product.shop_description || '店铺暂未补充简介。' }}</p>
+                <p v-if="product.shop_shipping_city">{{ product.shop_shipping_city }} 发货</p>
+              </div>
+            </div>
+            <div class="score-grid">
+              <span v-for="item in shopScores" :key="item.label">{{ item.label }}：{{ formatRating(item.value) }}</span>
+            </div>
+            <div v-if="product.shop_service_tags?.length" class="tag-list">
+              <span v-for="tag in product.shop_service_tags" :key="tag" class="tag-chip">{{ tag }}</span>
+            </div>
+            <div v-if="product.shop_featured_categories?.length" class="category-line">
+              主营类目：{{ product.shop_featured_categories.join(' / ') }}
+            </div>
+          </section>
         </div>
       </div>
     </article>
@@ -212,6 +316,14 @@ onBeforeUnmount(() => {
   gap: 12px;
 }
 
+.headline-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: #6f624c;
+  font-size: 13px;
+}
+
 .category {
   color: #836e47;
   font-weight: 700;
@@ -232,10 +344,35 @@ onBeforeUnmount(() => {
   padding: 6px 10px;
 }
 
+.summary {
+  margin: 0;
+  color: #5e564a;
+  line-height: 1.6;
+}
+
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tag-chip {
+  background: #f6ead0;
+  color: #5d4724;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
 .price-row {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
+}
+
+.price-stack {
+  display: grid;
+  gap: 2px;
 }
 
 .price {
@@ -244,8 +381,22 @@ onBeforeUnmount(() => {
   font-weight: 700;
 }
 
+.original-price {
+  color: #9a8b74;
+  text-decoration: line-through;
+  font-size: 13px;
+}
+
 .stock {
   color: #756b5d;
+}
+
+.score-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  color: #625847;
+  font-size: 13px;
 }
 
 .buy-box {
@@ -281,6 +432,65 @@ onBeforeUnmount(() => {
   background: #b3aa9d;
 }
 
+.detail-sections {
+  display: grid;
+  gap: 14px;
+}
+
+.detail-block {
+  border: 1px solid #e4d7c2;
+  border-radius: 14px;
+  padding: 14px;
+  background: #fffbf4;
+}
+
+.detail-block h2 {
+  margin: 0 0 10px;
+  font-size: 16px;
+  color: #352816;
+}
+
+.detail-list {
+  margin: 0;
+  padding-left: 18px;
+  color: #5c5245;
+  display: grid;
+  gap: 6px;
+}
+
+.shop-profile {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.shop-logo {
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  object-fit: cover;
+}
+
+.shop-copy p {
+  margin: 0 0 6px;
+  color: #5c5245;
+  line-height: 1.5;
+}
+
+.score-grid {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  color: #5a5245;
+  font-size: 13px;
+}
+
+.category-line {
+  color: #5c5245;
+  font-size: 13px;
+}
+
 @media (max-width: 860px) {
   .detail-card {
     grid-template-columns: 1fr;
@@ -288,6 +498,10 @@ onBeforeUnmount(() => {
 
   .cover {
     min-height: 220px;
+  }
+
+  .score-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>

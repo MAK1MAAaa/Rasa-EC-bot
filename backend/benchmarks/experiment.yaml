@@ -1,0 +1,100 @@
+{
+  "seed": 20260411,
+  "timeout_sec": 60,
+  "warmup_requests": 2,
+  "results_dir": "backend/benchmarks/results",
+  "profiles": {
+    "quick": {
+      "concurrency": [1, 2, 4],
+      "requests_per_level": 30,
+      "repeats": 2
+    },
+    "medium": {
+      "concurrency": [1, 2, 4, 8, 12],
+      "requests_per_level": 80,
+      "repeats": 2
+    },
+    "high": {
+      "concurrency": [1, 2, 4, 8, 12, 16],
+      "requests_per_level": 120,
+      "repeats": 2
+    }
+  },
+  "auth": {
+    "login_url": "http://127.0.0.1:8000/api/v1/auth/login",
+    "me_url": "http://127.0.0.1:8000/api/v1/auth/me",
+    "customer": {
+      "email": "test1@example.com",
+      "password": "password123"
+    }
+  },
+  "image_assets_dir": "backend/benchmarks/assets",
+  "image_case_map": {
+    "damaged_package": "damaged_package.png",
+    "broken_screen": "broken_screen.png",
+    "wrong_item": "wrong_item.png"
+  },
+  "systems": {
+    "rasa_only": {
+      "kind": "rasa_rest",
+      "base_url": "http://127.0.0.1:5006",
+      "path": "/webhooks/rest/webhook",
+      "model": "",
+      "auth_mode": "metadata",
+      "supports_image": false,
+      "supports_cards": true,
+      "requires_upload_step": false,
+      "sender_id": "benchmark-rasa-only"
+    },
+    "llm_base_ollama": {
+      "kind": "ollama_chat",
+      "base_url": "http://127.0.0.1:11434",
+      "path": "/api/chat",
+      "model": "qwen3.5:2b",
+      "auth_mode": "none",
+      "supports_image": false,
+      "supports_cards": false,
+      "requires_upload_step": false,
+      "sender_id": "benchmark-llm-base"
+    },
+    "llm_lora_ollama": {
+      "kind": "ollama_chat",
+      "base_url": "http://127.0.0.1:11434",
+      "path": "/api/chat",
+      "model": "qwen3.5:2b-lora",
+      "auth_mode": "none",
+      "supports_image": false,
+      "supports_cards": false,
+      "requires_upload_step": false,
+      "sender_id": "benchmark-llm-lora"
+    },
+    "rasa_plus_llm_base": {
+      "kind": "backend_chat",
+      "base_url": "http://127.0.0.1:8000",
+      "path": "/api/v1/chat/send",
+      "upload_path": "/api/v1/chat/upload-image",
+      "login_url": "http://127.0.0.1:8000/api/v1/auth/login",
+      "me_url": "http://127.0.0.1:8000/api/v1/auth/me",
+      "model": "qwen3.5:2b",
+      "auth_mode": "bearer",
+      "supports_image": true,
+      "supports_cards": true,
+      "requires_upload_step": true,
+      "sender_id": "benchmark-rasa-plus-base"
+    },
+    "rasa_plus_llm_lora": {
+      "kind": "backend_chat",
+      "base_url": "http://127.0.0.1:8001",
+      "path": "/api/v1/chat/send",
+      "upload_path": "/api/v1/chat/upload-image",
+      "login_url": "http://127.0.0.1:8001/api/v1/auth/login",
+      "me_url": "http://127.0.0.1:8001/api/v1/auth/me",
+      "model": "qwen3.5:2b-lora",
+      "auth_mode": "bearer",
+      "supports_image": true,
+      "supports_cards": true,
+      "requires_upload_step": true,
+      "sender_id": "benchmark-rasa-plus-lora"
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "seed": 20260411,
+  "outputs": {
+    "recommendation": "backend/benchmarks/prompts/recommendation.jsonl",
+    "after_sales": "backend/benchmarks/prompts/after_sales.jsonl",
+    "image_after_sales": "backend/benchmarks/prompts/image_after_sales.jsonl"
+  },
+  "sources": {
+    "rasa_nlu": "rasa/data/nlu.yml",
+    "lora_jsonl": [
+      "LoRA/data/processed/eval_prompts_20.jsonl"
+    ],
+    "image_cases": [
+      "damaged_package",
+      "broken_screen",
+      "wrong_item"
+    ]
+  },
+  "stats": {
+    "recommendation_count": 10,
+    "after_sales_count": 10,
+    "image_after_sales_count": 6,
+    "source_prompt_pool": 20,
+    "source_categories": 3
+  }
+}
