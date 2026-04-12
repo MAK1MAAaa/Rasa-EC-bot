@@ -85,12 +85,11 @@ watch(
   <section class="page-shell history-page">
     <PageHero
       eyebrow="History"
-      title="把最近浏览过的商品汇成可回看的收藏带，方便继续比较和回访。"
-      description="客服推荐也会参考这部分浏览偏好，因此这里既是回看入口，也是个性化服务的上下文来源。"
+      title="历史浏览"
       accent="ink"
     >
       <template #actions>
-        <Button variant="ghost" size="lg" @click="router.push('/products')">继续逛商品</Button>
+        <Button variant="ghost" size="md" @click="router.push('/products')">继续逛商品</Button>
       </template>
     </PageHero>
 

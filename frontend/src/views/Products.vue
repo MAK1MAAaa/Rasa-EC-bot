@@ -366,13 +366,11 @@ onBeforeUnmount(() => {
   <section class="page-shell products-page">
     <PageHero
       eyebrow="Curated Selection"
-      title="让商品比较、客服咨询与下单路径集中在一个主场景里。"
-      description="筛选区、搜索区和商品卡片统一成更稳定的版式，方便买家快速比较品牌、评分、销量和发货时效。"
+      title="精选商品"
       accent="gold"
     >
       <template #actions>
-        <Button v-if="!authStore.isMerchant" variant="secondary" size="lg" @click="router.push('/chat')">问客服</Button>
-        <Button variant="ghost" size="lg" @click="showFilters = !showFilters">{{ showFilters ? '收起筛选' : '打开筛选' }}</Button>
+        <Button variant="ghost" size="md" @click="showFilters = !showFilters">{{ showFilters ? '收起筛选' : '打开筛选' }}</Button>
       </template>
     </PageHero>
 

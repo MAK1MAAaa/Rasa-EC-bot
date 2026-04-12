@@ -63,8 +63,7 @@ onMounted(loadPage)
   <section class="page-shell checkout-page">
     <PageHero
       eyebrow="Checkout"
-      title="把收货信息和订单摘要放在同一视口里，减少最后一步的切换成本。"
-      description="确认地址、邮箱和订单金额后即可直接提交，不打断已有购物上下文。"
+      title="提交订单"
       accent="teal"
     />
 

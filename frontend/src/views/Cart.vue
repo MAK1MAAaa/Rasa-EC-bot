@@ -116,12 +116,11 @@ onBeforeUnmount(() => {
   <section class="page-shell cart-page">
     <PageHero
       eyebrow="Cart Overview"
-      title="把待结算商品、数量调整和结算概览放进同一块稳定的操作空间。"
-      description="购物车为空时仍保留完整壳层，回到有商品状态不会出现视觉跳变。"
+      title="购物车"
       accent="gold"
     >
       <template #actions>
-        <Button variant="ghost" size="lg" @click="router.push('/products')">继续购物</Button>
+        <Button variant="ghost" size="md" @click="router.push('/products')">继续购物</Button>
       </template>
     </PageHero>
 

@@ -129,12 +129,11 @@ onBeforeUnmount(() => {
   <section class="page-shell orders-page">
     <PageHero
       eyebrow="Order Archive"
-      title="在统一列表里查看订单、物流入口和售后状态，不再靠散落页面来回跳转。"
-      description="按时间倒序展示订单，空态和有内容状态保持相同节奏，方便持续浏览和回访。"
+      title="我的订单"
       accent="teal"
     >
       <template #actions>
-        <Button variant="ghost" size="lg" @click="router.push('/products')">继续购物</Button>
+        <Button variant="ghost" size="md" @click="router.push('/products')">继续购物</Button>
       </template>
     </PageHero>
 

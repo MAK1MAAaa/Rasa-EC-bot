@@ -813,7 +813,6 @@ onBeforeUnmount(() => {
     <PageHero
       eyebrow="Merchant Workspace"
       :title="shopDisplay"
-      description="把订单履约、商品维护、地址管理和售后处理收进同一块运营工作台，保持操作节奏与信息层级一致。"
       accent="gold"
     >
       <template #actions>

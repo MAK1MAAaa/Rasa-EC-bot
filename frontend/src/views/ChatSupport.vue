@@ -673,8 +673,7 @@ watch(
   <section class="page-shell chat-page">
     <PageHero
       eyebrow="Conversational Support"
-      title="用一块连续对话界面同时处理查单、物流、售后和待确认动作。"
-      description="会话历史、结构化卡片消息与图片售后分析统一放在同一屏里，减少跳转和上下文丢失。"
+      title="智能客服"
       accent="teal"
     >
       <template #actions>
