@@ -44,6 +44,7 @@
   - 已补充新的设计系统、组件层、`tsconfig.json` 与构建说明
 - 客服说明：[rasa/README.md](rasa/README.md)
 - LoRA 说明：[LoRA/README.md](LoRA/README.md)
+- 测试与 benchmark 实验规范：[tests/README.md](tests/README.md)
 
 ## 4. 运行前准备
 

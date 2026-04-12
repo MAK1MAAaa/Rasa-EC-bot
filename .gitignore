@@ -73,3 +73,7 @@ LoRA/*.log
 
 # Temp files
 temp.txt
+
+# Local benchmark outputs under tests/
+tests/benchmark_results/*
+!tests/benchmark_results/.gitkeep
