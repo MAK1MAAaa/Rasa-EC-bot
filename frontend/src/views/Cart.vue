@@ -242,10 +242,19 @@ onBeforeUnmount(() => {
 .item-main h3 {
   margin: 0;
   font-size: 24px;
+  line-height: 1.25;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  min-height: calc(24px * 1.25 * 2);
 }
 
 .item-main p {
   color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .qty-box {

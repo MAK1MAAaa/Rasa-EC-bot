@@ -166,6 +166,7 @@ watch(
   background: rgba(255, 253, 248, 0.96);
   cursor: pointer;
   transition: transform 0.2s ease, box-shadow 0.2s ease;
+  height: 100%;
 }
 
 .history-card:hover {
@@ -183,6 +184,8 @@ watch(
   display: grid;
   gap: 10px;
   padding: 16px;
+  align-content: start;
+  height: 100%;
 }
 
 .head,
@@ -199,16 +202,26 @@ watch(
   color: #2e2416;
   font-size: 28px;
   line-height: 1.45;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  min-height: calc(28px * 1.45 * 2);
 }
 
 .shop {
   margin: 0;
   color: #6b614f;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-height: calc(14px * 1.5);
 }
 
 .meta {
   color: #7a705f;
   font-size: 12px;
+  min-height: calc(12px * 1.5);
 }
 
 .foot strong {
@@ -218,5 +231,12 @@ watch(
 .foot span {
   color: #736856;
   font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.foot {
+  margin-top: auto;
 }
 </style>

@@ -677,6 +677,7 @@ onBeforeUnmount(() => {
   background: rgba(255, 252, 247, 0.94);
   box-shadow: 0 18px 36px rgba(46, 32, 12, 0.05);
   display: grid;
+  height: 100%;
 }
 
 .catalog-card:hover {
@@ -706,6 +707,8 @@ onBeforeUnmount(() => {
   padding: 16px;
   display: grid;
   gap: 12px;
+  align-content: start;
+  height: 100%;
 }
 
 .card-headline,
@@ -719,6 +722,8 @@ onBeforeUnmount(() => {
 .copy-stack {
   display: grid;
   gap: 8px;
+  min-height: 116px;
+  align-content: start;
 }
 
 .copy-stack h3 {
@@ -726,6 +731,11 @@ onBeforeUnmount(() => {
   font-size: 26px;
   line-height: 1.05;
   cursor: pointer;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  min-height: calc(26px * 1.05 * 2);
 }
 
 .copy-stack p,
@@ -738,6 +748,9 @@ onBeforeUnmount(() => {
 .identity-line {
   font-weight: 700;
   color: #5d503f;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .summary-line {
@@ -745,6 +758,7 @@ onBeforeUnmount(() => {
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+  min-height: calc(13px * 1.7 * 2);
 }
 
 .shop-link {
@@ -755,6 +769,10 @@ onBeforeUnmount(() => {
   background: rgba(47, 95, 89, 0.08);
   color: var(--accent);
   font-weight: 700;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .metrics {
@@ -775,6 +793,7 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 12px;
   align-items: end;
+  margin-top: auto;
 }
 
 .price-stack {
