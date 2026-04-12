@@ -5,6 +5,9 @@ import api from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 import { useCartStore } from '@/stores/cart'
 import { createRealtimeClient, type RealtimeEvent } from '@/utils/realtime'
+import Button from '@/components/ui/Button.vue'
+import Badge from '@/components/ui/Badge.vue'
+import EmptyState from '@/components/shared/EmptyState.vue'
 
 interface Product {
   id: string
@@ -207,336 +210,394 @@ watch(
 </script>
 
 <template>
-  <section class="detail-page">
-    <button class="back-btn" type="button" @click="handleBack()">← 返回</button>
+  <section class="page-shell detail-page">
+    <div class="detail-top">
+      <Button variant="outline" @click="handleBack()">返回上一页</Button>
+      <Badge v-if="fromSource === 'chat'" variant="info">来自客服推荐</Badge>
+    </div>
 
     <div v-if="loading" class="state-card">加载中...</div>
-    <div v-else-if="error" class="state-card error">{{ error }}</div>
+    <p v-else-if="error" class="status-banner error">{{ error }}</p>
 
-    <article v-else-if="product" class="detail-card">
-      <img :src="product.image_url || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=1000&q=80'" :alt="product.name" class="cover">
+    <EmptyState
+      v-else-if="!product"
+      eyebrow="Unavailable"
+      title="商品不存在或已下架"
+      description="可能已被商家下架，或者当前访问链接已失效。"
+    >
+      <Button variant="outline" @click="router.push('/products')">返回商品页</Button>
+    </EmptyState>
 
-      <div class="info">
-        <span class="category">{{ product.category || '未分类' }}</span>
-        <h1>{{ product.name }}</h1>
-        <div class="headline-meta">
-          <span v-if="product.brand">{{ product.brand }}</span>
-          <span v-if="product.model">{{ product.model }}</span>
-          <span v-if="product.sku_code">SKU {{ product.sku_code }}</span>
+    <article v-else class="detail-layout">
+      <section class="detail-media panel-surface">
+        <div class="media-frame">
+          <img :src="product.image_url || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=1000&q=80'" :alt="product.name" class="cover">
         </div>
-        <button class="shop-btn" type="button" @click="jumpToShop">{{ product.shop_name }}</button>
-        <p v-if="product.description" class="summary">{{ product.description }}</p>
-        <div v-if="product.tags?.length" class="tag-list">
-          <span v-for="tag in product.tags" :key="tag" class="tag-chip">{{ tag }}</span>
-        </div>
+      </section>
 
-        <div class="price-row">
-          <div class="price-stack">
-            <span class="price">¥ {{ product.price.toFixed(2) }}</span>
-            <span v-if="product.original_price && product.original_price > product.price" class="original-price">
-              ¥ {{ product.original_price.toFixed(2) }}
-            </span>
+      <section class="detail-summary panel-surface">
+        <div class="summary-head">
+          <div class="summary-tags">
+            <Badge variant="muted">{{ product.category || '未分类' }}</Badge>
+            <Badge v-if="product.brand" variant="default">{{ product.brand }}</Badge>
+            <Badge v-if="product.model" variant="warn">{{ product.model }}</Badge>
+            <Badge v-if="product.sku_code" variant="info">SKU {{ product.sku_code }}</Badge>
           </div>
-          <span class="stock">库存 {{ product.stock }}</span>
+          <h1>{{ product.name }}</h1>
+          <p class="summary-copy">{{ product.description || '暂无商品描述，建议查看核心参数与店铺画像获取更多信息。' }}</p>
+          <button class="shop-link" type="button" @click="jumpToShop">{{ product.shop_name }}</button>
+        </div>
+
+        <div v-if="product.tags?.length" class="tag-row">
+          <Badge v-for="tag in product.tags" :key="tag" variant="warn">{{ tag }}</Badge>
+        </div>
+
+        <div class="price-panel">
+          <div class="price-stack">
+            <strong>¥ {{ product.price.toFixed(2) }}</strong>
+            <span v-if="product.original_price && product.original_price > product.price">¥ {{ product.original_price.toFixed(2) }}</span>
+          </div>
+          <Badge :variant="product.stock > 0 ? 'success' : 'danger'">
+            {{ product.stock > 0 ? `库存 ${product.stock}` : '已售罄' }}
+          </Badge>
         </div>
 
         <div class="score-row">
-          <span>{{ formatRating(product.rating) }}</span>
-          <span>{{ product.review_count }} 条评价</span>
-          <span>月销 {{ product.monthly_sales }}</span>
+          <div class="score-card">
+            <span>评分</span>
+            <strong>{{ formatRating(product.rating) }}</strong>
+          </div>
+          <div class="score-card">
+            <span>评价</span>
+            <strong>{{ product.review_count }}</strong>
+          </div>
+          <div class="score-card">
+            <span>月销</span>
+            <strong>{{ product.monthly_sales }}</strong>
+          </div>
         </div>
 
         <div class="buy-box">
-          <label>数量</label>
-          <input v-model.number="quantity" type="number" min="1" :max="product.stock" class="qty">
-          <button type="button" :disabled="!canBuy" @click="addToCart">
-            {{ canBuy ? '加入购物车' : authStore.isMerchant ? '商家账号不可购买' : '已售罄' }}
-          </button>
+          <label>
+            <span>购买数量</span>
+            <input v-model.number="quantity" class="field-input qty" type="number" min="1" :max="product.stock">
+          </label>
+          <Button size="lg" block :disabled="!canBuy" @click="addToCart">
+            {{ canBuy ? '加入购物车' : authStore.isMerchant ? '商家账号不可购买' : '当前无货' }}
+          </Button>
+        </div>
+      </section>
+
+      <section class="detail-block section-card">
+        <div class="block-head">
+          <h2>核心参数</h2>
+          <p>把最重要的卖点放在前面，便于快速比较与客服推荐引用。</p>
+        </div>
+        <ul class="detail-list">
+          <li v-for="item in product.spec_highlights" :key="item">{{ item }}</li>
+        </ul>
+      </section>
+
+      <section class="detail-block section-card">
+        <div class="block-head">
+          <h2>服务保障</h2>
+          <p>履约承诺、保修信息和发货时效统一放在购买决策附近。</p>
+        </div>
+        <div class="service-grid">
+          <div class="service-item">
+            <span>发货时效</span>
+            <strong>{{ formatShipHours(product.ship_in_hours) }}</strong>
+          </div>
+          <div class="service-item">
+            <span>保修</span>
+            <strong>{{ product.warranty_days }} 天</strong>
+          </div>
+          <div class="service-item">
+            <span>库存</span>
+            <strong>{{ product.stock }}</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="detail-block section-card shop-block">
+        <div class="block-head">
+          <h2>店铺画像</h2>
+          <p>帮助买家快速了解店铺实力、发货城市与服务能力。</p>
         </div>
 
-        <div class="detail-sections">
-          <section class="detail-block">
-            <h2>核心参数</h2>
-            <ul class="detail-list">
-              <li v-for="item in product.spec_highlights" :key="item">{{ item }}</li>
-            </ul>
-          </section>
-
-          <section class="detail-block">
-            <h2>服务保障</h2>
-            <ul class="detail-list">
-              <li>{{ formatShipHours(product.ship_in_hours) }}</li>
-              <li>{{ product.warranty_days }} 天保修</li>
-              <li>库存 {{ product.stock }}</li>
-            </ul>
-          </section>
-
-          <section class="detail-block">
-            <h2>店铺画像</h2>
-            <div class="shop-profile">
-              <img
-                v-if="product.shop_logo_url"
-                :src="product.shop_logo_url"
-                :alt="product.shop_name"
-                class="shop-logo"
-              >
-              <div class="shop-copy">
-                <p>{{ product.shop_description || '店铺暂未补充简介。' }}</p>
-                <p v-if="product.shop_shipping_city">{{ product.shop_shipping_city }} 发货</p>
-              </div>
-            </div>
-            <div class="score-grid">
-              <span v-for="item in shopScores" :key="item.label">{{ item.label }}：{{ formatRating(item.value) }}</span>
-            </div>
-            <div v-if="product.shop_service_tags?.length" class="tag-list">
-              <span v-for="tag in product.shop_service_tags" :key="tag" class="tag-chip">{{ tag }}</span>
-            </div>
-            <div v-if="product.shop_featured_categories?.length" class="category-line">
-              主营类目：{{ product.shop_featured_categories.join(' / ') }}
-            </div>
-          </section>
+        <div class="shop-profile">
+          <img v-if="product.shop_logo_url" :src="product.shop_logo_url" :alt="product.shop_name" class="shop-logo">
+          <div class="shop-copy">
+            <strong>{{ product.shop_name }}</strong>
+            <p>{{ product.shop_description || '店铺暂未补充简介。' }}</p>
+            <p v-if="product.shop_shipping_city">{{ product.shop_shipping_city }} 发货</p>
+          </div>
         </div>
-      </div>
+
+        <div class="score-grid">
+          <div v-for="item in shopScores" :key="item.label" class="service-item">
+            <span>{{ item.label }}</span>
+            <strong>{{ formatRating(item.value) }}</strong>
+          </div>
+        </div>
+
+        <div v-if="product.shop_service_tags?.length" class="tag-row">
+          <Badge v-for="tag in product.shop_service_tags" :key="tag" variant="info">{{ tag }}</Badge>
+        </div>
+
+        <p v-if="product.shop_featured_categories?.length" class="category-line">
+          主营类目：{{ product.shop_featured_categories.join(' / ') }}
+        </p>
+      </section>
     </article>
   </section>
 </template>
 
 <style scoped>
 .detail-page {
-  max-width: 1180px;
-  margin: 0 auto;
-  padding: 22px 18px 38px;
+  display: grid;
+  gap: 16px;
 }
 
-.back-btn {
-  border: none;
-  background: #efe0c3;
-  color: #4b3a20;
-  border-radius: 999px;
-  padding: 8px 14px;
-  margin-bottom: 14px;
+.detail-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .state-card {
-  background: var(--surface-strong);
-  border: 1px dashed #d8cbb5;
-  border-radius: 16px;
-  padding: 30px;
-  text-align: center;
-}
-
-.state-card.error {
-  color: var(--danger);
-}
-
-.detail-card {
-  background: var(--surface-strong);
-  border: 1px solid var(--line);
-  border-radius: 18px;
-  overflow: hidden;
+  min-height: 320px;
+  border-radius: 28px;
+  border: 1px dashed rgba(106, 81, 47, 0.18);
   display: grid;
-  grid-template-columns: 1.1fr 1fr;
+  place-items: center;
+  color: var(--text-muted);
+}
+
+.detail-layout {
+  display: grid;
+  grid-template-columns: 1.15fr 1fr;
+  gap: 18px;
+  align-items: start;
+}
+
+.detail-media,
+.detail-summary {
+  min-height: 100%;
+  padding: 20px;
+}
+
+.media-frame {
+  border-radius: 28px;
+  overflow: hidden;
+  min-height: 560px;
 }
 
 .cover {
   width: 100%;
   height: 100%;
-  min-height: 360px;
+  min-height: 560px;
   object-fit: cover;
 }
 
-.info {
-  padding: 24px;
+.detail-summary {
   display: grid;
-  gap: 12px;
+  gap: 16px;
 }
 
-.headline-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  color: #6f624c;
-  font-size: 13px;
-}
-
-.category {
-  color: #836e47;
-  font-weight: 700;
-  font-size: 13px;
-}
-
-.info h1 {
-  margin: 0;
-  color: #2c2316;
-}
-
-.shop-btn {
-  width: fit-content;
-  border: none;
-  border-radius: 999px;
-  background: #efe2c9;
-  color: #4a3a20;
-  padding: 6px 10px;
-}
-
-.summary {
-  margin: 0;
-  color: #5e564a;
-  line-height: 1.6;
-}
-
-.tag-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.tag-chip {
-  background: #f6ead0;
-  color: #5d4724;
-  border-radius: 999px;
-  padding: 4px 10px;
-  font-size: 12px;
-}
-
-.price-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-}
-
-.price-stack {
-  display: grid;
-  gap: 2px;
-}
-
-.price {
-  font-size: 30px;
-  color: #3f2b10;
-  font-weight: 700;
-}
-
-.original-price {
-  color: #9a8b74;
-  text-decoration: line-through;
-  font-size: 13px;
-}
-
-.stock {
-  color: #756b5d;
-}
-
-.score-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 14px;
-  color: #625847;
-  font-size: 13px;
-}
-
-.buy-box {
-  margin-top: 8px;
+.summary-head {
   display: grid;
   gap: 10px;
 }
 
+.summary-tags,
+.tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.summary-head h1 {
+  margin: 0;
+  font-size: clamp(34px, 4.2vw, 56px);
+  line-height: 0.96;
+}
+
+.summary-copy {
+  color: var(--text-muted);
+  line-height: 1.8;
+}
+
+.shop-link {
+  width: fit-content;
+  border: none;
+  border-radius: 999px;
+  background: rgba(47, 95, 89, 0.08);
+  color: var(--accent);
+  padding: 8px 14px;
+  font-weight: 700;
+}
+
+.price-panel {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  gap: 14px;
+  padding: 18px;
+  border-radius: 24px;
+  background: linear-gradient(135deg, rgba(255, 251, 243, 0.96), rgba(248, 238, 221, 0.92));
+  border: 1px solid rgba(178, 122, 50, 0.14);
+}
+
+.price-stack {
+  display: grid;
+  gap: 4px;
+}
+
+.price-stack strong {
+  font-size: clamp(38px, 4vw, 52px);
+  color: #342313;
+  line-height: 0.95;
+}
+
+.price-stack span {
+  color: var(--text-soft);
+  text-decoration: line-through;
+  font-size: 13px;
+}
+
+.score-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.score-card,
+.service-item {
+  display: grid;
+  gap: 4px;
+  padding: 14px 16px;
+  border-radius: 20px;
+  border: 1px solid rgba(106, 81, 47, 0.14);
+  background: rgba(255, 252, 247, 0.88);
+}
+
+.score-card span,
+.service-item span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.score-card strong,
+.service-item strong {
+  color: var(--text);
+  font-size: 18px;
+}
+
+.buy-box {
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+  border-radius: 24px;
+  border: 1px solid rgba(106, 81, 47, 0.14);
+  background: rgba(255, 252, 247, 0.88);
+}
+
 .buy-box label {
-  color: #534a3d;
-  font-weight: 600;
+  display: grid;
+  gap: 8px;
+}
+
+.buy-box span {
+  color: #5a4d3f;
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .qty {
   width: 130px;
-  border: 1px solid #d8ccb5;
-  border-radius: 10px;
-  padding: 10px 12px;
-  background: #fffcf5;
 }
 
-.buy-box button {
-  width: 220px;
-  border: none;
-  border-radius: 999px;
-  background: linear-gradient(135deg, #2f2413, #765322);
-  color: #fff7ea;
-  font-weight: 600;
-  padding: 10px 12px;
-}
-
-.buy-box button:disabled {
-  background: #b3aa9d;
-}
-
-.detail-sections {
+.detail-block {
+  padding: 20px;
   display: grid;
   gap: 14px;
 }
 
-.detail-block {
-  border: 1px solid #e4d7c2;
-  border-radius: 14px;
-  padding: 14px;
-  background: #fffbf4;
+.block-head {
+  display: grid;
+  gap: 6px;
 }
 
-.detail-block h2 {
-  margin: 0 0 10px;
-  font-size: 16px;
-  color: #352816;
+.block-head h2 {
+  margin: 0;
+  font-size: 34px;
+}
+
+.block-head p,
+.category-line,
+.shop-copy p {
+  color: var(--text-muted);
+  line-height: 1.7;
 }
 
 .detail-list {
   margin: 0;
   padding-left: 18px;
-  color: #5c5245;
+  color: #5b4e3f;
   display: grid;
-  gap: 6px;
+  gap: 10px;
+  line-height: 1.7;
+}
+
+.service-grid,
+.score-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.shop-block {
+  grid-column: 1 / -1;
 }
 
 .shop-profile {
   display: flex;
-  gap: 12px;
+  gap: 14px;
   align-items: flex-start;
 }
 
 .shop-logo {
-  width: 52px;
-  height: 52px;
-  border-radius: 14px;
+  width: 68px;
+  height: 68px;
+  border-radius: 20px;
   object-fit: cover;
 }
 
-.shop-copy p {
-  margin: 0 0 6px;
-  color: #5c5245;
-  line-height: 1.5;
-}
-
-.score-grid {
-  margin-top: 10px;
+.shop-copy {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  color: #5a5245;
-  font-size: 13px;
+  gap: 6px;
 }
 
-.category-line {
-  color: #5c5245;
-  font-size: 13px;
+.shop-copy strong {
+  font-size: 22px;
+  color: var(--text);
 }
 
 @media (max-width: 860px) {
-  .detail-card {
+  .detail-layout {
     grid-template-columns: 1fr;
   }
 
-  .cover {
-    min-height: 220px;
-  }
-
+  .score-row,
+  .service-grid,
   .score-grid {
     grid-template-columns: 1fr;
+  }
+
+  .media-frame,
+  .cover {
+    min-height: 320px;
   }
 }
 </style>

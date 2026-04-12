@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import Button from '@/components/ui/Button.vue'
+
 const props = defineProps<{
   page: number
   totalPages: number
@@ -19,40 +21,36 @@ const changePage = (nextPage: number) => {
 
 <template>
   <div v-if="totalPages > 1" class="pager">
-    <button type="button" :disabled="page <= 1" @click="changePage(page - 1)">上一页</button>
-    <span>
-      {{ page }} / {{ totalPages }}
-      <template v-if="typeof totalItems === 'number'"> · 共 {{ totalItems }} 条</template>
-    </span>
-    <button type="button" :disabled="page >= totalPages" @click="changePage(page + 1)">下一页</button>
+    <Button variant="outline" size="sm" :disabled="page <= 1" @click="changePage(page - 1)">上一页</Button>
+    <div class="pager-center">
+      <strong>{{ page }} / {{ totalPages }}</strong>
+      <span v-if="typeof totalItems === 'number'">共 {{ totalItems }} 条</span>
+    </div>
+    <Button variant="outline" size="sm" :disabled="page >= totalPages" @click="changePage(page + 1)">下一页</Button>
   </div>
 </template>
 
 <style scoped>
 .pager {
-  margin-top: 18px;
   display: flex;
   justify-content: center;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-top: 6px;
 }
 
-.pager button {
-  border: none;
-  background: #2f2413;
-  color: #fff5e8;
-  border-radius: 999px;
-  padding: 8px 14px;
-  cursor: pointer;
+.pager-center {
+  min-width: 136px;
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  color: var(--text-muted);
+  font-size: 12px;
 }
 
-.pager button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.pager span {
-  color: #6c6253;
-  font-size: 13px;
+.pager-center strong {
+  color: var(--text);
+  font-size: 14px;
 }
 </style>

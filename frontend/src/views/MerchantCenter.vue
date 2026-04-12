@@ -4,6 +4,9 @@ import api from '@/api/client'
 import ListPager from '@/components/ListPager.vue'
 import { useAuthStore } from '@/stores/auth'
 import { createRealtimeClient, type RealtimeEvent } from '@/utils/realtime'
+import Button from '@/components/ui/Button.vue'
+import Badge from '@/components/ui/Badge.vue'
+import PageHero from '@/components/shared/PageHero.vue'
 
 interface ShopInfo {
   id: string
@@ -807,16 +810,24 @@ onBeforeUnmount(() => {
       </div>
     </transition>
 
-    <div class="hero">
-      <h1>{{ shopDisplay }}</h1>
-      <span>商家工作台</span>
-    </div>
+    <PageHero
+      eyebrow="Merchant Workspace"
+      :title="shopDisplay"
+      description="把订单履约、商品维护、地址管理和售后处理收进同一块运营工作台，保持操作节奏与信息层级一致。"
+      accent="gold"
+    >
+      <template #actions>
+        <Badge v-if="shop" variant="default">评分 {{ formatScore(shop.rating) }}</Badge>
+        <Badge v-if="shop" variant="info">物流 {{ formatScore(shop.logistics_score) }}</Badge>
+        <Badge v-if="shop" variant="success">售后 {{ formatScore(shop.after_sales_score) }}</Badge>
+      </template>
+    </PageHero>
 
     <div class="tabs">
-      <button :class="activeTab === 'orders' ? 'active' : ''" @click="activeTab = 'orders'">订单</button>
-      <button :class="activeTab === 'products' ? 'active' : ''" @click="activeTab = 'products'">商品</button>
-      <button :class="activeTab === 'addresses' ? 'active' : ''" @click="activeTab = 'addresses'">地址</button>
-      <button :class="activeTab === 'afterSales' ? 'active' : ''" @click="activeTab = 'afterSales'">售后</button>
+      <Button :variant="activeTab === 'orders' ? 'default' : 'outline'" size="sm" @click="activeTab = 'orders'">订单</Button>
+      <Button :variant="activeTab === 'products' ? 'default' : 'outline'" size="sm" @click="activeTab = 'products'">商品</Button>
+      <Button :variant="activeTab === 'addresses' ? 'default' : 'outline'" size="sm" @click="activeTab = 'addresses'">地址</Button>
+      <Button :variant="activeTab === 'afterSales' ? 'default' : 'outline'" size="sm" @click="activeTab = 'afterSales'">售后</Button>
     </div>
 
     <p v-if="error" class="error">{{ error }}</p>
@@ -1304,49 +1315,14 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .merchant-page {
-  max-width: 1180px;
-  margin: 0 auto;
-  padding: 22px 18px 38px;
   display: grid;
-  gap: 14px;
-}
-
-.hero {
-  background: linear-gradient(120deg, #2f2413, #765322);
-  color: #fff7ea;
-  border-radius: 18px;
-  padding: 20px;
-  display: flex;
-  justify-content: space-between;
-  align-items: end;
-}
-
-.hero h1 {
-  margin: 0;
-}
-
-.hero span {
-  opacity: 0.85;
+  gap: 16px;
 }
 
 .tabs {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
-}
-
-.tabs button {
-  border: 1px solid #d7c8ae;
-  border-radius: 999px;
-  background: #fff8eb;
-  color: #4d3d22;
-  padding: 8px 14px;
-}
-
-.tabs button.active {
-  background: #2f2413;
-  color: #fff7ea;
-  border-color: #2f2413;
 }
 
 .panel {

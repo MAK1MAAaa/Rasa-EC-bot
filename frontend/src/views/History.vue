@@ -3,6 +3,10 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
+import Button from '@/components/ui/Button.vue'
+import Badge from '@/components/ui/Badge.vue'
+import PageHero from '@/components/shared/PageHero.vue'
+import EmptyState from '@/components/shared/EmptyState.vue'
 
 interface ProductViewHistoryItem {
   id: string
@@ -78,17 +82,19 @@ watch(
 </script>
 
 <template>
-  <section class="history-page">
-    <div class="hero">
-      <div>
-        <p class="eyebrow">History</p>
-        <h1>历史浏览</h1>
-        <p class="sub">这里会展示你最近看过的商品，客服推荐也会参考这部分浏览偏好。</p>
-      </div>
-      <button type="button" class="browse-btn" @click="router.push('/products')">继续逛商品</button>
-    </div>
+  <section class="page-shell history-page">
+    <PageHero
+      eyebrow="History"
+      title="把最近浏览过的商品汇成可回看的收藏带，方便继续比较和回访。"
+      description="客服推荐也会参考这部分浏览偏好，因此这里既是回看入口，也是个性化服务的上下文来源。"
+      accent="ink"
+    >
+      <template #actions>
+        <Button variant="ghost" size="lg" @click="router.push('/products')">继续逛商品</Button>
+      </template>
+    </PageHero>
 
-    <p v-if="error" class="error">{{ error }}</p>
+    <p v-if="error" class="status-banner error">{{ error }}</p>
     <div v-if="loading" class="state-card">加载中...</div>
 
     <section v-else-if="hasItems" class="history-grid">
@@ -105,8 +111,8 @@ watch(
         >
         <div class="content">
           <div class="head">
-            <span class="category">{{ item.category || '未分类' }}</span>
-            <span v-if="item.brand" class="brand">{{ item.brand }}</span>
+            <Badge variant="muted">{{ item.category || '未分类' }}</Badge>
+            <Badge v-if="item.brand" variant="default">{{ item.brand }}</Badge>
           </div>
           <h2>{{ item.name }}</h2>
           <p class="shop">{{ item.shop_name }}</p>
@@ -122,101 +128,33 @@ watch(
       </article>
     </section>
 
-    <section v-else class="empty-card">
-      <div class="empty-copy">
-        <p class="eyebrow">Empty</p>
-        <h2>还没有历史浏览记录</h2>
-        <p>先进入几个商品详情页，这里就会出现最近看过的商品列表。</p>
-      </div>
-      <button type="button" class="browse-btn" @click="router.push('/products')">去商品页</button>
-    </section>
+    <EmptyState
+      v-else
+      eyebrow="Empty"
+      title="还没有历史浏览记录"
+      description="先进入几个商品详情页，这里就会出现最近看过的商品列表。"
+    >
+      <Button variant="outline" @click="router.push('/products')">去商品页</Button>
+    </EmptyState>
   </section>
 </template>
 
 <style scoped>
 .history-page {
-  max-width: 1180px;
-  margin: 0 auto;
-  padding: 24px 18px 40px;
-}
-
-.hero {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  align-items: flex-end;
-  padding: 26px;
-  border-radius: 24px;
-  background:
-    radial-gradient(circle at top right, rgba(255, 241, 211, 0.95), rgba(255, 255, 255, 0) 38%),
-    linear-gradient(135deg, #2d2213, #6f5122);
-  color: #fff7ea;
-  box-shadow: 0 22px 44px rgba(60, 42, 17, 0.18);
-}
-
-.eyebrow {
-  margin: 0 0 8px;
-  text-transform: uppercase;
-  letter-spacing: 0.18em;
-  font-size: 11px;
-  color: rgba(255, 245, 224, 0.82);
-}
-
-.hero h1,
-.empty-copy h2 {
-  margin: 0;
-}
-
-.sub {
-  margin: 10px 0 0;
-  max-width: 560px;
-  color: rgba(255, 246, 231, 0.84);
-  line-height: 1.6;
-}
-
-.browse-btn {
-  border: none;
-  border-radius: 999px;
-  padding: 12px 18px;
-  cursor: pointer;
-  background: #f5e3be;
-  color: #3c2b12;
-  font-weight: 700;
-}
-
-.error {
-  margin: 14px 0;
-  color: var(--danger);
-}
-
-.state-card,
-.empty-card {
-  margin-top: 18px;
-  border-radius: 20px;
-  border: 1px dashed #d8c8aa;
-  background: linear-gradient(180deg, #fffdf8, #fff8ed);
-  padding: 36px 28px;
+  display: grid;
+  gap: 18px;
 }
 
 .state-card {
-  text-align: center;
+  min-height: 260px;
+  display: grid;
+  place-items: center;
+  border-radius: 28px;
+  border: 1px dashed rgba(106, 81, 47, 0.18);
   color: #726755;
 }
 
-.empty-card {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  align-items: center;
-}
-
-.empty-copy p:last-child {
-  margin: 10px 0 0;
-  color: #756a58;
-}
-
 .history-grid {
-  margin-top: 18px;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: 16px;
@@ -224,9 +162,9 @@ watch(
 
 .history-card {
   overflow: hidden;
-  border-radius: 18px;
-  border: 1px solid #e6d8bb;
-  background: #fffdf8;
+  border-radius: 24px;
+  border: 1px solid rgba(106, 81, 47, 0.14);
+  background: rgba(255, 253, 248, 0.96);
   cursor: pointer;
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
@@ -257,24 +195,10 @@ watch(
   align-items: center;
 }
 
-.category {
-  color: #866c3c;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.brand {
-  border-radius: 999px;
-  padding: 4px 8px;
-  background: #f6ecd9;
-  color: #5d4824;
-  font-size: 12px;
-}
-
 .content h2 {
   margin: 0;
   color: #2e2416;
-  font-size: 18px;
+  font-size: 28px;
   line-height: 1.45;
 }
 
@@ -295,17 +219,5 @@ watch(
 .foot span {
   color: #736856;
   font-size: 12px;
-}
-
-@media (max-width: 860px) {
-  .hero,
-  .empty-card {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .browse-btn {
-    width: 100%;
-  }
 }
 </style>

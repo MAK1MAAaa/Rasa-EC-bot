@@ -43,11 +43,23 @@ onMounted(async () => {
 .app-shell::before {
   content: '';
   position: fixed;
-  inset: 0;
+  inset: -18% -10% auto auto;
+  width: 420px;
+  height: 420px;
   pointer-events: none;
-  background-image: radial-gradient(rgba(62, 42, 19, 0.04) 0.8px, transparent 0.8px);
-  background-size: 3px 3px;
-  opacity: 0.42;
+  background: radial-gradient(circle, rgba(178, 122, 50, 0.12), transparent 72%);
+  filter: blur(12px);
+}
+
+.app-shell::after {
+  content: '';
+  position: fixed;
+  inset: auto auto -14% -8%;
+  width: 360px;
+  height: 360px;
+  pointer-events: none;
+  background: radial-gradient(circle, rgba(47, 95, 89, 0.12), transparent 70%);
+  filter: blur(12px);
 }
 
 .page-body {
@@ -57,6 +69,7 @@ onMounted(async () => {
 }
 
 .page-body.with-header {
-  min-height: calc(100vh - 74px);
+  min-height: calc(100vh - 92px);
+  padding-top: 4px;
 }
 </style>

@@ -4,6 +4,9 @@ import { useRouter } from 'vue-router'
 import api from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 import { useCartStore } from '@/stores/cart'
+import Button from '@/components/ui/Button.vue'
+import PageHero from '@/components/shared/PageHero.vue'
+import EmptyState from '@/components/shared/EmptyState.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -57,35 +60,54 @@ onMounted(loadPage)
 </script>
 
 <template>
-  <section class="checkout-page">
-    <h1>提交订单</h1>
+  <section class="page-shell checkout-page">
+    <PageHero
+      eyebrow="Checkout"
+      title="把收货信息和订单摘要放在同一视口里，减少最后一步的切换成本。"
+      description="确认地址、邮箱和订单金额后即可直接提交，不打断已有购物上下文。"
+      accent="teal"
+    />
 
     <div v-if="loading" class="state-card">加载中...</div>
 
-    <div v-else-if="cartStore.items.length === 0" class="state-card">
-      购物车为空
-      <button type="button" @click="router.push('/products')">去选购</button>
-    </div>
+    <EmptyState
+      v-else-if="cartStore.items.length === 0"
+      eyebrow="Cart Empty"
+      title="购物车为空"
+      description="先挑选一些商品，再回到这里完成下单。"
+    >
+      <Button variant="outline" @click="router.push('/products')">去选购</Button>
+    </EmptyState>
 
-    <div v-else class="checkout-layout">
-      <div class="form-card">
-        <h2>收货信息</h2>
+    <div v-else class="page-grid-two">
+      <div class="panel-surface form-card">
+        <div class="surface-title">
+          <h2>收货信息</h2>
+          <p>填写详细地址和联系邮箱，订单提交后可以在订单详情页继续查看或修改待发货收货信息。</p>
+        </div>
 
-        <label>地址</label>
-        <textarea v-model="address" rows="4" placeholder="请输入详细地址"></textarea>
+        <label class="field">
+          <span>地址</span>
+          <textarea v-model="address" class="field-textarea" rows="4" placeholder="请输入详细地址"></textarea>
+        </label>
 
-        <label>邮箱</label>
-        <input v-model="contactEmail" type="email" placeholder="you@example.com">
+        <label class="field">
+          <span>邮箱</span>
+          <input v-model="contactEmail" class="field-input" type="email" placeholder="you@example.com">
+        </label>
 
-        <p v-if="error" class="error">{{ error }}</p>
+        <p v-if="error" class="status-banner error">{{ error }}</p>
 
-        <button type="button" :disabled="submitting" @click="submitOrder">
+        <Button size="lg" :disabled="submitting" @click="submitOrder">
           {{ submitting ? '提交中...' : '确认下单' }}
-        </button>
+        </Button>
       </div>
 
-      <aside class="summary-card">
-        <h2>商品</h2>
+      <aside class="panel-surface summary-card">
+        <div class="surface-title">
+          <h2>订单摘要</h2>
+          <p>下单前再核对一次商品数量和金额。</p>
+        </div>
         <ul>
           <li v-for="item in cartStore.items" :key="item.id">
             <span>{{ item.product_name }} x {{ item.quantity }}</span>
@@ -100,92 +122,44 @@ onMounted(loadPage)
 
 <style scoped>
 .checkout-page {
-  max-width: 1180px;
-  margin: 0 auto;
-  padding: 22px 18px 38px;
-}
-
-.checkout-page h1 {
-  margin: 0 0 14px;
-  color: #2f2618;
+  display: grid;
+  gap: 18px;
 }
 
 .state-card {
-  background: var(--surface-strong);
-  border: 1px dashed #d8ccb6;
-  border-radius: 16px;
-  padding: 30px;
-  text-align: center;
-  color: #6b6153;
-}
-
-.state-card button {
-  margin-top: 12px;
-  border: none;
-  border-radius: 999px;
-  background: #2f2413;
-  color: #fff6e8;
-  padding: 10px 14px;
-}
-
-.checkout-layout {
+  min-height: 280px;
   display: grid;
-  grid-template-columns: 1fr 360px;
-  gap: 16px;
+  place-items: center;
+  border-radius: 28px;
+  border: 1px dashed rgba(106, 81, 47, 0.18);
+  color: #6b6153;
 }
 
 .form-card,
 .summary-card {
-  background: var(--surface-strong);
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 18px;
+  padding: 24px;
 }
 
 .form-card {
   display: grid;
-  gap: 10px;
+  gap: 14px;
 }
 
-.form-card h2,
-.summary-card h2 {
-  margin: 0 0 8px;
-  color: #312819;
+.field {
+  display: grid;
+  gap: 8px;
 }
 
-label {
+.field span {
   font-size: 13px;
   color: #61584b;
-  font-weight: 600;
+  font-weight: 700;
 }
 
-textarea,
-input {
-  border: 1px solid #d8ccb5;
-  border-radius: 12px;
-  padding: 11px 12px;
-  font-size: 14px;
-  background: #fffcf5;
-}
-
-button {
-  width: fit-content;
-  border: none;
-  border-radius: 999px;
-  background: linear-gradient(135deg, #2f2413, #765322);
-  color: #fff7ea;
-  font-weight: 600;
-  padding: 10px 16px;
-}
-
-button:disabled {
-  opacity: 0.7;
-}
-
-.error {
-  margin: 0;
-  color: var(--danger);
-  font-size: 14px;
+.summary-card {
+  display: grid;
+  gap: 16px;
+  align-content: start;
 }
 
 .summary-card ul {
@@ -193,7 +167,7 @@ button:disabled {
   padding: 0;
   list-style: none;
   display: grid;
-  gap: 8px;
+  gap: 10px;
 }
 
 .summary-card li {
@@ -201,20 +175,14 @@ button:disabled {
   justify-content: space-between;
   gap: 10px;
   color: #5b5244;
+  font-size: 14px;
 }
 
 .total {
-  margin-top: 12px;
   border-top: 1px dashed #d6c8ae;
   padding-top: 10px;
   font-size: 20px;
   font-weight: 700;
   color: #3e2c12;
-}
-
-@media (max-width: 920px) {
-  .checkout-layout {
-    grid-template-columns: 1fr;
-  }
 }
 </style>

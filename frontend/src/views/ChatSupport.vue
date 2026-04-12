@@ -1,7 +1,11 @@
 ﻿<script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { Disclosure, DisclosureButton, DisclosurePanel } from '@headlessui/vue'
 import api from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
+import Button from '@/components/ui/Button.vue'
+import AppDialog from '@/components/ui/AppDialog.vue'
+import PageHero from '@/components/shared/PageHero.vue'
 
 type ChatBubbleRole = 'user' | 'bot' | 'system'
 type PendingDecision = 'confirm' | 'cancel'
@@ -93,21 +97,20 @@ const sanitizeCards = (rawCards: any): ChatCard[] => {
 
 const sanitizeActions = (rawActions: any): ChatAction[] => {
   if (!Array.isArray(rawActions)) return []
-  return rawActions
-    .map((item) => {
-      if (!item || typeof item !== 'object') return null
-      const type = typeof item.type === 'string' ? item.type.trim() : ''
-      const label = typeof item.label === 'string' ? item.label.trim() : ''
-      if (!type || !label) return null
-      const payload = item.payload && typeof item.payload === 'object' && !Array.isArray(item.payload) ? item.payload : {}
-      return {
-        type,
-        label,
-        payload,
-        style: typeof item.style === 'string' && item.style.trim() ? item.style.trim() : undefined
-      }
+  return rawActions.reduce<ChatAction[]>((result, item) => {
+    if (!item || typeof item !== 'object') return result
+    const type = typeof item.type === 'string' ? item.type.trim() : ''
+    const label = typeof item.label === 'string' ? item.label.trim() : ''
+    if (!type || !label) return result
+    const payload = item.payload && typeof item.payload === 'object' && !Array.isArray(item.payload) ? item.payload : {}
+    result.push({
+      type,
+      label,
+      payload,
+      style: typeof item.style === 'string' && item.style.trim() ? item.style.trim() : undefined
     })
-    .filter((item): item is ChatAction => !!item)
+    return result
+  }, [])
 }
 
 const buildBubble = (role: ChatBubbleRole, text: string, cards: ChatCard[] = [], actions: ChatAction[] = []): ChatBubble => ({
@@ -351,11 +354,11 @@ const loadChatState = () => {
 
 const escapeHtml = (value: string) =>
   value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
 
 const isAppHost = (hostname: string) => {
   const current = window.location.hostname
@@ -667,18 +670,29 @@ watch(
 </script>
 
 <template>
-  <section class="chat-page">
-    <div class="hero">
-      <div class="hero-head">
-        <h1>智能客服</h1>
-        <span class="user-chip">{{ userLabel }}</span>
-      </div>
-      <div class="quick-actions">
+  <section class="page-shell chat-page">
+    <PageHero
+      eyebrow="Conversational Support"
+      title="用一块连续对话界面同时处理查单、物流、售后和待确认动作。"
+      description="会话历史、结构化卡片消息与图片售后分析统一放在同一屏里，减少跳转和上下文丢失。"
+      accent="teal"
+    >
+      <template #actions>
+        <div class="user-chip">{{ userLabel }}</div>
+      </template>
+    </PageHero>
+
+    <Disclosure v-slot="{ open }" as="section" class="prompt-disclosure">
+      <DisclosureButton class="prompt-trigger">
+        <span>快捷提问</span>
+        <span>{{ open ? '收起' : '展开' }}</span>
+      </DisclosureButton>
+      <DisclosurePanel class="quick-actions">
         <button v-for="item in quickPrompts" :key="item" type="button" @click="sendQuickPrompt(item)">
           {{ item }}
         </button>
-      </div>
-    </div>
+      </DisclosurePanel>
+    </Disclosure>
 
     <div class="support-layout">
       <aside class="history-panel">
@@ -895,7 +909,7 @@ watch(
             v-model="inputText"
             type="text"
             placeholder="输入你的问题..."
-            @keyup.enter="sendMessage"
+            @keyup.enter="() => sendMessage()"
           >
           <button type="button" :disabled="sending || (!inputText.trim() && !selectedImageFile)" @click="sendMessage()">
             {{ sending ? '发送中...' : '发送' }}
@@ -904,84 +918,77 @@ watch(
       </div>
     </div>
 
-    <div v-if="decisionModal.visible" class="decision-mask" @click.self="closeDecisionModal">
-      <section class="decision-card">
-        <h3>{{ modalTitle }}</h3>
-        <p v-if="decisionModal.card?.data?.description" class="modal-desc">{{ getText(decisionModal.card.data.description, '') }}</p>
+    <AppDialog :open="decisionModal.visible" :title="modalTitle" @close="closeDecisionModal">
+      <p v-if="decisionModal.card?.data?.description" class="modal-desc">{{ getText(decisionModal.card.data.description, '') }}</p>
 
-        <div v-if="modalCardDetails.length > 0" class="detail-list">
-          <div v-for="(detail, index) in modalCardDetails" :key="`modal-${index}`" class="detail-item">
-            <span>{{ detail.label }}</span>
-            <strong>{{ detail.value }}</strong>
-          </div>
+      <div v-if="modalCardDetails.length > 0" class="detail-list">
+        <div v-for="(detail, index) in modalCardDetails" :key="`modal-${index}`" class="detail-item">
+          <span>{{ detail.label }}</span>
+          <strong>{{ detail.value }}</strong>
         </div>
+      </div>
 
-        <div class="decision-actions">
-          <button type="button" class="ghost" :disabled="decisionModal.loading" @click="closeDecisionModal">关闭</button>
-          <button
-            type="button"
-            :class="decisionModal.decision === 'confirm' ? 'primary' : 'danger'"
-            :disabled="decisionModal.loading"
-            @click="submitPendingDecision"
-          >
-            {{ modalConfirmLabel }}
-          </button>
-        </div>
-      </section>
-    </div>
+      <div class="decision-actions">
+        <Button variant="outline" :disabled="decisionModal.loading" @click="closeDecisionModal">关闭</Button>
+        <Button
+          :variant="decisionModal.decision === 'confirm' ? 'default' : 'danger'"
+          :disabled="decisionModal.loading"
+          @click="submitPendingDecision"
+        >
+          {{ modalConfirmLabel }}
+        </Button>
+      </div>
+    </AppDialog>
   </section>
 </template>
 <style scoped>
 .chat-page {
-  max-width: 1180px;
-  margin: 0 auto;
-  padding: 24px 18px 40px;
   display: grid;
   gap: 16px;
 }
 
-.hero {
-  border-radius: 20px;
-  padding: 20px;
-  color: #fff7ea;
-  background: linear-gradient(130deg, #2f2413 0%, #765322 52%, #315f58 100%);
-  box-shadow: 0 18px 34px rgba(56, 39, 15, 0.25);
-  display: grid;
-  gap: 10px;
-}
-
-.hero-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.hero h1 {
-  margin: 0;
-  font-size: 28px;
-}
-
 .user-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 42px;
+  padding: 0 14px;
+  border-radius: 999px;
   background: rgba(255, 255, 255, 0.18);
   border: 1px solid rgba(255, 255, 255, 0.35);
-  border-radius: 999px;
-  padding: 6px 12px;
-  font-size: 12px;
+  font-size: 13px;
+  color: #fff8ef;
+}
+
+.prompt-disclosure {
+  border-radius: 24px;
+  border: 1px solid rgba(106, 81, 47, 0.14);
+  background: rgba(255, 252, 247, 0.84);
+  overflow: hidden;
+}
+
+.prompt-trigger {
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 16px 18px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--text);
+  font-weight: 700;
 }
 
 .quick-actions {
-  margin-top: 2px;
+  padding: 0 18px 18px;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
 
 .quick-actions button {
-  border: 1px solid rgba(255, 255, 255, 0.35);
-  background: rgba(255, 255, 255, 0.12);
-  color: #fff;
+  border: 1px solid rgba(106, 81, 47, 0.14);
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--text);
   border-radius: 999px;
   padding: 8px 12px;
   font-size: 13px;
@@ -1334,31 +1341,6 @@ watch(
   cursor: not-allowed;
 }
 
-.decision-mask {
-  position: fixed;
-  inset: 0;
-  background: rgba(31, 24, 13, 0.42);
-  display: grid;
-  place-items: center;
-  z-index: 40;
-  padding: 16px;
-}
-
-.decision-card {
-  width: min(520px, 100%);
-  background: #fffaf1;
-  border: 1px solid #e5d5b7;
-  border-radius: 16px;
-  padding: 16px;
-  display: grid;
-  gap: 12px;
-}
-
-.decision-card h3 {
-  margin: 0;
-  color: #332717;
-}
-
 .modal-desc {
   margin: 0;
   color: #6f6554;
@@ -1366,31 +1348,10 @@ watch(
 }
 
 .decision-actions {
+  margin-top: 14px;
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-}
-
-.decision-actions button {
-  border: none;
-  border-radius: 999px;
-  padding: 8px 14px;
-  cursor: pointer;
-}
-
-.decision-actions .ghost {
-  background: #efe3cb;
-  color: #4d3a1e;
-}
-
-.decision-actions .primary {
-  background: #2f2413;
-  color: #fff7ea;
-}
-
-.decision-actions .danger {
-  background: #be123c;
-  color: #fff7fb;
 }
 
 :deep(.bubble a) {
@@ -1414,10 +1375,6 @@ watch(
 }
 
 @media (max-width: 760px) {
-  .hero h1 {
-    font-size: 24px;
-  }
-
   .chat-panel {
     min-height: 78vh;
   }

@@ -9,6 +9,11 @@
 - Vue Router（路由）
 - Axios（HTTP 客户端）
 - Tailwind CSS（样式系统）
+- `shadcn-vue` 风格组件层（本地落地于 `src/components/ui`）
+- Headless UI（弹层 / 抽屉 / 折叠容器）
+- `class-variance-authority` + `clsx` + `tailwind-merge`（组件变体与 class 合并）
+- `tailwindcss-animate`（统一动效）
+- Lucide Vue（图标）
 
 ## 2. 页面与路由
 - `/products`：商品列表（分类/价格/库存筛选，支持展开筛选面板）
@@ -22,6 +27,12 @@
 - `/merchant`：商家中心（商家角色可访问）
 
 ## 3. 已实现前端功能
+### 3.0 视觉系统升级
+- 重构全局设计令牌：统一背景、表面层、描边、阴影、品牌色、状态色、圆角和排版层级
+- 新增公共 UI 组件层：按钮、徽标、弹层、分页、页面 Hero、空态等，减少页面各自维护一套 scoped CSS
+- 顶部导航升级为统一 App Shell：品牌区、主导航区、账户区、移动端抽屉导航一体化
+- 登录注册、商品列表/详情、购物车、结算、订单列表、历史浏览、客服页、商家中心统一到同一套暖金电商视觉语言
+
 ### 3.1 用户端
 - 商品搜索、分类筛选、价格区间筛选、仅看有货
 - 商品详情自动记录历史浏览，历史浏览页独立展示最近看过的商品
@@ -76,6 +87,36 @@ pnpm dev
 ```bash
 pnpm build
 ```
+
+当前 `build` 会执行：
+
+```bash
+vue-tsc && vite build
+```
+
+已补充 `tsconfig.json` 和 `src/env.d.ts`，用于 Vue SFC、路径别名和类型检查。
+
+## 5.1 组件与主题目录
+- `src/components/ui`
+  - 基础 UI 组件层，采用 `shadcn-vue` 风格组织方式
+- `src/components/shared`
+  - 页面级复用组件，例如 `PageHero`、`EmptyState`
+- `src/lib/utils.ts`
+  - `cn()` class 合并工具
+- `src/style.css`
+  - 全局设计令牌、基础表单样式、按钮/徽标样式、弹层样式、公共页面壳层
+- `components.json`
+  - `shadcn-vue` 风格组件配置元数据
+
+## 5.2 新增依赖
+```bash
+pnpm add @headlessui/vue class-variance-authority clsx radix-vue tailwind-merge tailwindcss-animate
+pnpm add -D vue-tsc
+```
+
+说明：
+- `radix-vue` 已纳入前端组件基础设施依赖，后续若继续扩展 `shadcn-vue` 风格组件，可直接复用
+- 当前首批组件已优先落地在本地 `ui` 组件层，避免业务页继续散落实现
 
 ## 6. 联调要求
 - 后端启动：`http://127.0.0.1:8000`

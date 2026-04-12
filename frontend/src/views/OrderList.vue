@@ -5,6 +5,10 @@ import api from '@/api/client'
 import ListPager from '@/components/ListPager.vue'
 import { useAuthStore } from '@/stores/auth'
 import { createRealtimeClient, type RealtimeEvent } from '@/utils/realtime'
+import Button from '@/components/ui/Button.vue'
+import Badge from '@/components/ui/Badge.vue'
+import PageHero from '@/components/shared/PageHero.vue'
+import EmptyState from '@/components/shared/EmptyState.vue'
 
 interface OrderListItem {
   id: string
@@ -122,42 +126,46 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="orders-page">
-    <header class="hero">
-      <div>
-        <p class="hero-eyebrow">Order Archive</p>
-        <h1>我的订单</h1>
-        <p class="hero-copy">订单为空时保留同一块列表背景，订单增多后仍延续相同的信息框架和节奏。</p>
-      </div>
-      <button type="button" class="ghost" @click="router.push('/products')">继续购物</button>
-    </header>
+  <section class="page-shell orders-page">
+    <PageHero
+      eyebrow="Order Archive"
+      title="在统一列表里查看订单、物流入口和售后状态，不再靠散落页面来回跳转。"
+      description="按时间倒序展示订单，空态和有内容状态保持相同节奏，方便持续浏览和回访。"
+      accent="teal"
+    >
+      <template #actions>
+        <Button variant="ghost" size="lg" @click="router.push('/products')">继续购物</Button>
+      </template>
+    </PageHero>
 
-    <p v-if="error" class="error">{{ error }}</p>
+    <p v-if="error" class="status-banner error">{{ error }}</p>
 
-    <section class="content-surface">
-      <div class="surface-head">
-        <div>
+    <section class="panel-surface content-surface">
+      <div class="surface-header">
+        <div class="surface-title">
           <h2>订单列表</h2>
-          <p>按时间倒序展示，点击卡片进入详情，分页时保留当前浏览上下文。</p>
+          <p>点击卡片进入详情，统一查看物流、售后和订单操作。</p>
         </div>
-        <span class="surface-badge">共 {{ total }} 笔订单</span>
+        <Badge variant="info">共 {{ total }} 笔订单</Badge>
       </div>
 
       <div v-if="loading" class="surface-state">加载中...</div>
 
-      <div v-else-if="orders.length === 0" class="empty-state">
-        <p class="empty-eyebrow">No Orders Yet</p>
-        <h3>还没有订单记录</h3>
-        <p>完成下单后，这里会继续沿用当前面板样式展示订单、物流和售后入口。</p>
-        <button type="button" class="empty-action" @click="router.push('/products')">去下单</button>
-      </div>
+      <EmptyState
+        v-else-if="orders.length === 0"
+        eyebrow="No Orders Yet"
+        title="还没有订单记录"
+        description="完成下单后，这里会继续沿用当前面板样式展示订单、物流和售后入口。"
+      >
+        <Button variant="outline" @click="router.push('/products')">去下单</Button>
+      </EmptyState>
 
       <div v-else class="list-wrap">
         <div class="order-grid">
           <article v-for="order in orders" :key="order.id" class="order-card" @click="toOrderDetail(order.id)">
             <div class="row">
               <strong>{{ order.id }}</strong>
-              <span class="status">{{ orderStatusLabel(order.status) }}</span>
+              <Badge variant="info">{{ orderStatusLabel(order.status) }}</Badge>
             </div>
 
             <div class="row muted">
@@ -176,7 +184,7 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="card-footer">
-              <button type="button" class="detail-btn" @click.stop="toOrderDetail(order.id)">查看详情</button>
+              <Button variant="outline" size="sm" @click.stop="toOrderDetail(order.id)">查看详情</Button>
             </div>
           </article>
         </div>
@@ -193,147 +201,20 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.orders-page {
-  --page-accent: #1f5e57;
-  --page-accent-soft: rgba(31, 94, 87, 0.14);
-  max-width: 1180px;
-  margin: 0 auto;
-  padding: 24px 18px 40px;
-  display: grid;
-  gap: 16px;
-}
-
-.hero {
-  padding: 22px 24px;
-  border-radius: 24px;
-  background:
-    radial-gradient(circle at right top, rgba(201, 247, 240, 0.28), transparent 28%),
-    linear-gradient(135deg, #182624 0%, #1f5e57 52%, #8dc8be 100%);
-  color: #f2fffd;
-  display: flex;
-  justify-content: space-between;
-  gap: 18px;
-  align-items: flex-end;
-}
-
-.hero-eyebrow,
-.empty-eyebrow {
-  margin: 0 0 6px;
-  text-transform: uppercase;
-  letter-spacing: 0.16em;
-  font-size: 11px;
-}
-
-.hero h1 {
-  margin: 0;
-  font-size: clamp(30px, 4vw, 38px);
-}
-
-.hero-copy {
-  margin: 10px 0 0;
-  max-width: 560px;
-  color: rgba(242, 255, 253, 0.8);
-  line-height: 1.7;
-}
-
-.ghost {
-  border: 1px solid rgba(220, 255, 249, 0.42);
-  background: rgba(255, 255, 255, 0.08);
-  color: #f2fffd;
-  border-radius: 999px;
-  padding: 10px 16px;
-}
-
-.error {
-  margin: 0;
-  border-radius: 14px;
-  padding: 12px 14px;
-  background: #fff1f2;
-  color: #be123c;
-}
-
 .content-surface {
-  min-height: 560px;
   padding: 20px;
-  border-radius: 24px;
-  border: 1px solid rgba(31, 94, 87, 0.12);
-  background:
-    radial-gradient(circle at top left, rgba(188, 240, 230, 0.24), transparent 24%),
-    linear-gradient(180deg, rgba(252, 255, 253, 0.96), rgba(240, 248, 246, 0.92));
-  box-shadow: 0 18px 40px rgba(18, 55, 50, 0.08);
   display: grid;
-  grid-template-rows: auto 1fr;
   gap: 18px;
 }
 
-.surface-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items: flex-start;
-}
-
-.surface-head h2,
-.empty-state h3 {
-  margin: 0;
-  color: #153732;
-}
-
-.surface-head p,
-.empty-state p {
-  margin: 8px 0 0;
-  color: #62706d;
-  line-height: 1.7;
-}
-
-.surface-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 8px 12px;
-  border-radius: 999px;
-  background: var(--page-accent-soft);
-  color: var(--page-accent);
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-.surface-state,
-.empty-state,
-.list-wrap {
-  min-height: 100%;
-  border-radius: 20px;
-  border: 1px solid rgba(31, 94, 87, 0.1);
-  background: rgba(255, 255, 255, 0.72);
-}
-
-.surface-state,
-.empty-state {
+.surface-state {
+  min-height: 260px;
   display: grid;
   place-items: center;
-  text-align: center;
-  padding: 36px 24px;
-}
-
-.empty-state {
-  justify-items: center;
-  gap: 8px;
-}
-
-.empty-action,
-.detail-btn {
-  border: none;
-  cursor: pointer;
-}
-
-.empty-action {
-  padding: 12px 18px;
-  border-radius: 999px;
-  background: #1f5e57;
-  color: #f2fffd;
+  color: var(--text-muted);
 }
 
 .list-wrap {
-  padding: 16px;
   display: grid;
   gap: 14px;
   align-content: start;
@@ -347,8 +228,8 @@ onBeforeUnmount(() => {
 
 .order-card {
   background: rgba(255, 255, 255, 0.88);
-  border: 1px solid rgba(31, 94, 87, 0.12);
-  border-radius: 18px;
+  border: 1px solid rgba(31, 94, 87, 0.1);
+  border-radius: 24px;
   padding: 16px;
   cursor: pointer;
   display: grid;
@@ -374,14 +255,6 @@ onBeforeUnmount(() => {
   font-size: 13px;
 }
 
-.status {
-  background: #dff5ef;
-  color: #1b5a53;
-  border-radius: 999px;
-  font-size: 12px;
-  padding: 4px 10px;
-}
-
 .addr {
   color: #37423f;
   overflow: hidden;
@@ -399,25 +272,7 @@ onBeforeUnmount(() => {
   justify-content: flex-end;
 }
 
-.detail-btn {
-  border-radius: 10px;
-  padding: 8px 12px;
-  font-size: 13px;
-  background: #163f3b;
-  color: #f2fffd;
-}
-
 @media (max-width: 760px) {
-  .hero,
-  .surface-head {
-    display: grid;
-    align-items: start;
-  }
-
-  .content-surface {
-    min-height: 500px;
-  }
-
   .row {
     flex-wrap: wrap;
   }

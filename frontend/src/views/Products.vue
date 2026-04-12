@@ -5,6 +5,10 @@ import api from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 import { useCartStore } from '@/stores/cart'
 import { createRealtimeClient, type RealtimeEvent } from '@/utils/realtime'
+import Button from '@/components/ui/Button.vue'
+import Badge from '@/components/ui/Badge.vue'
+import PageHero from '@/components/shared/PageHero.vue'
+import EmptyState from '@/components/shared/EmptyState.vue'
 
 interface Product {
   id: string
@@ -338,300 +342,299 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="page-wrap">
-    <div class="hero">
-      <h1>本周热卖</h1>
-      <div class="hero-actions">
-        <button v-if="!authStore.isMerchant" class="chat-link" type="button" @click="router.push('/chat')">问客服</button>
-        <button class="ghost-link" type="button" @click="showFilters = !showFilters">{{ showFilters ? '收起筛选' : '筛选' }}</button>
-      </div>
-    </div>
+  <section class="page-shell products-page">
+    <PageHero
+      eyebrow="Curated Selection"
+      title="让商品比较、客服咨询与下单路径集中在一个主场景里。"
+      description="筛选区、搜索区和商品卡片统一成更稳定的版式，方便买家快速比较品牌、评分、销量和发货时效。"
+      accent="gold"
+    >
+      <template #actions>
+        <Button v-if="!authStore.isMerchant" variant="secondary" size="lg" @click="router.push('/chat')">问客服</Button>
+        <Button variant="ghost" size="lg" @click="showFilters = !showFilters">{{ showFilters ? '收起筛选' : '打开筛选' }}</Button>
+      </template>
+    </PageHero>
 
-    <div class="toolbar">
-      <div class="search-box">
-        <input v-model="keywordInput" type="text" placeholder="搜商品 / 品牌" @keyup.enter="search">
-        <button type="button" @click="search">搜索</button>
+    <section class="panel-surface surface-block">
+      <div class="surface-head">
+        <div class="surface-title">
+          <h2>商品列表</h2>
+          <p>支持搜索、分类、品牌、店铺、价格和库存筛选，并保留商品比较所需的主要指标。</p>
+        </div>
+        <div class="result-meta">
+          <Badge variant="default">{{ total }} 件商品</Badge>
+          <Badge v-if="hasActiveFilters" variant="info">已应用筛选</Badge>
+          <Badge v-if="appliedShopName" variant="muted">{{ appliedShopName }}</Badge>
+        </div>
       </div>
-    </div>
 
-    <transition name="expand">
-      <div v-if="showFilters" class="filter-panel">
-        <div class="filter-group">
-          <div class="categories">
+      <div class="search-row">
+        <input v-model="keywordInput" class="field-input search-input" type="text" placeholder="搜商品、品牌或店铺" @keyup.enter="search">
+        <Button size="lg" @click="search">搜索</Button>
+      </div>
+
+      <transition name="expand">
+        <div v-if="showFilters" class="filter-panel">
+          <div class="category-row">
             <button
               v-for="item in categoryOptions"
               :key="item"
               type="button"
-              :class="selectedCategory === (item === '全部' ? '' : item) ? 'pill active' : 'pill'"
+              class="filter-pill"
+              :class="{ active: selectedCategory === (item === '全部' ? '' : item) }"
               @click="selectCategory(item)"
             >
               {{ item }}
             </button>
           </div>
+
+          <div class="filter-grid">
+            <label class="filter-field">
+              <span>品牌</span>
+              <select v-model="selectedBrand" class="field-select">
+                <option v-for="item in brandOptions" :key="item" :value="item === '全部品牌' ? '' : item">
+                  {{ item }}
+                </option>
+              </select>
+            </label>
+            <label class="filter-field">
+              <span>店铺</span>
+              <select v-model="appliedShopId" class="field-select">
+                <option value="">全部店铺</option>
+                <option v-for="item in shopOptions" :key="item.id" :value="item.id">
+                  {{ item.name }} · {{ item.active_product_count }} 件
+                </option>
+              </select>
+            </label>
+            <label class="filter-field">
+              <span>最低价</span>
+              <input
+                v-model="minPriceInput"
+                class="field-input"
+                type="number"
+                min="0"
+                step="0.01"
+                :placeholder="`¥${priceRange.min.toFixed(0)}`"
+              >
+            </label>
+            <label class="filter-field">
+              <span>最高价</span>
+              <input
+                v-model="maxPriceInput"
+                class="field-input"
+                type="number"
+                min="0"
+                step="0.01"
+                :placeholder="`¥${priceRange.max.toFixed(0)}`"
+              >
+            </label>
+            <label class="filter-field">
+              <span>排序</span>
+              <select v-model="sortBy" class="field-select">
+                <option value="newest">最新</option>
+                <option value="price_asc">价格低到高</option>
+                <option value="price_desc">价格高到低</option>
+                <option value="rating_desc">评分优先</option>
+                <option value="sales_desc">销量优先</option>
+              </select>
+            </label>
+          </div>
+
+          <label class="stock-check">
+            <input v-model="onlyInStock" type="checkbox">
+            <span>仅看有货</span>
+          </label>
+
+          <div class="filter-actions">
+            <Button size="sm" @click="applyFilters">应用筛选</Button>
+            <Button variant="outline" size="sm" @click="resetFilters">重置</Button>
+          </div>
         </div>
+      </transition>
 
-        <div class="filter-grid">
-          <label>
-            <span>品牌</span>
-            <select v-model="selectedBrand">
-              <option v-for="item in brandOptions" :key="item" :value="item === '全部品牌' ? '' : item">
-                {{ item }}
-              </option>
-            </select>
-          </label>
-          <label>
-            <span>店铺</span>
-            <select v-model="appliedShopId">
-              <option value="">全部店铺</option>
-              <option v-for="item in shopOptions" :key="item.id" :value="item.id">
-                {{ item.name }} · {{ item.active_product_count }} 件
-              </option>
-            </select>
-          </label>
-          <label>
-            <span>最低价</span>
-            <input
-              v-model="minPriceInput"
-              type="number"
-              min="0"
-              step="0.01"
-              :placeholder="`¥${priceRange.min.toFixed(0)}`"
-            >
-          </label>
-          <label>
-            <span>最高价</span>
-            <input
-              v-model="maxPriceInput"
-              type="number"
-              min="0"
-              step="0.01"
-              :placeholder="`¥${priceRange.max.toFixed(0)}`"
-            >
-          </label>
-          <label>
-            <span>排序</span>
-            <select v-model="sortBy">
-              <option value="newest">最新</option>
-              <option value="price_asc">价格低到高</option>
-              <option value="price_desc">价格高到低</option>
-              <option value="rating_desc">评分优先</option>
-              <option value="sales_desc">销量优先</option>
-            </select>
-          </label>
-        </div>
+      <p v-if="error" class="status-banner error">{{ error }}</p>
 
-        <label class="stock-check">
-          <input v-model="onlyInStock" type="checkbox">
-          <span>仅看有货</span>
-        </label>
+      <div v-if="loading" class="catalog-state">加载中...</div>
 
-        <div class="filter-actions">
-          <button type="button" class="apply" @click="applyFilters">应用</button>
-          <button type="button" class="reset" @click="resetFilters">重置</button>
-        </div>
-      </div>
-    </transition>
+      <EmptyState
+        v-else-if="products.length === 0"
+        eyebrow="Catalog Empty"
+        title="当前筛选下没有商品"
+        description="可以尝试切换分类、品牌或价格范围，或者回到默认筛选查看全部商品。"
+      >
+        <Button variant="outline" @click="resetFilters">重置筛选</Button>
+      </EmptyState>
 
-    <p v-if="error" class="error">{{ error }}</p>
-    <p v-else class="result-text">
-      {{ total }} 件商品
-      <span v-if="hasActiveFilters"> · 已筛选</span>
-      <span v-if="appliedShopName"> · {{ appliedShopName }}</span>
-    </p>
-
-    <div v-if="loading" class="state-card">加载中...</div>
-    <div v-else-if="products.length === 0" class="state-card">暂无商品</div>
-
-    <div v-else class="grid-list">
-      <article v-for="product in products" :key="product.id" class="product-card">
-        <img :src="product.image_url || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=800&q=80'" :alt="product.name" class="thumb">
-        <div class="content">
-          <div class="top-meta">
-            <span class="category">{{ product.category || '未分类' }}</span>
-            <span v-if="product.brand" class="brand">{{ product.brand }}</span>
+      <div v-else class="catalog-grid">
+        <article v-for="product in products" :key="product.id" class="catalog-card">
+          <div class="card-media" @click="openProductDetail(product.id)">
+            <img :src="product.image_url || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=800&q=80'" :alt="product.name">
+            <div class="media-fade"></div>
           </div>
-          <h3>{{ product.name }}</h3>
-          <p class="product-desc">{{ product.description }}</p>
-          <button class="shop-link" type="button" @click="filterByShop(product.shop_id, product.shop_name)">
-            {{ product.shop_name }}
-          </button>
-          <div class="shop-meta" v-if="product.shop_rating || product.shop_shipping_city">
-            <span v-if="product.shop_rating">店铺 {{ formatRating(product.shop_rating) }}</span>
-            <span v-if="product.shop_shipping_city">{{ product.shop_shipping_city }} 发货</span>
-          </div>
-          <div class="metric-row">
-            <span>{{ formatRating(product.rating) }}</span>
-            <span>{{ product.review_count }} 条评价</span>
-          </div>
-          <div class="metric-row">
-            <span>月销 {{ product.monthly_sales }}</span>
-            <span>{{ formatShipHours(product.ship_in_hours) }}</span>
-          </div>
-          <div v-if="product.tags?.length" class="tag-list">
-            <span v-for="tag in product.tags.slice(0, 3)" :key="tag" class="tag-chip">{{ tag }}</span>
-          </div>
-          <div class="bottom-row">
-            <div class="price-stack">
-              <span class="price">¥ {{ product.price.toFixed(2) }}</span>
-              <span v-if="product.original_price && product.original_price > product.price" class="original-price">
-                ¥ {{ product.original_price.toFixed(2) }}
-              </span>
+
+          <div class="card-body">
+            <div class="card-headline">
+              <Badge variant="muted">{{ product.category || '未分类' }}</Badge>
+              <Badge v-if="product.brand" variant="default">{{ product.brand }}</Badge>
             </div>
-            <span class="stock">库存 {{ product.stock }}</span>
-          </div>
-          <div class="actions">
-            <button type="button" class="ghost" @click="openProductDetail(product.id)">详情</button>
-            <button type="button" :disabled="product.stock <= 0" @click="addCart(product.id)">
-              {{ product.stock <= 0 ? '售罄' : '加购' }}
-            </button>
-          </div>
-        </div>
-      </article>
-    </div>
 
-    <div class="pager">
-      <button type="button" :disabled="page <= 1" @click="jumpPage(page - 1)">上一页</button>
-      <span>{{ page }} / {{ totalPages }}</span>
-      <button type="button" :disabled="page >= totalPages" @click="jumpPage(page + 1)">下一页</button>
-    </div>
+            <div class="copy-stack">
+              <h3 @click="openProductDetail(product.id)">{{ product.name }}</h3>
+              <p>{{ product.description || '暂无商品描述，点击详情查看完整规格与店铺信息。' }}</p>
+            </div>
+
+            <button class="shop-link" type="button" @click="filterByShop(product.shop_id, product.shop_name)">
+              {{ product.shop_name }}
+            </button>
+
+            <div class="metrics">
+              <span>{{ formatRating(product.rating) }}</span>
+              <span>{{ product.review_count }} 条评价</span>
+              <span>月销 {{ product.monthly_sales }}</span>
+            </div>
+
+            <div class="metrics muted-row">
+              <span v-if="product.shop_rating">店铺 {{ formatRating(product.shop_rating) }}</span>
+              <span v-if="product.shop_shipping_city">{{ product.shop_shipping_city }} 发货</span>
+              <span>{{ formatShipHours(product.ship_in_hours) }}</span>
+            </div>
+
+            <div v-if="product.tags?.length" class="tags">
+              <Badge v-for="tag in product.tags.slice(0, 4)" :key="tag" variant="warn">{{ tag }}</Badge>
+            </div>
+
+            <div class="price-row">
+              <div class="price-stack">
+                <strong>¥ {{ product.price.toFixed(2) }}</strong>
+                <span v-if="product.original_price && product.original_price > product.price">¥ {{ product.original_price.toFixed(2) }}</span>
+              </div>
+              <Badge :variant="product.stock > 0 ? 'success' : 'danger'">
+                {{ product.stock > 0 ? `库存 ${product.stock}` : '售罄' }}
+              </Badge>
+            </div>
+
+            <div class="actions">
+              <Button variant="outline" block @click="openProductDetail(product.id)">查看详情</Button>
+              <Button block :disabled="product.stock <= 0" @click="addCart(product.id)">
+                {{ product.stock <= 0 ? '暂不可购' : '加入购物车' }}
+              </Button>
+            </div>
+          </div>
+        </article>
+      </div>
+
+      <div v-if="products.length > 0" class="pager">
+        <Button variant="outline" size="sm" :disabled="page <= 1" @click="jumpPage(page - 1)">上一页</Button>
+        <div class="pager-meta">
+          <strong>{{ page }} / {{ totalPages }}</strong>
+          <span>当前结果分页</span>
+        </div>
+        <Button variant="outline" size="sm" :disabled="page >= totalPages" @click="jumpPage(page + 1)">下一页</Button>
+      </div>
+    </section>
   </section>
 </template>
 
 <style scoped>
-.page-wrap {
-  max-width: 1180px;
-  margin: 0 auto;
-  padding: 24px 18px 40px;
+.products-page {
+  display: grid;
+  gap: 18px;
 }
 
-.hero {
-  background:
-    linear-gradient(135deg, rgba(50, 39, 24, 0.95), rgba(114, 82, 38, 0.93)),
-    radial-gradient(circle at 80% 0%, rgba(255, 255, 255, 0.14), transparent 42%);
-  color: #fff6ea;
-  border-radius: 22px;
+.surface-block {
   padding: 24px;
-  box-shadow: 0 20px 40px rgba(66, 46, 18, 0.2);
+  display: grid;
+  gap: 18px;
+}
+
+.surface-head {
   display: flex;
   justify-content: space-between;
-  gap: 12px;
-  align-items: center;
-  flex-wrap: wrap;
+  gap: 16px;
+  align-items: start;
 }
 
-.hero h1 {
+.surface-title {
+  display: grid;
+  gap: 6px;
+}
+
+.surface-title h2 {
   margin: 0;
-  font-size: 30px;
+  font-size: 36px;
 }
 
-.hero-actions {
-  display: inline-flex;
+.surface-title p {
+  max-width: 640px;
+  color: var(--text-muted);
+  line-height: 1.75;
+}
+
+.result-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 8px;
 }
 
-.chat-link,
-.ghost-link {
-  border: none;
-  border-radius: 999px;
-  padding: 10px 16px;
-  font-weight: 600;
-}
-
-.chat-link {
-  background: #f6e2be;
-  color: #3f2b10;
-}
-
-.ghost-link {
-  background: rgba(255, 255, 255, 0.16);
-  color: #fffaf2;
-  border: 1px solid rgba(255, 255, 255, 0.35);
-}
-
-.toolbar {
-  margin-top: 18px;
-}
-
-.search-box {
+.search-row {
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: 10px;
-}
-
-.search-box input {
-  border: 1px solid #d8ccb5;
-  border-radius: 14px;
-  padding: 12px 14px;
-  font-size: 14px;
-  background: #fffdf7;
-}
-
-.search-box button {
-  border: none;
-  border-radius: 999px;
-  background: #2e2313;
-  color: #fff6e8;
-  padding: 0 18px;
+  gap: 12px;
 }
 
 .filter-panel {
-  margin-top: 12px;
-  background: var(--surface-strong);
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  padding: 14px;
   display: grid;
-  gap: 14px;
+  gap: 16px;
+  padding: 18px;
+  border-radius: 24px;
+  border: 1px solid rgba(106, 81, 47, 0.14);
+  background: rgba(255, 252, 247, 0.86);
 }
 
-.categories {
+.category-row {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
 
-.pill {
-  border: 1px solid #d8cab2;
-  background: #fff8eb;
-  color: #5d523f;
+.filter-pill {
+  min-height: 40px;
   border-radius: 999px;
-  padding: 8px 12px;
+  border: 1px solid rgba(107, 83, 48, 0.14);
+  padding: 0 14px;
+  background: rgba(255, 250, 243, 0.94);
+  color: #5f503f;
 }
 
-.pill.active {
-  border-color: #b6863e;
-  color: #3d2c14;
-  background: #f4dfbd;
+.filter-pill.active {
+  background: var(--brand-soft);
+  color: var(--brand-strong);
+  border-color: rgba(178, 122, 50, 0.28);
 }
 
 .filter-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
+  gap: 12px;
 }
 
-.filter-grid label {
+.filter-field {
   display: grid;
-  gap: 6px;
-  color: #5a5143;
-  font-size: 13px;
+  gap: 8px;
 }
 
-.filter-grid input,
-.filter-grid select {
-  border: 1px solid #d8ccb5;
-  border-radius: 10px;
-  padding: 10px 12px;
-  font-size: 14px;
-  background: #fffdf7;
+.filter-field span,
+.stock-check {
+  color: #5f513f;
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .stock-check {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  color: #5a5143;
-  font-size: 14px;
 }
 
 .filter-actions {
@@ -639,214 +642,154 @@ onBeforeUnmount(() => {
   gap: 10px;
 }
 
-.filter-actions button {
-  border: none;
-  border-radius: 999px;
-  padding: 10px 16px;
-}
-
-.filter-actions .apply {
-  background: #2f2413;
-  color: #fff4e6;
-}
-
-.filter-actions .reset {
-  background: #efdfc2;
-  color: #4a3a1e;
-}
-
-.result-text,
-.error {
-  margin: 14px 0;
-}
-
-.result-text {
-  color: #655c4f;
-}
-
-.error {
-  color: var(--danger);
-}
-
-.state-card {
-  background: var(--surface-strong);
-  border: 1px dashed #d9cdb7;
-  border-radius: 16px;
-  padding: 30px;
-  text-align: center;
-  color: #756a58;
-}
-
-.grid-list {
+.catalog-state {
+  min-height: 280px;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  place-items: center;
+  border-radius: 24px;
+  border: 1px dashed rgba(107, 83, 48, 0.18);
+  color: var(--text-muted);
+}
+
+.catalog-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 16px;
 }
 
-.product-card {
-  background: var(--surface-strong);
-  border: 1px solid var(--line);
-  border-radius: 16px;
+.catalog-card {
   overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  border-radius: 24px;
+  border: 1px solid rgba(106, 81, 47, 0.14);
+  background: rgba(255, 252, 247, 0.94);
+  box-shadow: 0 18px 36px rgba(46, 32, 12, 0.05);
+  display: grid;
 }
 
-.product-card:hover {
-  transform: translateY(-3px);
-  box-shadow: var(--shadow-soft);
+.catalog-card:hover {
+  transform: translateY(-2px);
 }
 
-.thumb {
+.card-media {
+  position: relative;
+  height: 220px;
+  cursor: pointer;
+}
+
+.card-media img {
   width: 100%;
-  height: 180px;
+  height: 100%;
   object-fit: cover;
 }
 
-.content {
+.media-fade {
+  position: absolute;
+  inset: auto 0 0;
+  height: 70px;
+  background: linear-gradient(180deg, transparent, rgba(26, 19, 10, 0.2));
+}
+
+.card-body {
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.card-headline,
+.tags,
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.copy-stack {
   display: grid;
   gap: 8px;
-  padding: 14px;
 }
 
-.top-meta {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  align-items: center;
-}
-
-.category {
-  color: #826d46;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.brand {
-  color: #6f5a34;
-  font-size: 12px;
-  background: #f5ead2;
-  border-radius: 999px;
-  padding: 4px 8px;
-}
-
-.content h3 {
+.copy-stack h3 {
   margin: 0;
-  color: #2b2317;
-  font-size: 18px;
+  font-size: 26px;
+  line-height: 1.05;
+  cursor: pointer;
 }
 
-.product-desc {
-  margin: 0;
-  color: #6c6357;
+.copy-stack p,
+.metrics {
+  color: var(--text-muted);
+  line-height: 1.7;
   font-size: 13px;
-  line-height: 1.5;
-  min-height: 40px;
 }
 
 .shop-link {
+  justify-self: start;
   border: none;
-  background: #efe2c9;
-  color: #544427;
-  border-radius: 8px;
-  width: fit-content;
-  padding: 4px 8px;
-  font-size: 12px;
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: rgba(47, 95, 89, 0.08);
+  color: var(--accent);
+  font-weight: 700;
 }
 
-.shop-meta,
-.metric-row {
+.metrics {
   display: flex;
   justify-content: space-between;
   gap: 10px;
-  color: #746c5d;
-  font-size: 12px;
 }
 
-.tag-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+.muted-row {
+  color: #807261;
 }
 
-.tag-chip {
-  border-radius: 999px;
-  background: #f8efdf;
-  color: #5e4b2d;
-  padding: 4px 8px;
-  font-size: 12px;
-}
-
-.bottom-row {
+.price-row {
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
+  gap: 12px;
+  align-items: end;
 }
 
 .price-stack {
   display: grid;
-  gap: 2px;
+  gap: 3px;
 }
 
-.price {
-  color: #3f2b10;
-  font-weight: 700;
+.price-stack strong {
+  font-size: 28px;
+  color: #322414;
 }
 
-.original-price {
-  color: #9c8d74;
-  text-decoration: line-through;
+.price-stack span {
   font-size: 12px;
-}
-
-.stock {
-  color: #7c7466;
-  font-size: 13px;
+  color: var(--text-soft);
+  text-decoration: line-through;
 }
 
 .actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
-}
-
-.actions button {
-  border: none;
-  border-radius: 999px;
-  padding: 9px 0;
-  cursor: pointer;
-  background: #2f2413;
-  color: #fff5e8;
-}
-
-.actions button:disabled {
-  background: #b8b0a4;
-}
-
-.actions .ghost {
-  background: #efe2c9;
-  color: #4f3f26;
 }
 
 .pager {
-  margin-top: 20px;
   display: flex;
   justify-content: center;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
-.pager button {
-  border: none;
-  background: #2f2413;
-  color: #fff5e8;
-  border-radius: 999px;
-  padding: 8px 14px;
+.pager-meta {
+  min-width: 124px;
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  color: var(--text-muted);
+  font-size: 12px;
 }
 
-.pager button:disabled {
-  opacity: 0.5;
+.pager-meta strong {
+  color: var(--text);
+  font-size: 14px;
 }
 
 .expand-enter-active,
@@ -866,22 +809,24 @@ onBeforeUnmount(() => {
     grid-template-columns: 1fr;
   }
 
-  .search-box {
+  .search-row {
     grid-template-columns: 1fr;
   }
 }
 
-@media (max-width: 600px) {
-  .hero h1 {
-    font-size: 24px;
-  }
-
+@media (max-width: 760px) {
+  .surface-head,
   .actions {
-    grid-template-columns: 1fr;
+    display: grid;
   }
 
   .filter-actions {
     flex-direction: column;
+  }
+
+  .metrics,
+  .price-row {
+    flex-wrap: wrap;
   }
 }
 </style>

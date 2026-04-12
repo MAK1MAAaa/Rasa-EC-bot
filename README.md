@@ -27,7 +27,7 @@
 
 ## 2. 技术栈
 
-- 前端：Vue 3、Vite、Pinia、Vue Router、Tailwind CSS
+- 前端：Vue 3、Vite、Pinia、Vue Router、Tailwind CSS、Headless UI、`shadcn-vue` 风格本地组件层
 - 后端：FastAPI、SQLModel、SQLAlchemy Async
 - 数据库：PostgreSQL 15、pgvector
 - 缓存：Redis 7
@@ -41,6 +41,7 @@
 - 根架构说明：[design.md](design.md)
 - 后端说明：[backend/README.md](backend/README.md)
 - 前端说明：[frontend/README.md](frontend/README.md)
+  - 已补充新的设计系统、组件层、`tsconfig.json` 与构建说明
 - 客服说明：[rasa/README.md](rasa/README.md)
 - LoRA 说明：[LoRA/README.md](LoRA/README.md)
 
