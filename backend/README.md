@@ -4,8 +4,9 @@
 
 ## 1. 主要能力
 - 用户：注册登录、商品查询、购物车、下单、订单查询、申请退货/换货
+- 用户：商品详情页自动记录历史浏览，商品列表页可读取最近浏览商品
 - 商家：店铺读取、发货地址管理、商品管理、订单发货、售后处理
-- 客服：提供订单/物流/售后内部查询接口，并支持“自动下单/自动退款”二次确认执行
+- 客服：提供订单/物流/售后/个性化商品推荐内部接口，并支持“自动下单/自动退款”二次确认执行
 - 缓存：Redis 缓存商品筛选元数据与客服汇总数据
 
 ## 2. 运行依赖
@@ -50,6 +51,10 @@ New-Item -ItemType Directory -Force ..\database\pgdata | Out-Null
 $PGDATA_PATH = (Resolve-Path ..\database\pgdata).Path
 
 docker run --name rasa-postgres -e POSTGRES_PASSWORD=postgres -p 5432:5432 -v "${PGDATA_PATH}:/var/lib/postgresql/data" -d pgvector/pgvector:pg15
+do {
+    Start-Sleep -Seconds 1
+    docker exec rasa-postgres pg_isready -U postgres | Out-Null
+} until ($LASTEXITCODE -eq 0)
 
 docker ps --filter name=rasa-postgres
 
@@ -61,6 +66,9 @@ Linux / macOS（在 `backend` 目录执行）：
 mkdir -p ../database/pgdata
 
 docker run --name rasa-postgres -e POSTGRES_PASSWORD=postgres -p 5432:5432 -v "$(pwd)/../database/pgdata:/var/lib/postgresql/data" -d pgvector/pgvector:pg15
+until docker exec rasa-postgres pg_isready -U postgres >/dev/null 2>&1; do
+  sleep 1
+done
 
 docker ps --filter name=rasa-postgres
 
@@ -92,13 +100,13 @@ Windows PowerShell：
 
 ```powershell
 # 1) 创建/启动 Redis 容器（自动读取 .env，自动挂载持久化目录）
-powershell -ExecutionPolicy Bypass -File .\scripts\start_redis.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start_redis.ps1
 
 # 可选：强制重建容器
-# powershell -ExecutionPolicy Bypass -File .\scripts\start_redis.ps1 -Recreate
+# powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start_redis.ps1 -Recreate
 
 # 2) 初始化 Redis（健康检查 + 初始化标记）
-powershell -ExecutionPolicy Bypass -File .\scripts\init_redis.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\init_redis.ps1
 ```
 
 macOS（bash/zsh）：
@@ -154,11 +162,28 @@ docker exec -it rasa-redis redis-cli ping
 ```
 
 ## 5. 导入表结构与种子数据
+Windows PowerShell：
+
 ```powershell
-$OutputEncoding = [System.Text.Encoding]::UTF8
-Get-Content -Raw -Encoding UTF8 db/init_db.sql | docker exec -i -e PGCLIENTENCODING=UTF8 rasa-postgres psql -U postgres -d rasa_ec_bot
-Get-Content -Raw -Encoding UTF8 db/seed_data.sql | docker exec -i -e PGCLIENTENCODING=UTF8 rasa-postgres psql -U postgres -d rasa_ec_bot
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\init_postgres.ps1
 ```
+
+macOS（bash/zsh）：
+
+```bash
+chmod +x scripts/init_postgres.sh scripts/init_postgres_macos.sh
+./scripts/init_postgres_macos.sh
+```
+
+Fedora（bash）：
+
+```bash
+chmod +x scripts/init_postgres.sh scripts/init_postgres_fedora.sh
+./scripts/init_postgres_fedora.sh
+```
+
+说明：Windows PowerShell 不要使用 `Get-Content ... | docker exec -i psql ...` 导入中文 SQL。该管道会按本地代码页重编码，导致中文种子数据写入 PostgreSQL 后变成 `?`。项目提供的初始化脚本使用 `docker cp + psql -f`，会自动创建 `rasa_ec_bot` 并安全导入 `db/init_db.sql` 与 `db/seed_data.sql`。
+- `init_postgres.sh` 是 Unix 共享实现；`init_postgres_macos.sh` 与 `init_postgres_fedora.sh` 是平台入口脚本。
 
 ## 6. 启动后端
 ```bash
@@ -167,6 +192,7 @@ uv run uvicorn app.main:app --reload
 ```
 - API: `http://127.0.0.1:8000`
 - Swagger: `http://127.0.0.1:8000/docs`
+- 后端启动时会自动读取 `backend/.env`；若 `AMAP_WEB_KEY` 为空，启动日志会直接给出警告，物流地图会退回文本路线。
 
 ## 7. Redis 缓存说明
 ### 7.1 缓存接口
@@ -174,6 +200,7 @@ uv run uvicorn app.main:app --reload
 - `GET /api/v1/chat/internal/orders-summary`
 - `GET /api/v1/chat/internal/orders-logistics-summary`
 - `GET /api/v1/chat/internal/after-sales-summary`
+- `GET /api/v1/chat/internal/product-recommendations`
 
 ### 7.2 失效触发
 - 商品新增/编辑后：失效商品筛选缓存
@@ -191,7 +218,9 @@ uv run uvicorn app.main:app --reload
 - `GET /api/v1/auth/me`
 - `GET /api/v1/products`
 - `GET /api/v1/products/filters`
+- `GET /api/v1/products/history`
 - `GET /api/v1/products/{product_id}`
+- `POST /api/v1/products/{product_id}/history`
 - `GET /api/v1/cart`
 - `POST /api/v1/cart/items`
 - `PATCH /api/v1/cart/items/{item_id}`
@@ -225,6 +254,13 @@ uv run uvicorn app.main:app --reload
 - `GET /api/v1/chat/internal/orders-summary`
 - `GET /api/v1/chat/internal/orders-logistics-summary`
 - `GET /api/v1/chat/internal/after-sales-summary`
+- `GET /api/v1/chat/internal/product-recommendations`
+
+商品历史浏览与个性化推荐说明：
+- `POST /api/v1/products/{product_id}/history` 仅客户账号可调用，语义为记录一次商品浏览。
+- `GET /api/v1/products/history` 仅客户账号可调用，返回最近浏览商品列表，默认取最近 8 条。
+- 后端最多保留每个用户最近 20 个唯一商品浏览记录；重复浏览会更新 `view_count` 与 `last_viewed_at`。
+- 客服推荐统一复用后端推荐 helper：显式类目/关键词优先，历史浏览偏好加权次之，再按销量、评分、上架时间排序。
 
 ### 8.4 客服自动执行（二次确认）
 - 入口：
@@ -338,8 +374,8 @@ WHERE email IN (
 RASA_PARSE_PATH=/model/parse
 CHAT_ROUTER_ENABLE_AGENT=true
 CHAT_ROUTER_RASA_CONFIDENCE_THRESHOLD=0.72
-AGENT_OLLAMA_MODEL=qwen3.5:2b-lora
-AGENT_OLLAMA_TIMEOUT_SEC=45
+AGENT_LLM_MODEL=qwen3.5-2b-lora
+AGENT_LLM_TIMEOUT_SEC=45
 ```
 
 ### 10.4 可观测性
@@ -389,19 +425,29 @@ AMAP_TIMEOUT_MS=3000
 AMAP_QPS_LIMIT=5
 ```
 
+后端启动时会自动加载 `backend/.env`，并在日志中输出 AMap key 是否已生效的掩码信息，便于确认当前进程读到的是不是正确配置。
+
 ### 12.2 数据模型扩展
 - `logistics` 新增字段：
   - `current_lng`
   - `current_lat`
-  - `route_geo`（JSON 数组，元素结构：`name/lng/lat`）
+  - `route_geo`（对外响应仍为 `name/lng/lat`，库内原始 JSON 可额外保留 `amap_query/stage`）
 - 新增表：`geo_cache`（地址地理编码缓存）。
 
 ### 12.3 运行时行为
+- 商家发货时不再依赖本地 Ollama 生成路线，改为基于“发货地址 + 收货地址 + AMap geocode”生成内部 `route_steps[]`：
+  - `name`：站点显示名
+  - `amap_query`：用于调用高德地理编码的查询词
+  - `stage`：阶段标记（`pickup/origin_hub/destination_hub/delivery_station/sorting`）
+- 公开 API 不新增请求参数，仍返回 `route_plan` 与 `route_geo`。
 - 商家发货与物流推进时会尝试补全坐标：
   - 先查询 `geo_cache`
-  - 未命中时回退到 AMap 地理编码
+  - 未命中时优先用 `amap_query` 调用 AMap 地理编码
+  - `amap_query` 失败时回退到站点名称、去后缀名称、城市级查询词
   - 地理编码失败不会阻断发货，文本物流仍可正常工作
+- 订单详情读取时，若历史 `route_geo` 中缺少有效坐标，会基于已保存的 `shipped_from_address_id + order.address` 现场重算路线与坐标并返回，方便旧订单恢复地图展示。
 - 启动阶段包含轻量 schema 自检（`CREATE TABLE IF NOT EXISTS` + `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`）。
+- 为避免本机代理环境干扰高德请求，后端 geocode 调用会忽略系统代理变量，并把 query、状态码、`info/infocode`、是否命中坐标写入日志，方便排查“只有文本路线没有地图”的问题。
 
 ### 12.4 向后兼容
 API 路径保持不变，`logistics` 响应仅新增可选字段：
@@ -551,14 +597,14 @@ ollama create qwen3.5:2b-lora -f outputs/smoke_ec_faq_only/ollama_export/Modelfi
 
 ```bash
 cd backend
-AGENT_OLLAMA_MODEL=qwen3.5:2b uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
+AGENT_LLM_PROVIDER=ollama AGENT_LLM_BASE_URL=http://127.0.0.1:11434 AGENT_LLM_MODEL=qwen3.5:2b uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
 后端 LoRA 模型实例：
 
 ```bash
 cd backend
-AGENT_OLLAMA_MODEL=qwen3.5:2b-lora uv run uvicorn app.main:app --host 127.0.0.1 --port 8001
+AGENT_LLM_MODEL=qwen3.5-2b-lora uv run uvicorn app.main:app --host 127.0.0.1 --port 8001
 ```
 
 ### 14.4 数据集与运行命令
@@ -614,3 +660,47 @@ uv run python backend/scripts/run_system_benchmark.py \
 - 接口性能：`p95_ms`、`throughput_rps`、`success_rate`
 - 任务效果：`task_success_rate`、`quality_pass_rate`
 - 能力缺失：`unsupported_rate`
+
+## 15. Agent LoRA 推理改为 vLLM + PEFT
+
+当前推荐方案：
+- 复杂客服 Agent：`vLLM + PEFT adapter runtime`
+- 视觉与向量：继续使用 Ollama（`qwen3-vl:2b`、`mxbai-embed-large`）
+
+### 15.1 后端环境变量
+
+`backend/.env` 新增/更新：
+
+```env
+AGENT_LLM_PROVIDER=openai_compat
+AGENT_LLM_BASE_URL=http://127.0.0.1:8002/v1
+AGENT_LLM_MODEL=qwen3.5-2b-lora
+AGENT_LLM_API_KEY=EMPTY
+AGENT_LLM_TIMEOUT_SEC=45
+```
+
+兼容说明：
+- 旧字段 `AGENT_OLLAMA_MODEL`、`AGENT_OLLAMA_TIMEOUT_SEC` 仍可被读取，但仅用于平滑迁移。
+- 新部署请统一使用 `AGENT_LLM_*`。
+
+### 15.2 启动 vLLM（PEFT Runtime）
+
+```bash
+cd LoRA
+uv run --with vllm python -m vllm.entrypoints.openai.api_server \
+  --host 0.0.0.0 \
+  --port 8002 \
+  --model /mnt/d/Github/Rasa-EC-bot/LoRA/models/Qwen3.5-2B \
+  --served-model-name qwen3.5-2b-lora \
+  --enable-lora \
+  --lora-modules qwen3.5-2b-lora=/mnt/d/Github/Rasa-EC-bot/LoRA/outputs/smoke_ec_faq_only/adapter \
+  --gpu-memory-utilization 0.85 \
+  --max-model-len 32768
+```
+
+### 15.3 启动后端
+
+```bash
+cd backend
+uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
+```

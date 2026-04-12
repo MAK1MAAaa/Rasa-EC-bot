@@ -47,6 +47,7 @@ const logout = () => {
           <span v-if="cartStore.totalItems > 0" class="badge">{{ cartStore.totalItems }}</span>
         </router-link>
         <router-link :class="navClass('/orders')" to="/orders">订单</router-link>
+        <router-link :class="navClass('/history')" to="/history">历史浏览</router-link>
       </nav>
 
       <div class="header-right" v-if="authStore.isLoggedIn">

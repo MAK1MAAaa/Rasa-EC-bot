@@ -96,20 +96,40 @@ def is_complex_query(message: str) -> bool:
     return any(marker in text for marker in conditional_markers)
 
 
+def is_product_recommendation_query(message: str) -> bool:
+    text = (message or "").strip()
+    lowered = text.lower()
+    if not text:
+        return False
+    return any(keyword in text for keyword in ["推荐", "适合", "买什么", "选哪个", "看什么"]) or any(
+        keyword in lowered for keyword in ["recommend", "best for", "which one", "buy"]
+    )
+
+
 class NexAUAgentOrchestrator:
     """轻量 ReAct 风格编排器：本地工具规划 + LLM 汇总回答。"""
 
     def __init__(
         self,
         *,
-        ollama_base_url: str,
-        ollama_model: str,
-        ollama_timeout_sec: float,
+        llm_provider: str,
+        llm_base_url: str,
+        llm_model: str,
+        llm_timeout_sec: float,
+        llm_api_key: str,
         frontend_base_url: str,
     ) -> None:
-        self._ollama_base_url = ollama_base_url.rstrip("/")
-        self._ollama_model = ollama_model
-        self._ollama_timeout_sec = ollama_timeout_sec
+        normalized_provider = (llm_provider or "openai_compat").strip().lower()
+        if normalized_provider == "openai":
+            normalized_provider = "openai_compat"
+        if normalized_provider not in {"openai_compat", "ollama"}:
+            raise ValueError(f"Unsupported llm_provider: {llm_provider}")
+
+        self._llm_provider = normalized_provider
+        self._llm_base_url = llm_base_url.rstrip("/")
+        self._llm_model = llm_model.strip()
+        self._llm_timeout_sec = llm_timeout_sec
+        self._llm_api_key = llm_api_key.strip()
         self._frontend_base_url = frontend_base_url.rstrip("/")
         self._tools: dict[str, ToolDefinition] = {}
 
@@ -213,12 +233,22 @@ class NexAUAgentOrchestrator:
         has_policy_keywords = any(k in message for k in ["政策", "规则", "条款", "补差价", "保价", "退货"]) or (
             "price_protection" in domains
         )
-        has_manual_keywords = any(k in message for k in ["说明书", "报错", "故障", "安装", "使用"]) or ("product" in domains)
+        has_manual_keywords = any(k in message for k in ["说明书", "报错", "故障", "安装", "使用"])
+        has_recommendation_keywords = is_product_recommendation_query(message)
 
         if has_policy_keywords or "after_sales" in domains:
             add_step("retrieve_policy_knowledge", {"query": message or "售后政策"})
         if has_manual_keywords:
             add_step("retrieve_manual_knowledge", {"query": message or "商品说明书"})
+        if "product" in domains and has_recommendation_keywords:
+            add_step(
+                "query_product_recommendations",
+                {
+                    "query": message,
+                    "user_id": user_id if is_authenticated else "",
+                    "limit": 5,
+                },
+            )
 
         if attachments:
             for attachment_id in attachments:
@@ -262,12 +292,17 @@ class NexAUAgentOrchestrator:
             "user_message": message,
             "tool_observations": observations,
         }
+        if self._llm_provider == "openai_compat":
+            return await self._generate_with_openai_compat(system_prompt=system_prompt, user_payload=user_payload)
+        return await self._generate_with_ollama(system_prompt=system_prompt, user_payload=user_payload)
+
+    async def _generate_with_ollama(self, *, system_prompt: str, user_payload: dict[str, Any]) -> str:
         try:
-            async with httpx.AsyncClient(timeout=self._ollama_timeout_sec) as client:
+            async with httpx.AsyncClient(timeout=self._llm_timeout_sec) as client:
                 response = await client.post(
-                    f"{self._ollama_base_url}/api/chat",
+                    f"{self._llm_base_url}/api/chat",
                     json={
-                        "model": self._ollama_model,
+                        "model": self._llm_model,
                         "stream": False,
                         "options": {"temperature": 0.2},
                         "messages": [
@@ -285,6 +320,56 @@ class NexAUAgentOrchestrator:
             return ""
         return ""
 
+    async def _generate_with_openai_compat(self, *, system_prompt: str, user_payload: dict[str, Any]) -> str:
+        headers = {"Content-Type": "application/json"}
+        if self._llm_api_key:
+            headers["Authorization"] = f"Bearer {self._llm_api_key}"
+
+        endpoint = (
+            f"{self._llm_base_url}/chat/completions"
+            if self._llm_base_url.endswith("/v1")
+            else f"{self._llm_base_url}/v1/chat/completions"
+        )
+        body = {
+            "model": self._llm_model,
+            "temperature": 0.2,
+            "stream": False,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
+            ],
+        }
+        try:
+            async with httpx.AsyncClient(timeout=self._llm_timeout_sec) as client:
+                response = await client.post(endpoint, json=body, headers=headers)
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload, dict):
+                return ""
+            choices = payload.get("choices")
+            if not isinstance(choices, list) or not choices:
+                return ""
+            first_choice = choices[0]
+            if not isinstance(first_choice, dict):
+                return ""
+            message = first_choice.get("message")
+            if not isinstance(message, dict):
+                return ""
+            content = message.get("content")
+            if isinstance(content, str):
+                return content.strip()
+            if isinstance(content, list):
+                parts: list[str] = []
+                for item in content:
+                    if isinstance(item, dict):
+                        text_value = item.get("text")
+                        if isinstance(text_value, str) and text_value.strip():
+                            parts.append(text_value.strip())
+                return "\n".join(parts).strip()
+        except Exception:  # noqa: BLE001
+            return ""
+        return ""
+
     def _fallback_answer(self, *, message: str, observations: list[dict[str, Any]], domains: set[str]) -> str:
         if not observations:
             return "我已切入复杂问题处理模式，但当前缺少可执行信息。请补充订单号、具体诉求或上传图片后再试。"
@@ -294,5 +379,7 @@ class NexAUAgentOrchestrator:
 
         if any(item.get("tool") == "analyze_uploaded_image_vlm" for item in observations):
             return "我已完成图片分析并给出建议，可继续为你生成售后待确认草案。"
+        if any(item.get("tool") == "query_product_recommendations" for item in observations):
+            return "我已结合你的诉求整理出商品推荐，请查看上方商品卡片；如果你想继续缩小范围，可以告诉我预算、品牌或使用场景。"
 
         return "我已完成复杂问题查询，请查看上方结果；如果你要继续执行操作，我可以先生成待确认草案。"

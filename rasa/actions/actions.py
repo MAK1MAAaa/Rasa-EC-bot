@@ -168,26 +168,32 @@ class ActionRecommendProducts(Action):
     def run(self, dispatcher: CollectingDispatcher, tracker: Tracker, domain: dict[str, Any]) -> list[dict[str, Any]]:
         category = _safe_text(tracker.get_slot('category'))
         metadata = _latest_metadata(tracker)
+        user_text = _safe_text(tracker.latest_message.get('text'))
+        is_authenticated = bool(metadata.get('is_authenticated'))
+        user_id = _safe_text(metadata.get('user_id'))
         frontend_base_url = _safe_text(metadata.get('frontend_base_url')) or FRONTEND_BASE_URL
         frontend_base_url = frontend_base_url.rstrip('/')
 
         params: dict[str, Any] = {
-            'page': 1,
-            'page_size': 5,
-            'sort_by': 'sales_desc',
-            'in_stock': True,
+            'limit': 5,
+            'query': user_text,
         }
         if category:
             params['category'] = category
+        if is_authenticated and user_id:
+            params['user_id'] = user_id
 
         try:
             response = requests.get(
-                f"{BACKEND_API_URL.rstrip('/')}/products",
+                f"{BACKEND_API_URL.rstrip('/')}/chat/internal/product-recommendations",
                 params=params,
+                headers=_build_headers(),
                 timeout=ACTION_HTTP_TIMEOUT_SEC,
             )
             response.raise_for_status()
-            items = response.json().get('items', [])
+            payload = response.json()
+            items = payload.get('items', [])
+            personalized = bool(payload.get('personalized'))
         except requests.RequestException:
             dispatcher.utter_message(text='暂时无法读取商品数据，请稍后重试。')
             return []
@@ -226,8 +232,12 @@ class ActionRecommendProducts(Action):
             )
 
         prefix = '给你推荐这几款商品：'
+        if personalized:
+            prefix = '结合你最近浏览的商品，为你推荐这几款：'
         if category:
             prefix = f'给你推荐几款 {category} 商品：'
+            if personalized:
+                prefix = f'结合你最近浏览的偏好，为你推荐几款 {category} 商品：'
         dispatcher.utter_message(text=prefix, json_message={'cards': cards})
         return []
 

@@ -160,6 +160,10 @@ const logisticsRouteGeo = computed<RouteGeoPoint[]>(() => {
 
 const hasMapCoordinates = computed(() => logisticsRouteGeo.value.length > 0)
 
+const logisticsRouteGeoSignature = computed(() =>
+  logisticsRouteGeo.value.map((item) => `${item.name}:${item.lng}:${item.lat}`).join('|')
+)
+
 const currentMapCenter = computed<[number, number] | null>(() => {
   const lng = Number(order.value?.logistics?.current_lng)
   const lat = Number(order.value?.logistics?.current_lat)
@@ -169,22 +173,54 @@ const currentMapCenter = computed<[number, number] | null>(() => {
   return [last.lng, last.lat]
 })
 
+const currentRouteGeoPoint = computed<RouteGeoPoint | null>(() => {
+  const currentLocation = (order.value?.logistics?.current_location || '').trim()
+  const matchedPoint = logisticsRouteGeo.value.find((item) => item.name === currentLocation)
+  if (matchedPoint) return matchedPoint
+  const center = currentMapCenter.value
+  if (!center) return null
+  return {
+    name: currentLocation || '当前位置',
+    lng: center[0],
+    lat: center[1]
+  }
+})
+
+const mapOverlayMessage = computed(() => {
+  if (mapError.value) return mapError.value
+  if (!hasMapCoordinates.value) return '暂无可用坐标，已使用文本轨迹展示。'
+  return ''
+})
+
+const destroyLogisticsMap = () => {
+  if (amapInstance) {
+    amapInstance.destroy()
+    amapInstance = null
+  }
+}
+
+const createMapMarker = (AMap: any, position: [number, number], title: string, label: string) =>
+  new AMap.Marker({
+    position,
+    title,
+    label: {
+      content: label,
+      direction: 'top'
+    }
+  })
+
 const renderLogisticsMap = async () => {
-  if (!mapEnabled || !mapContainerRef.value) return
+  if (!mapEnabled) return
+  await nextTick()
+  if (!mapContainerRef.value) return
   if (!order.value?.logistics) {
     mapError.value = ''
-    if (amapInstance) {
-      amapInstance.destroy()
-      amapInstance = null
-    }
+    destroyLogisticsMap()
     return
   }
   if (!hasMapCoordinates.value) {
     mapError.value = ''
-    if (amapInstance) {
-      amapInstance.destroy()
-      amapInstance = null
-    }
+    destroyLogisticsMap()
     return
   }
   mapLoading.value = true
@@ -192,10 +228,12 @@ const renderLogisticsMap = async () => {
   try {
     const AMap = await loadAmap()
     await nextTick()
-    if (!mapContainerRef.value) return
+    const mapContainer = mapContainerRef.value
+    if (!mapContainer) return
 
-    if (!amapInstance) {
-      amapInstance = new AMap.Map(mapContainerRef.value, {
+    if (!amapInstance || amapInstance.getContainer?.() !== mapContainer) {
+      destroyLogisticsMap()
+      amapInstance = new AMap.Map(mapContainer, {
         zoom: 5,
         resizeEnable: true
       })
@@ -216,23 +254,37 @@ const renderLogisticsMap = async () => {
       overlays.push(polyline)
     }
 
-    const currentCenter = currentMapCenter.value
-    if (currentCenter) {
-      const marker = new AMap.Marker({
-        position: currentCenter,
-        title: order.value.logistics.current_location || 'Current Location'
-      })
-      overlays.push(marker)
+    const firstPoint = logisticsRouteGeo.value[0]
+    if (firstPoint) {
+      overlays.push(createMapMarker(AMap, [firstPoint.lng, firstPoint.lat], firstPoint.name, '起点'))
+    }
+
+    const lastPoint = logisticsRouteGeo.value[logisticsRouteGeo.value.length - 1]
+    if (lastPoint) {
+      overlays.push(createMapMarker(AMap, [lastPoint.lng, lastPoint.lat], lastPoint.name, '终点'))
+    }
+
+    const currentPoint = currentRouteGeoPoint.value
+    if (currentPoint) {
+      overlays.push(
+        createMapMarker(
+          AMap,
+          [currentPoint.lng, currentPoint.lat],
+          order.value.logistics.current_location || currentPoint.name,
+          '当前位置'
+        )
+      )
     }
 
     if (overlays.length > 0) {
       amapInstance.add(overlays)
-      amapInstance.setFitView(overlays, false, [40, 40, 40, 40], 12)
-    } else if (currentCenter) {
-      amapInstance.setCenter(currentCenter)
+      amapInstance.setFitView(overlays, false, [32, 32, 32, 32], 12)
+    } else if (currentMapCenter.value) {
+      amapInstance.setCenter(currentMapCenter.value)
       amapInstance.setZoom(9)
     }
   } catch {
+    destroyLogisticsMap()
     mapError.value = '地图加载失败，已自动降级为文本轨迹。'
   } finally {
     mapLoading.value = false
@@ -373,7 +425,7 @@ watch(
     order.value?.logistics?.updated_at,
     order.value?.logistics?.current_lng,
     order.value?.logistics?.current_lat,
-    logisticsRouteGeo.value.length
+    logisticsRouteGeoSignature.value
   ],
   () => {
     if (!mapEnabled) return
@@ -398,10 +450,7 @@ onBeforeUnmount(() => {
     clearTimeout(realtimeRefreshTimer)
     realtimeRefreshTimer = null
   }
-  if (amapInstance) {
-    amapInstance.destroy()
-    amapInstance = null
-  }
+  destroyLogisticsMap()
   realtimeClient?.close()
   realtimeClient = null
 })
@@ -464,11 +513,22 @@ onBeforeUnmount(() => {
               <span v-if="logisticsRouteNodes.length === 0" class="muted-small">暂无路线信息</span>
             </div>
             <div v-if="mapEnabled" class="map-card">
-              <p class="map-title">地图预览</p>
-              <div v-if="mapLoading" class="map-skeleton"></div>
-              <p v-else-if="mapError" class="muted-small">{{ mapError }}</p>
-              <div v-else-if="hasMapCoordinates" ref="mapContainerRef" class="map-container"></div>
-              <p v-else class="muted-small">暂无可用坐标，已使用文本轨迹展示。</p>
+              <div class="map-headline">
+                <p class="map-title">地图预览</p>
+                <span class="map-badge">{{ hasMapCoordinates ? `${logisticsRouteGeo.length} 个站点` : '文本降级' }}</span>
+              </div>
+              <div class="map-stage">
+                <div
+                  ref="mapContainerRef"
+                  class="map-container"
+                  :class="{ 'is-muted': mapLoading || !!mapOverlayMessage }"
+                ></div>
+                <div v-if="mapLoading || !!mapOverlayMessage" class="map-overlay">
+                  <div v-if="mapLoading" class="map-skeleton"></div>
+                  <p v-else class="muted-small">{{ mapOverlayMessage }}</p>
+                </div>
+              </div>
+              <p class="muted-small">文本轨迹始终保留，地图异常时自动降级。</p>
             </div>
           </template>
           <p v-else class="muted-small">订单暂未发货，暂无物流轨迹</p>
@@ -656,15 +716,49 @@ onBeforeUnmount(() => {
   color: #5b4f3a;
 }
 
+.map-headline {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.map-badge {
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: #315f58;
+  background: #e7f6f2;
+}
+
+.map-stage {
+  position: relative;
+}
+
 .map-container {
   width: 100%;
   height: 230px;
   border-radius: 10px;
   overflow: hidden;
   border: 1px solid #e6d9bf;
+  background: linear-gradient(180deg, #fffaf0 0%, #f6eee0 100%);
+}
+
+.map-container.is-muted {
+  opacity: 0.22;
+  filter: saturate(0.4);
+}
+
+.map-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 14px;
 }
 
 .map-skeleton {
+  width: 100%;
   height: 230px;
   border-radius: 10px;
   background: linear-gradient(90deg, #f6ede0 25%, #fff8eb 45%, #f6ede0 65%);

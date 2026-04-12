@@ -149,6 +149,7 @@ let realtimeRefreshTimer: ReturnType<typeof setTimeout> | null = null
 const productForm = reactive({
   name: '',
   category: '',
+  sku_code: '',
   brand: '',
   model: '',
   price: 0,
@@ -427,6 +428,7 @@ const createProduct = async () => {
     await api.post('/merchant/products', {
       name: productForm.name,
       category: productForm.category || null,
+      sku_code: productForm.sku_code || null,
       brand: productForm.brand || null,
       model: productForm.model || null,
       price: Number(productForm.price),
@@ -446,6 +448,7 @@ const createProduct = async () => {
     success.value = '商品已上架'
     productForm.name = ''
     productForm.category = ''
+    productForm.sku_code = ''
     productForm.brand = ''
     productForm.model = ''
     productForm.price = 0
@@ -836,7 +839,7 @@ onBeforeUnmount(() => {
         </article>
       </section>
 
-      <section v-if="activeTab === 'products'" class="panel">
+      <section v-if="activeTab === 'products'" class="panel merchant-editor-panel">
         <div class="panel-head">
           <h2>店铺资料</h2>
           <div class="score-tags" v-if="shop">
@@ -860,37 +863,201 @@ onBeforeUnmount(() => {
             <p class="muted">服务标签</p>
           </article>
         </div>
-        <form class="grid-form" @submit.prevent="saveShopProfile">
-          <input v-model="shopForm.logo_url" placeholder="店铺 Logo URL">
-          <input v-model="shopForm.contact_email" placeholder="联系邮箱">
-          <input v-model="shopForm.contact_phone" placeholder="联系电话">
-          <input v-model="shopForm.shipping_city" placeholder="发货城市">
-          <textarea v-model="shopForm.description" rows="2" placeholder="店铺简介"></textarea>
-          <textarea v-model="shopForm.featured_categories" rows="2" placeholder="主营类目，用逗号或换行分隔"></textarea>
-          <textarea v-model="shopForm.service_tags" rows="2" placeholder="服务标签，用逗号或换行分隔"></textarea>
-          <button :disabled="actionLoading" type="submit">保存店铺资料</button>
-        </form>
-        <h2>上架商品</h2>
-        <p class="muted">标签、核心参数、主营类目和服务标签支持用中英文逗号或换行提交多值。</p>
-        <form class="grid-form" @submit.prevent="createProduct">
-          <textarea v-model="productForm.tags" rows="2" placeholder="标签，用逗号或换行分隔"></textarea>
-          <textarea v-model="productForm.spec_highlights" rows="2" placeholder="核心参数，用逗号或换行分隔"></textarea>
-          <input v-model="productForm.brand" placeholder="品牌">
-          <input v-model="productForm.model" placeholder="型号">
-          <input v-model.number="productForm.original_price" min="0" step="0.01" type="number" placeholder="原价">
-          <input v-model.number="productForm.rating" min="0" max="5" step="0.1" type="number" placeholder="评分">
-          <input v-model.number="productForm.review_count" min="0" step="1" type="number" placeholder="评价数">
-          <input v-model.number="productForm.monthly_sales" min="0" step="1" type="number" placeholder="月销量">
-          <input v-model.number="productForm.ship_in_hours" min="0" step="1" type="number" placeholder="发货时效(小时)">
-          <input v-model.number="productForm.warranty_days" min="0" step="1" type="number" placeholder="保修天数">
-          <input v-model="productForm.name" required placeholder="商品名称">
-          <input v-model="productForm.category" placeholder="分类">
-          <input v-model.number="productForm.price" min="0" step="0.01" type="number" required placeholder="价格">
-          <input v-model.number="productForm.stock" min="0" step="1" type="number" required placeholder="库存">
-          <input v-model="productForm.image_url" placeholder="图片 URL">
-          <textarea v-model="productForm.description" rows="2" placeholder="商品描述"></textarea>
-          <button :disabled="actionLoading" type="submit">上架</button>
-        </form>
+        <article class="editor-card">
+          <div class="editor-intro">
+            <div>
+              <h3>店铺资料编辑</h3>
+              <p class="muted">核心信息直接展示给买家，高级信息折叠收起，减少误填。</p>
+            </div>
+            <span class="editor-tip">多值字段支持中文逗号 / 英文逗号 / 换行</span>
+          </div>
+          <form class="merchant-editor-form" @submit.prevent="saveShopProfile">
+            <section class="form-block">
+              <div class="block-head">
+                <h4>核心信息</h4>
+                <p>用于店铺页展示、商品详情页展示和物流预期提示。</p>
+              </div>
+              <div class="form-grid">
+                <label class="field-card">
+                  <span class="field-label">联系邮箱</span>
+                  <span class="field-help">售后、订单异常或客服回访时使用，例如 `support@example.com`。</span>
+                  <input v-model="shopForm.contact_email" type="email" placeholder="support@example.com">
+                </label>
+                <label class="field-card">
+                  <span class="field-label">联系电话</span>
+                  <span class="field-help">建议填写买家可联系到的店铺电话，例如 `400-800-1234`。</span>
+                  <input v-model="shopForm.contact_phone" placeholder="400-800-1234">
+                </label>
+                <label class="field-card">
+                  <span class="field-label">发货城市</span>
+                  <span class="field-help">会在商品列表和详情页直接展示，例如 `杭州`、`深圳`。</span>
+                  <input v-model="shopForm.shipping_city" placeholder="杭州">
+                </label>
+                <label class="field-card field-card-wide">
+                  <span class="field-label">店铺简介</span>
+                  <span class="field-help">一句话说明主营方向、服务承诺或品牌定位，建议 20-80 字。</span>
+                  <textarea
+                    v-model="shopForm.description"
+                    rows="3"
+                    placeholder="例如：专注办公数码与企业采购，支持正规发票与次日出库。"
+                  ></textarea>
+                </label>
+              </div>
+            </section>
+
+            <details class="advanced-panel">
+              <summary>高级店铺信息</summary>
+              <div class="advanced-body">
+                <div class="form-grid">
+                  <label class="field-card">
+                    <span class="field-label">店铺 Logo URL</span>
+                    <span class="field-help">可选，用于品牌识别与视觉展示。</span>
+                    <input v-model="shopForm.logo_url" placeholder="https://example.com/logo.png">
+                  </label>
+                  <label class="field-card field-card-wide">
+                    <span class="field-label">主营类目</span>
+                    <span class="field-help">支持中文逗号、英文逗号或换行分隔。</span>
+                    <span class="field-example">示例：显示器，办公电脑，键鼠套装</span>
+                    <textarea v-model="shopForm.featured_categories" rows="3" placeholder="显示器，办公电脑，键鼠套装"></textarea>
+                  </label>
+                  <label class="field-card field-card-wide">
+                    <span class="field-label">服务标签</span>
+                    <span class="field-help">建议填写买家最关心的履约承诺与服务能力。</span>
+                    <span class="field-example">示例：次日达，官方质保，企业采购，7 天无理由</span>
+                    <textarea v-model="shopForm.service_tags" rows="3" placeholder="次日达，官方质保，企业采购"></textarea>
+                  </label>
+                </div>
+              </div>
+            </details>
+
+            <div class="form-actions">
+              <button :disabled="actionLoading" type="submit">保存店铺资料</button>
+            </div>
+          </form>
+        </article>
+
+        <article class="editor-card">
+          <div class="editor-intro">
+            <div>
+              <h3>商品录入</h3>
+              <p class="muted">先录入影响上架与履约的核心字段，高级字段按需补充，用于比较展示与推荐。</p>
+            </div>
+            <span class="editor-tip">SKU、本地库存与发货时效建议优先维护</span>
+          </div>
+          <form class="merchant-editor-form" @submit.prevent="createProduct">
+            <section class="form-block">
+              <div class="block-head">
+                <h4>核心字段</h4>
+                <p>这些信息直接决定商品是否易于识别、下单与履约。</p>
+              </div>
+              <div class="form-grid">
+                <label class="field-card">
+                  <span class="field-label">商品名称</span>
+                  <span class="field-help">建议包含品类、系列或关键规格，例如 `27 英寸 4K 办公显示器`。</span>
+                  <input v-model="productForm.name" required placeholder="27 英寸 4K 办公显示器">
+                </label>
+                <label class="field-card">
+                  <span class="field-label">分类</span>
+                  <span class="field-help">用于商品筛选与归类，例如 `显示器`、`笔记本电脑`。</span>
+                  <input v-model="productForm.category" placeholder="显示器">
+                </label>
+                <label class="field-card">
+                  <span class="field-label">SKU 编码</span>
+                  <span class="field-help">便于内部管理与检索，支持字母、数字和短横线。</span>
+                  <input v-model="productForm.sku_code" placeholder="OFFICE-27-4K-001">
+                </label>
+                <label class="field-card">
+                  <span class="field-label">售价</span>
+                  <span class="field-help">买家实际下单价格。</span>
+                  <input v-model.number="productForm.price" min="0" step="0.01" type="number" required placeholder="1999">
+                </label>
+                <label class="field-card">
+                  <span class="field-label">库存</span>
+                  <span class="field-help">当前可售库存，缺货时会直接影响购买按钮状态。</span>
+                  <input v-model.number="productForm.stock" min="0" step="1" type="number" required placeholder="120">
+                </label>
+                <label class="field-card">
+                  <span class="field-label">发货时效（小时）</span>
+                  <span class="field-help">例如 `24` 表示 24 小时内发货，`0` 表示即时发货。</span>
+                  <input v-model.number="productForm.ship_in_hours" min="0" step="1" type="number" placeholder="24">
+                </label>
+                <label class="field-card field-card-wide">
+                  <span class="field-label">图片 URL</span>
+                  <span class="field-help">建议使用稳定可访问的主图地址。</span>
+                  <input v-model="productForm.image_url" placeholder="https://example.com/product-cover.jpg">
+                </label>
+                <label class="field-card field-card-wide">
+                  <span class="field-label">商品描述</span>
+                  <span class="field-help">一句话说明定位、适用场景或核心卖点，建议 30-120 字。</span>
+                  <textarea
+                    v-model="productForm.description"
+                    rows="3"
+                    placeholder="例如：面向日常办公与轻度设计，支持 Type-C 一线连接与低蓝光护眼。"
+                  ></textarea>
+                </label>
+              </div>
+            </section>
+
+            <details class="advanced-panel">
+              <summary>高级商品信息</summary>
+              <div class="advanced-body">
+                <div class="form-grid">
+                  <label class="field-card">
+                    <span class="field-label">品牌</span>
+                    <span class="field-help">用于商品比较与品牌筛选。</span>
+                    <input v-model="productForm.brand" placeholder="Acer">
+                  </label>
+                  <label class="field-card">
+                    <span class="field-label">型号</span>
+                    <span class="field-help">建议填写官方型号，便于买家对比。</span>
+                    <input v-model="productForm.model" placeholder="VG270K">
+                  </label>
+                  <label class="field-card">
+                    <span class="field-label">原价</span>
+                    <span class="field-help">用于展示优惠力度，可留空。</span>
+                    <input v-model.number="productForm.original_price" min="0" step="0.01" type="number" placeholder="2399">
+                  </label>
+                  <label class="field-card">
+                    <span class="field-label">评分</span>
+                    <span class="field-help">范围 0-5，例如 `4.7`。</span>
+                    <input v-model.number="productForm.rating" min="0" max="5" step="0.1" type="number" placeholder="4.7">
+                  </label>
+                  <label class="field-card">
+                    <span class="field-label">评价数</span>
+                    <span class="field-help">已有评价条数，用于口碑展示。</span>
+                    <input v-model.number="productForm.review_count" min="0" step="1" type="number" placeholder="385">
+                  </label>
+                  <label class="field-card">
+                    <span class="field-label">月销量</span>
+                    <span class="field-help">用于销量排序与推荐展示。</span>
+                    <input v-model.number="productForm.monthly_sales" min="0" step="1" type="number" placeholder="268">
+                  </label>
+                  <label class="field-card">
+                    <span class="field-label">保修天数</span>
+                    <span class="field-help">例如 `365` 表示一年保修。</span>
+                    <input v-model.number="productForm.warranty_days" min="0" step="1" type="number" placeholder="365">
+                  </label>
+                  <label class="field-card field-card-wide">
+                    <span class="field-label">标签</span>
+                    <span class="field-help">支持中文逗号、英文逗号或换行分隔。</span>
+                    <span class="field-example">示例：低蓝光，Type-C，升降支架，办公推荐</span>
+                    <textarea v-model="productForm.tags" rows="3" placeholder="低蓝光，Type-C，升降支架"></textarea>
+                  </label>
+                  <label class="field-card field-card-wide">
+                    <span class="field-label">核心参数</span>
+                    <span class="field-help">建议拆成 3-6 个短条目，方便详情页展示。</span>
+                    <span class="field-example">示例：27 英寸 4K，IPS 面板，65W 反向供电</span>
+                    <textarea v-model="productForm.spec_highlights" rows="3" placeholder="27 英寸 4K，IPS 面板，65W 反向供电"></textarea>
+                  </label>
+                </div>
+              </div>
+            </details>
+
+            <div class="form-actions">
+              <button :disabled="actionLoading" type="submit">上架商品</button>
+            </div>
+          </form>
+        </article>
 
         <h3>商品列表</h3>
         <div class="table-list">
@@ -1039,6 +1206,127 @@ onBeforeUnmount(() => {
   line-height: 1.5;
 }
 
+.merchant-editor-panel {
+  gap: 14px;
+}
+
+.editor-card {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px;
+  background: #fffdf7;
+  display: grid;
+  gap: 14px;
+}
+
+.editor-intro {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.editor-intro h3 {
+  margin: 0 0 4px;
+  color: #312819;
+}
+
+.editor-tip {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #f5ecda;
+  color: #6b5128;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.merchant-editor-form {
+  display: grid;
+  gap: 12px;
+}
+
+.form-block {
+  display: grid;
+  gap: 10px;
+}
+
+.block-head h4 {
+  margin: 0 0 4px;
+  color: #3f3017;
+}
+
+.block-head p {
+  margin: 0;
+  color: #6f6657;
+  font-size: 13px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.field-card {
+  border: 1px solid #eadbc1;
+  border-radius: 12px;
+  padding: 12px;
+  background: linear-gradient(180deg, #fffdf8 0%, #fff8eb 100%);
+  display: grid;
+  gap: 8px;
+}
+
+.field-card-wide {
+  grid-column: 1 / -1;
+}
+
+.field-label {
+  color: #41331b;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.field-help,
+.field-example {
+  color: #6f6657;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.field-example {
+  color: #87602b;
+}
+
+.advanced-panel {
+  border: 1px solid #e5d8bf;
+  border-radius: 12px;
+  background: #fff8ed;
+  overflow: hidden;
+}
+
+.advanced-panel summary {
+  cursor: pointer;
+  list-style: none;
+  background: #fcf2df;
+  color: #4d3a18;
+  font-weight: 700;
+}
+
+.advanced-panel summary::-webkit-details-marker {
+  display: none;
+}
+
+.advanced-body {
+  padding: 12px;
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .filter-row {
   display: flex;
   gap: 8px;
@@ -1049,6 +1337,10 @@ onBeforeUnmount(() => {
 .ship-row select,
 .ship-row button,
 .action-row button,
+.merchant-editor-form input,
+.merchant-editor-form textarea,
+.merchant-editor-form button,
+.advanced-panel summary,
 .grid-form input,
 .grid-form textarea,
 .grid-form button {
@@ -1061,6 +1353,7 @@ onBeforeUnmount(() => {
 .filter-row button,
 .ship-row button,
 .action-row button,
+.merchant-editor-form button,
 .grid-form button,
 .product-row button,
 .address-row button {
@@ -1340,10 +1633,12 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 860px) {
+  .form-grid,
   .grid-form {
     grid-template-columns: 1fr;
   }
 
+  .editor-intro,
   .shop-meta,
   .ship-row,
   .product-row,
@@ -1351,6 +1646,10 @@ onBeforeUnmount(() => {
   .panel-head {
     grid-template-columns: 1fr;
     display: grid;
+  }
+
+  .editor-tip {
+    white-space: normal;
   }
 }
 </style>

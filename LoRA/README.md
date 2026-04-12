@@ -65,7 +65,7 @@ uv sync
 `LoRA/.env` 里确认：
 
 ```env
-BASE_MODEL_PATH=d:/Github/Rasa-EC-bot/LoRA/models/Qwen3.5-2B
+BASE_MODEL_PATH=/mnt/d/Github/Rasa-EC-bot/LoRA/models/Qwen3.5-2B
 ```
 
 ## 4. 数据准备
@@ -176,6 +176,7 @@ uv run python scripts/eval_lora.py `
 ## 9. 导出为 Ollama 模型（用于系统形态 Benchmark）
 
 为了让 LoRA 微调后的模型参与接口级 benchmark，需要先把 adapter 注册为 Ollama 模型。
+这一节主要面向 benchmark 或兼容旧链路；当前默认推荐的复杂 Agent 推理方式见第 10 节的 `vLLM + PEFT Runtime`。
 
 新增脚本：`scripts/export_ollama_model.py`
 
@@ -216,3 +217,53 @@ uv run python scripts/export_ollama_model.py `
 
 - `--base-model` 必须是本机 `ollama list` 中已经存在的基础模型名。
 - benchmark 脚本只消费已经能被 `ollama /api/chat` 调用的模型，不负责训练。
+
+## 10. LoRA 推理改为 vLLM + PEFT Runtime（替代 Ollama ADAPTER）
+
+Qwen 系列 LoRA 在 Ollama `ADAPTER` 路径上兼容性有限，推荐直接使用支持 PEFT runtime 的 vLLM。
+
+### 10.1 启动 vLLM（base + adapter）
+
+```bash
+cd /mnt/d/Github/Rasa-EC-bot/LoRA
+
+uv run --with vllm python -m vllm.entrypoints.openai.api_server \
+  --host 0.0.0.0 \
+  --port 8002 \
+  --model /mnt/d/Github/Rasa-EC-bot/LoRA/models/Qwen3.5-2B \
+  --served-model-name qwen3.5-2b-lora \
+  --enable-lora \
+  --lora-modules qwen3.5-2b-lora=/mnt/d/Github/Rasa-EC-bot/LoRA/outputs/smoke_ec_faq_only/adapter \
+  --gpu-memory-utilization 0.85 \
+  --max-model-len 32768
+```
+
+WSL 路径注意：
+- 盘符挂载路径使用 `/mnt/d/...`。
+- 不要写成 `/home/mnt/d/...`，该路径不存在。
+
+### 10.2 健康检查（OpenAI 兼容接口）
+
+```powershell
+curl http://127.0.0.1:8002/v1/models
+```
+
+若出现显存不足（例如 `desired GPU memory utilization (0.9)`）：
+- 进一步下调 `--gpu-memory-utilization`（如 `0.8`）。
+- 进一步下调 `--max-model-len`（如 `16384`）。
+
+### 10.3 后端接入参数
+
+在 `backend/.env` 中配置：
+
+```env
+AGENT_LLM_PROVIDER=openai_compat
+AGENT_LLM_BASE_URL=http://127.0.0.1:8002/v1
+AGENT_LLM_MODEL=qwen3.5-2b-lora
+AGENT_LLM_API_KEY=EMPTY
+AGENT_LLM_TIMEOUT_SEC=45
+```
+
+说明：
+- `qwen3-vl:2b` 不挂载该 LoRA，继续独立运行。
+- 如仅做 LoRA 服务对比测试，也可保留原有 Ollama 基础模型链路用于对照。

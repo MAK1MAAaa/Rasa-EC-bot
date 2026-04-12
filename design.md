@@ -45,10 +45,11 @@ Rasa-EC-bot 当前的目标不是单一聊天机器人，而是一个可运行�
 
 ### 2.4 模型服务层
 
-- 默认运行方式：Ollama
+- 当前运行方式：Ollama + OpenAI-compatible / vLLM
 - 当前口径：
   - 基础聊天模型：`qwen3.5:2b`
-  - Agent 默认模型：`qwen3.5:2b-lora`
+  - Rasa Action fallback：通过 Ollama 调用 `qwen3.5:2b`
+  - Agent 默认模型：通过 OpenAI-compatible / vLLM 调用 `qwen3.5-2b-lora`
   - 多模态模型：`qwen3-vl:2b`
   - 向量模型：`mxbai-embed-large`
 - 职责：
@@ -89,7 +90,6 @@ Rasa-EC-bot/
 │  └─ data/                    NLU 与规则数据
 ├─ LoRA/                       LoRA 数据处理、训练、评估、导出脚本
 ├─ tests/                      benchmark 评分规则测试
-├─ requirement.md              需求说明
 └─ design.md                   当前架构设计说明
 ```
 
@@ -102,15 +102,18 @@ graph TD
     B --> D[(PostgreSQL)]
     B --> E[(Redis)]
     B --> F[Ollama]
+    B --> L[vLLM / OpenAI Compatible]
     B --> G[Action Server]
     G --> B
     C --> G
     B --> H[(pgvector)]
     B --> I[上传图片目录]
     J[LoRA 导出脚本] --> F
+    M[LoRA Adapter] --> L
     K[System Benchmark] --> B
     K --> C
     K --> F
+    K --> L
 ```
 
 说明：
@@ -118,7 +121,8 @@ graph TD
 - 前端的电商业务请求主要进入 FastAPI。
 - Rasa Server 负责规则型客服链路。
 - Action Server 不直接访问数据库，而是优先通过后端内部接口取业务摘要。
-- Ollama 既服务基础模型，也服务 LoRA 模型、多模态模型与 embedding 模型。
+- Ollama 负责基础聊天、多模态与 embedding 模型。
+- 复杂 Agent 默认通过 OpenAI-compatible / vLLM 加载 LoRA adapter。
 - benchmark 只通过 HTTP 接口访问系统，不直接调用内部函数。
 
 ## 5. 关键业务链路
@@ -362,4 +366,3 @@ LoRA 目录负责：
 - 将图片与知识库检索进一步统一到单一 Agent 工具协议
 - 把 benchmark 结果自动转换为论文图表
 - 把配置拆成开发、论文实验、演示三套 profile
-

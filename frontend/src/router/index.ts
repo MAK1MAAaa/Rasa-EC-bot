@@ -7,6 +7,7 @@ import Cart from '@/views/Cart.vue'
 import Checkout from '@/views/Checkout.vue'
 import OrderList from '@/views/OrderList.vue'
 import OrderDetail from '@/views/OrderDetail.vue'
+import History from '@/views/History.vue'
 import ChatSupport from '@/views/ChatSupport.vue'
 import MerchantCenter from '@/views/MerchantCenter.vue'
 
@@ -58,6 +59,12 @@ const router = createRouter({
       path: '/orders',
       name: 'OrderList',
       component: OrderList,
+      meta: { requiresAuth: true, customerOnly: true }
+    },
+    {
+      path: '/history',
+      name: 'History',
+      component: History,
       meta: { requiresAuth: true, customerOnly: true }
     },
     {

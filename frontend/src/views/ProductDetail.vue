@@ -1,5 +1,5 @@
 ﻿<script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import api from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
@@ -48,6 +48,7 @@ const loading = ref(false)
 const error = ref('')
 const product = ref<Product | null>(null)
 const quantity = ref(1)
+const historyTrackedProductId = ref('')
 let realtimeClient: ReturnType<typeof createRealtimeClient> | null = null
 let realtimeRefreshTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -85,6 +86,22 @@ const loadProduct = async () => {
     error.value = '商品不存在或已下架'
   } finally {
     loading.value = false
+  }
+}
+
+const recordProductViewHistory = async () => {
+  if (!authStore.isCustomer || !authStore.user?.id || !product.value) {
+    return
+  }
+  if (historyTrackedProductId.value === product.value.id) {
+    return
+  }
+
+  try {
+    await api.post(`/products/${product.value.id}/history`)
+    historyTrackedProductId.value = product.value.id
+  } catch {
+    // 历史浏览记录失败不影响详情页主流程
   }
 }
 
@@ -159,6 +176,7 @@ onMounted(async () => {
     token: authStore.token,
     onEvent: handleRealtimeEvent
   })
+  await recordProductViewHistory()
 })
 
 onBeforeUnmount(() => {
@@ -169,6 +187,23 @@ onBeforeUnmount(() => {
   realtimeClient?.close()
   realtimeClient = null
 })
+
+watch(
+  () => authStore.user?.id,
+  async () => {
+    await recordProductViewHistory()
+  }
+)
+
+watch(
+  () => route.params.id,
+  async (nextId, previousId) => {
+    if (nextId === previousId) return
+    historyTrackedProductId.value = ''
+    await loadProduct()
+    await recordProductViewHistory()
+  }
+)
 </script>
 
 <template>

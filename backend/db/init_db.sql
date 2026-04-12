@@ -10,6 +10,7 @@ DROP TABLE IF EXISTS after_sales CASCADE;
 DROP TABLE IF EXISTS logistics CASCADE;
 DROP TABLE IF EXISTS order_items CASCADE;
 DROP TABLE IF EXISTS cart_items CASCADE;
+DROP TABLE IF EXISTS product_view_history CASCADE;
 DROP TABLE IF EXISTS orders CASCADE;
 DROP TABLE IF EXISTS products CASCADE;
 DROP TABLE IF EXISTS shop_addresses CASCADE;
@@ -96,6 +97,19 @@ CREATE INDEX idx_products_brand ON products(brand);
 CREATE INDEX idx_products_active_created_at ON products(is_active, created_at DESC);
 CREATE INDEX idx_products_monthly_sales ON products(monthly_sales DESC);
 CREATE INDEX idx_products_rating ON products(rating DESC);
+
+CREATE TABLE product_view_history (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    view_count INT NOT NULL DEFAULT 1 CHECK (view_count > 0),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    last_viewed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_product_view_history_user_product UNIQUE (user_id, product_id)
+);
+
+CREATE INDEX idx_product_view_history_user_last_viewed_at
+    ON product_view_history(user_id, last_viewed_at DESC);
 
 CREATE TABLE orders (
     id VARCHAR(50) PRIMARY KEY,

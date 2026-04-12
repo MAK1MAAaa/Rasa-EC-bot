@@ -236,6 +236,10 @@ const filterByShop = (shopId: string, shopName: string) => {
   loadProducts()
 }
 
+const openProductDetail = (productId: string) => {
+  router.push(`/products/${productId}`)
+}
+
 const formatRating = (value?: number | null) => {
   if (typeof value !== 'number' || Number.isNaN(value)) return '暂无评分'
   return `${value.toFixed(1)} 分`
@@ -476,7 +480,7 @@ onBeforeUnmount(() => {
             <span class="stock">库存 {{ product.stock }}</span>
           </div>
           <div class="actions">
-            <button type="button" class="ghost" @click="router.push(`/products/${product.id}`)">详情</button>
+            <button type="button" class="ghost" @click="openProductDetail(product.id)">详情</button>
             <button type="button" :disabled="product.stock <= 0" @click="addCart(product.id)">
               {{ product.stock <= 0 ? '售罄' : '加购' }}
             </button>

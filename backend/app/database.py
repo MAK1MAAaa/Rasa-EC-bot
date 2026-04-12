@@ -1,8 +1,13 @@
+import os
+
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.orm import sessionmaker
-from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import SQLModel
-import os
+from sqlmodel.ext.asyncio.session import AsyncSession
+
+from .env import load_backend_env
+
+load_backend_env()
 
 # 数据库连接字符串，实际应从环境变量读取
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/rasa_ec_bot")

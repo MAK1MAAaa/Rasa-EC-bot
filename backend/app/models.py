@@ -2,7 +2,7 @@
 from typing import Any, List, Optional
 from uuid import UUID, uuid4
 
-from sqlalchemy import Column
+from sqlalchemy import Column, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
 
@@ -195,11 +195,37 @@ class ProductRead(ProductBase):
     created_at: datetime
 
 
+class ProductViewHistory(SQLModel, table=True):
+    __tablename__ = "product_view_history"
+    __table_args__ = (UniqueConstraint("user_id", "product_id", name="uq_product_view_history_user_product"),)
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    user_id: UUID = Field(foreign_key="users.id", index=True)
+    product_id: UUID = Field(foreign_key="products.id", index=True)
+    view_count: int = Field(default=1, ge=1)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    last_viewed_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class ProductListResponse(SQLModel):
     items: List[ProductRead]
     total: int
     page: int
     page_size: int
+
+
+class ProductViewHistoryItem(ProductRead):
+    view_count: int
+    last_viewed_at: datetime
+
+
+class ProductViewHistoryResponse(SQLModel):
+    items: List[ProductViewHistoryItem]
+
+
+class ProductRecommendationResponse(SQLModel):
+    items: List[ProductRead]
+    personalized: bool = False
 
 
 class ProductFilterShopOption(SQLModel):

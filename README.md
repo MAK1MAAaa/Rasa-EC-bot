@@ -23,7 +23,6 @@
 - `database/`：PostgreSQL / Redis 本地数据目录
 - `tests/`：benchmark 规则与脚本测试
 - `design.md`：当前项目架构设计说明
-- `requirement.md`：需求说明
 
 ## 2. 技术栈
 
@@ -39,7 +38,6 @@
 ## 3. 文档索引
 
 - 根架构说明：[design.md](design.md)
-- 需求说明：[requirement.md](requirement.md)
 - 后端说明：[backend/README.md](backend/README.md)
 - 前端说明：[frontend/README.md](frontend/README.md)
 - 客服说明：[rasa/README.md](rasa/README.md)
@@ -87,7 +85,11 @@ $PGDATA_PATH = (Resolve-Path .\database\pgdata).Path
 $REDISDATA_PATH = (Resolve-Path .\database\redisdata).Path
 
 docker run --name rasa-postgres -e POSTGRES_PASSWORD=postgres -p 5432:5432 -v "${PGDATA_PATH}:/var/lib/postgresql/data" -d pgvector/pgvector:pg15
-docker exec -it rasa-postgres psql -U postgres -c "CREATE DATABASE rasa_ec_bot;"
+do {
+    Start-Sleep -Seconds 1
+    docker exec rasa-postgres pg_isready -U postgres | Out-Null
+} until ($LASTEXITCODE -eq 0)
+docker exec rasa-postgres psql -U postgres -c "CREATE DATABASE rasa_ec_bot;"
 
 docker run --name rasa-redis -p 6379:6379 -v "${REDISDATA_PATH}:/data" -d redis:7 redis-server --appendonly yes
 ```
@@ -98,18 +100,41 @@ Linux / macOS：
 mkdir -p ./database/pgdata ./database/redisdata
 
 docker run --name rasa-postgres -e POSTGRES_PASSWORD=postgres -p 5432:5432 -v "$(pwd)/database/pgdata:/var/lib/postgresql/data" -d pgvector/pgvector:pg15
-docker exec -it rasa-postgres psql -U postgres -c "CREATE DATABASE rasa_ec_bot;"
+until docker exec rasa-postgres pg_isready -U postgres >/dev/null 2>&1; do
+  sleep 1
+done
+docker exec rasa-postgres psql -U postgres -c "CREATE DATABASE rasa_ec_bot;"
 
 docker run --name rasa-redis -p 6379:6379 -v "$(pwd)/database/redisdata:/data" -d redis:7 redis-server --appendonly yes
 ```
 
 ### 5.2 初始化数据库
 
+Windows PowerShell：
+
 ```powershell
 cd backend
-Get-Content -Raw -Encoding UTF8 db/init_db.sql | docker exec -i -e PGCLIENTENCODING=UTF8 rasa-postgres psql -U postgres -d rasa_ec_bot
-Get-Content -Raw -Encoding UTF8 db/seed_data.sql | docker exec -i -e PGCLIENTENCODING=UTF8 rasa-postgres psql -U postgres -d rasa_ec_bot
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\init_postgres.ps1
 ```
+
+macOS（bash/zsh）：
+
+```bash
+cd backend
+chmod +x scripts/init_postgres.sh scripts/init_postgres_macos.sh
+./scripts/init_postgres_macos.sh
+```
+
+Fedora（bash）：
+
+```bash
+cd backend
+chmod +x scripts/init_postgres.sh scripts/init_postgres_fedora.sh
+./scripts/init_postgres_fedora.sh
+```
+
+说明：Windows PowerShell 不要再用 `Get-Content ... | docker exec -i psql ...` 导入中文 SQL，管道编码会把 UTF-8 中文种子数据写坏。初始化脚本改为 `docker cp + psql -f`，会自动创建 `rasa_ec_bot` 并安全导入 `db/init_db.sql` 与 `db/seed_data.sql`。
+如需脚本化管理 Redis，请在 `backend` 目录使用 `scripts/start_redis*` 与 `scripts/init_redis*` 入口，具体见 `backend/README.md`。
 
 ### 5.3 启动后端
 
@@ -123,6 +148,7 @@ uv run uvicorn app.main:app --reload
 ```
 
 默认地址：`http://127.0.0.1:8000`
+后端启动时会自动读取 `backend/.env`，无需再手动把 `AMAP_WEB_KEY`、`REDIS_URL` 等变量提前注入 PowerShell 会话。
 
 ### 5.4 启动 Rasa 与 Action Server
 
@@ -184,6 +210,25 @@ pnpm dev
 - `qwen3-vl:2b` 图片分析
 
 更完整的架构说明见：[design.md](design.md)
+
+### 7.1 商家表单与物流地图增强
+
+- 商家中心的店铺资料与商品录入已调整为“核心字段直出 + 高级字段折叠”的混合表单。
+- 商品录入现在支持维护 `sku_code`，并继续兼容品牌、型号、评分、月销、标签、核心参数等比较字段。
+- 商家发货时，后端已改为基于“发货地址 + 收货地址 + 高德 geocode”生成确定性物流站点与 `route_geo`，不再依赖本地 Ollama 规划路线。
+- 历史订单若缺少坐标，订单详情读取时也会尝试按已保存地址现场补算地图点位。
+- 若订单详情仍只显示文本轨迹，先检查后端启动日志中的 `AMAP_WEB_KEY` 生效情况，以及发货时输出的 AMap geocode 成功/失败日志。
+
+### 7.2 历史浏览与个性化推荐
+
+- 登录中的用户账号在访问商品详情页时，会自动写入服务端历史浏览记录。
+- 历史浏览已改为独立页面入口，位于前端顶部导航“订单”右侧；即使没有记录，也会先显示空态占位页。
+- 当前默认展示最近 8 条；服务端最多保留最近 20 个唯一商品。
+- 客服推荐已统一接入历史浏览画像：
+  - 简单推荐问法走 Rasa Action 时，会调用后端内部推荐接口。
+  - 复杂推荐问法走 Agent 时，会调用同一套推荐 helper。
+- 推荐排序规则为“显式类目/关键词优先，历史浏览偏好加权次之，再按销量、评分、上架时间排序”。
+- 历史浏览只对登录客户账号生效，访客与商家账号不记录。
 
 ## 8. 系统形态 Benchmark
 
@@ -311,3 +356,43 @@ ollama create qwen3.5:2b-lora -f LoRA/outputs/smoke_ec_faq_only/ollama_export/Mo
 - `LoRA/data/dianshang_dataset/README.md`：文件编码正常
 
 `node_modules`、`.venv`、模型输出目录下的第三方或自动生成 README 不纳入项目文档修复范围。
+
+## 13. LoRA 推理栈切换（vLLM + PEFT Runtime）
+
+从本次版本开始，复杂客服 Agent 的 LoRA 推理默认不再依赖 Ollama 的 `ADAPTER` 注册路径，改为 `vLLM(OpenAI Compatible API) + PEFT adapter runtime`。
+
+说明：
+- `qwen3.5` 的 LoRA：走 vLLM。
+- `qwen3-vl:2b` 与 `mxbai-embed-large`：继续走 Ollama。
+
+### 13.1 启动 vLLM（加载 base + adapter）
+
+```bash
+# 以 LoRA 目录为例
+cd LoRA
+
+# 需要先安装 vllm（建议在 Linux/WSL + CUDA 环境）
+uv run --with vllm python -m vllm.entrypoints.openai.api_server \
+  --host 0.0.0.0 \
+  --port 8002 \
+  --model /mnt/d/Github/Rasa-EC-bot/LoRA/models/Qwen3.5-2B \
+  --served-model-name qwen3.5-2b-lora \
+  --enable-lora \
+  --lora-modules qwen3.5-2b-lora=/mnt/d/Github/Rasa-EC-bot/LoRA/outputs/smoke_ec_faq_only/adapter \
+  --gpu-memory-utilization 0.85 \
+  --max-model-len 32768
+```
+
+### 13.2 后端 Agent 对接 vLLM
+
+在 `backend/.env` 中配置：
+
+```env
+AGENT_LLM_PROVIDER=openai_compat
+AGENT_LLM_BASE_URL=http://127.0.0.1:8002/v1
+AGENT_LLM_MODEL=qwen3.5-2b-lora
+AGENT_LLM_API_KEY=EMPTY
+AGENT_LLM_TIMEOUT_SEC=45
+```
+
+完成后，后端复杂路由会通过 OpenAI 兼容接口调用 vLLM 的 LoRA 运行时。

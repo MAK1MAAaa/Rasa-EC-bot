@@ -1,4 +1,4 @@
-# Rasa + Ollama 客服模块
+# Rasa + 后端联调客服模块
 
 本目录负责电商客服对话能力，当前包含两种运行形态：
 
@@ -9,17 +9,21 @@
 
 - Rasa：意图识别、规则策略、基础对话流转
 - Action Server：调用后端内部接口读取订单、物流、售后与商品数据
-- Ollama：在默认联调形态中承担闲聊兜底与自然语言补充
+- 商品推荐 Action 已改为调用后端个性化推荐接口，登录用户会自动带上历史浏览画像
+- Ollama：在默认联调形态中承担 `action_ollama_reply` 的闲聊兜底与自然语言补充
+- 复杂问题 Agent：由后端按 `AGENT_LLM_*` 配置处理，默认可接 OpenAI-compatible / vLLM 的 LoRA 模型
 
 默认模型约定：
 
-- 规则链路兜底模型：`qwen3.5:2b`
-- 复杂问题的 Agent 模型由后端 `AGENT_OLLAMA_MODEL` 控制，可切到 `qwen3.5:2b-lora`
+- Rasa Action fallback 模型：`OLLAMA_MODEL=qwen3.5:2b`
+- 复杂问题 Agent 模型：由后端 `AGENT_LLM_*` 控制，默认推荐通过 OpenAI-compatible / vLLM 接入 `qwen3.5-2b-lora`
+- 兼容说明：旧后端若仍保留 `AGENT_OLLAMA_*` 兼容字段，可继续读取，但不再作为主文档路径
 
 ## 2. 运行前准备
 
 - 已安装 Ollama，并可运行 `qwen3.5:2b`
 - 后端接口可访问：`http://127.0.0.1:8000/api/v1`
+- 若后端 `AGENT_LLM_PROVIDER=openai_compat`，还需先启动对应的 OpenAI-compatible / vLLM 服务
 - 若要跑系统形态 benchmark，还需按根 README 额外启动纯 Rasa 实例和第二个后端实例
 
 拉取默认模型：
@@ -42,6 +46,8 @@ Copy-Item .env.sample .env
 
 关键变量：
 
+- 以下变量由 `rasa/.env.sample` 提供，供 Rasa Server 与 Action Server 使用。
+- 复杂问题 Agent 的 `AGENT_LLM_*` 配置位于 `backend/.env`，本目录不直接读取。
 - `OLLAMA_BASE_URL`
 - `OLLAMA_CHAT_PATH`
 - `OLLAMA_MODEL`
@@ -149,13 +155,19 @@ uv run rasa run actions --actions actions --port 5055
 - 低置信、复杂、多目标问题：后端切到 Agent
 - 带图片附件的问题：后端强制走 Agent，不走纯 Rasa 回复
 
+### 8.1 新增推荐接口
+- `GET /api/v1/chat/internal/product-recommendations`
+- `action_recommend_products` 会把当前用户 `user_id`、原始 query 与识别出的类目一起传给后端。
+- 后端会统一按“显式类目/关键词优先，历史浏览偏好加权次之，再按销量、评分、上架时间排序”返回商品卡片。
+
 ## 9. 联调顺序
 
-1. 启动 Ollama
-2. 启动后端
-3. 启动 Rasa Server（默认 `5005`）
-4. 启动 Action Server（默认 `5055`）
-5. 启动前端并打开 `/chat`
+1. 启动 Ollama（用于 `action_ollama_reply`）
+2. 若后端使用 `AGENT_LLM_PROVIDER=openai_compat`，先启动对应的 OpenAI-compatible / vLLM 服务
+3. 启动后端
+4. 启动 Rasa Server（默认 `5005`）
+5. 启动 Action Server（默认 `5055`）
+6. 启动前端并打开 `/chat`
 
 若要跑系统形态 benchmark，再额外启动：
 
@@ -166,3 +178,4 @@ uv run rasa run actions --actions actions --port 5055
 
 - LoRA 训练与导出流程位于 `LoRA/`，不在本目录执行。
 - 若要做论文对照实验，请优先阅读根目录与 `backend/README.md` 中的 benchmark 章节。
+- 当前默认推荐的复杂 Agent 推理链路见 `LoRA/README.md` 与 `backend/README.md` 中的 vLLM / OpenAI-compatible 配置章节。

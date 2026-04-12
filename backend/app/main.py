@@ -6,8 +6,10 @@ import base64
 import hashlib
 import json
 import logging
+import math
 import os
 import re
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from io import BytesIO
@@ -20,10 +22,15 @@ import httpx
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Path, Query, Request, UploadFile, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
-from sqlalchemy import String, cast, func, or_, text
+from sqlalchemy import String, cast, delete, func, or_, text
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.dialects.postgresql import insert
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
+
+from .env import BACKEND_ROOT_DIR, ENV_FILE_PATH, load_backend_env
+
+load_backend_env()
 
 from .auth import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
@@ -80,8 +87,12 @@ from .models import (
     Product,
     ProductFilterMetaResponse,
     ProductFilterShopOption,
+    ProductRecommendationResponse,
     ProductListResponse,
     ProductRead,
+    ProductViewHistory,
+    ProductViewHistoryItem,
+    ProductViewHistoryResponse,
     Shop,
     ShopAddress,
     ShopAddressCreate,
@@ -111,9 +122,25 @@ RASA_INTERNAL_TOKEN = os.getenv("RASA_INTERNAL_TOKEN", "")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3.5:2b")
 OLLAMA_TIMEOUT_SEC = float(os.getenv("OLLAMA_TIMEOUT_SEC", "45"))
-LOGISTICS_LLM_MAX_WAIT_SEC = float(os.getenv("LOGISTICS_LLM_MAX_WAIT_SEC", "12"))
-AGENT_OLLAMA_MODEL = os.getenv("AGENT_OLLAMA_MODEL", "qwen3.5:2b-lora")
-AGENT_OLLAMA_TIMEOUT_SEC = float(os.getenv("AGENT_OLLAMA_TIMEOUT_SEC", str(OLLAMA_TIMEOUT_SEC)))
+_agent_provider_raw = os.getenv("AGENT_LLM_PROVIDER", "").strip().lower()
+if _agent_provider_raw:
+    AGENT_LLM_PROVIDER = _agent_provider_raw
+elif os.getenv("AGENT_LLM_BASE_URL", "").strip():
+    AGENT_LLM_PROVIDER = "openai_compat"
+else:
+    AGENT_LLM_PROVIDER = "ollama"
+AGENT_LLM_BASE_URL = os.getenv(
+    "AGENT_LLM_BASE_URL",
+    "http://127.0.0.1:8002/v1" if AGENT_LLM_PROVIDER in {"openai", "openai_compat"} else OLLAMA_BASE_URL,
+).strip()
+AGENT_LLM_MODEL = os.getenv(
+    "AGENT_LLM_MODEL",
+    os.getenv("AGENT_OLLAMA_MODEL", "qwen3.5-2b-lora" if AGENT_LLM_PROVIDER in {"openai", "openai_compat"} else "qwen3.5:2b-lora"),
+).strip()
+AGENT_LLM_API_KEY = os.getenv("AGENT_LLM_API_KEY", "EMPTY").strip()
+AGENT_LLM_TIMEOUT_SEC = float(
+    os.getenv("AGENT_LLM_TIMEOUT_SEC", os.getenv("AGENT_OLLAMA_TIMEOUT_SEC", str(OLLAMA_TIMEOUT_SEC)))
+)
 OLLAMA_EMBED_MODEL = os.getenv("OLLAMA_EMBED_MODEL", "mxbai-embed-large")
 OLLAMA_VLM_MODEL = os.getenv("OLLAMA_VLM_MODEL", "qwen3-vl:2b")
 KB_EMBEDDING_DIM = int(os.getenv("KB_EMBEDDING_DIM", "1024"))
@@ -143,7 +170,7 @@ FAST_ROUTER_INTENTS = {
 
 REDIS_URL = os.getenv("REDIS_URL", "")
 REDIS_CACHE_TTL_SEC = int(os.getenv("REDIS_CACHE_TTL_SEC", "180"))
-APP_ROOT_DIR = FsPath(__file__).resolve().parents[1]
+APP_ROOT_DIR = BACKEND_ROOT_DIR
 UPLOAD_ROOT_DIR = (
     FsPath(CHAT_UPLOAD_DIR).resolve()
     if FsPath(CHAT_UPLOAD_DIR).is_absolute()
@@ -192,6 +219,9 @@ PRODUCT_FILTER_CACHE_KEY = "products:filters:v2"
 CHAT_ACTION_TTL_SEC = int(os.getenv("CHAT_ACTION_TTL_SEC", "300"))
 CHAT_ACTION_TYPE_CHECKOUT = "checkout"
 CHAT_ACTION_TYPE_AFTER_SALES = "after_sales"
+PRODUCT_VIEW_HISTORY_MAX_ITEMS = 20
+DEFAULT_PRODUCT_HISTORY_LIMIT = 8
+DEFAULT_PRODUCT_RECOMMENDATION_LIMIT = 5
 PENDING_CHAT_ACTION_MEMORY: dict[str, dict[str, Any]] = {}
 _amap_throttle_lock = asyncio.Lock()
 _amap_last_call_time = 0.0
@@ -345,11 +375,49 @@ async def ensure_catalog_schema() -> None:
             await conn.execute(text(statement))
 
 
+async def ensure_product_view_history_schema() -> None:
+    statements = [
+        """
+        CREATE TABLE IF NOT EXISTS product_view_history (
+            id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            product_id uuid NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+            view_count INT NOT NULL DEFAULT 1 CHECK (view_count > 0),
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            last_viewed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_product_view_history_user_product
+        ON product_view_history(user_id, product_id)
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_product_view_history_user_last_viewed_at
+        ON product_view_history(user_id, last_viewed_at DESC)
+        """,
+    ]
+    async with engine.begin() as conn:
+        for statement in statements:
+            await conn.execute(text(statement))
+
+
 @app.on_event("startup")
 async def on_startup() -> None:
+    logger.info(
+        "Backend config loaded. env_file=%s exists=%s amap_web_key=%s amap_sig=%s",
+        ENV_FILE_PATH,
+        ENV_FILE_PATH.is_file(),
+        mask_secret_for_log(AMAP_WEB_KEY),
+        "configured" if AMAP_WEB_SIG else "not_configured",
+    )
+    if not AMAP_WEB_KEY:
+        logger.warning(
+            "AMAP_WEB_KEY is empty. Shipping route geocode will fall back to text-only logistics until backend/.env is configured."
+        )
     UPLOAD_ROOT_DIR.mkdir(parents=True, exist_ok=True)
     await ensure_logistics_geo_schema()
     await ensure_catalog_schema()
+    await ensure_product_view_history_schema()
     await cache.connect()
 
 
@@ -630,7 +698,7 @@ async def analyze_uploaded_image_vlm(
     }
 
     try:
-        async with httpx.AsyncClient(timeout=AGENT_OLLAMA_TIMEOUT_SEC) as client:
+        async with httpx.AsyncClient(timeout=OLLAMA_TIMEOUT_SEC) as client:
             response = await client.post(f"{OLLAMA_BASE_URL}/api/chat", json=payload)
         response.raise_for_status()
     except Exception as exc:  # noqa: BLE001
@@ -1380,9 +1448,11 @@ async def run_nexau_agent_orchestrator(
     attachments: list[str] | None = None,
 ) -> tuple[ChatReplyMessage, list[dict[str, Any]]]:
     orchestrator = NexAUAgentOrchestrator(
-        ollama_base_url=OLLAMA_BASE_URL,
-        ollama_model=AGENT_OLLAMA_MODEL,
-        ollama_timeout_sec=AGENT_OLLAMA_TIMEOUT_SEC,
+        llm_provider=AGENT_LLM_PROVIDER,
+        llm_base_url=AGENT_LLM_BASE_URL,
+        llm_model=AGENT_LLM_MODEL,
+        llm_timeout_sec=AGENT_LLM_TIMEOUT_SEC,
+        llm_api_key=AGENT_LLM_API_KEY,
         frontend_base_url=FRONTEND_BASE_URL,
     )
 
@@ -1464,6 +1534,23 @@ async def run_nexau_agent_orchestrator(
     async def tool_query_price_protection(user_id: str) -> dict[str, Any]:
         observation = await query_price_protection_candidates(user_id=UUID(user_id), session=session)
         return {"observation": observation}
+
+    async def tool_query_product_recommendations(
+        query: str,
+        user_id: str = "",
+        category: str = "",
+        limit: int = DEFAULT_PRODUCT_RECOMMENDATION_LIMIT,
+    ) -> dict[str, Any]:
+        parsed_user_id = UUID(user_id) if user_id.strip() else None
+        response = await get_personalized_product_recommendations(
+            session,
+            user_id=parsed_user_id,
+            query=query,
+            category=category,
+            limit=max(1, min(limit, 20)),
+        )
+        cards = [product_read_to_chat_card(item) for item in response.items]
+        return {"observation": dump_response_model(response), "cards": cards}
 
     async def tool_retrieve_policy_knowledge(query: str) -> dict[str, Any]:
         matches = await retrieve_kb_knowledge(
@@ -1572,6 +1659,12 @@ async def run_nexau_agent_orchestrator(
         mode="read",
         description="基于订单与当前商品价格计算可补差价信息",
         handler=tool_query_price_protection,
+    )
+    orchestrator.register_tool(
+        name="query_product_recommendations",
+        mode="read",
+        description="基于用户最近浏览历史、显式类目和关键词获取商品推荐",
+        handler=tool_query_product_recommendations,
     )
     orchestrator.register_tool(
         name="retrieve_policy_knowledge",
@@ -1692,63 +1785,250 @@ def infer_region_label(address_text: str, fallback: str) -> str:
     return token[:18] if token else fallback
 
 
-def build_fallback_route(ship_from: str, ship_to: str) -> tuple[str, list[str]]:
+@dataclass
+class LogisticsRouteStep:
+    name: str
+    amap_query: str
+    stage: str | None = None
+
+
+@dataclass
+class AmapGeocodeResult:
+    formatted_address: str
+    province: str
+    city: str
+    district: str
+    adcode: str
+    lng: float
+    lat: float
+
+
+def normalize_amap_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        for item in value:
+            if isinstance(item, str) and item.strip():
+                return item.strip()
+    return ""
+
+
+def resolve_city_label(detail: AmapGeocodeResult | None, fallback_text: str) -> str:
+    if detail:
+        if detail.city:
+            return detail.city
+        if detail.province:
+            return detail.province
+        if detail.district:
+            return detail.district
+    return infer_region_label(fallback_text, "站点")
+
+
+def resolve_station_label(detail: AmapGeocodeResult | None, fallback_text: str, city_label: str) -> str:
+    if detail and detail.district and detail.district not in {detail.city, detail.province}:
+        return detail.district
+    if city_label:
+        return city_label
+    return infer_region_label(fallback_text, "站点")
+
+
+def build_hub_query(detail: AmapGeocodeResult | None, city_label: str, fallback_text: str) -> str:
+    if detail and detail.city and detail.district and detail.district not in {detail.city, detail.province}:
+        return f"{detail.city}{detail.district}"
+    if city_label:
+        return city_label
+    return fallback_text
+
+
+def haversine_distance_km(lng1: float, lat1: float, lng2: float, lat2: float) -> float:
+    radius_km = 6371.0
+    lng1_rad = math.radians(lng1)
+    lat1_rad = math.radians(lat1)
+    lng2_rad = math.radians(lng2)
+    lat2_rad = math.radians(lat2)
+    d_lng = lng2_rad - lng1_rad
+    d_lat = lat2_rad - lat1_rad
+    a = math.sin(d_lat / 2) ** 2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(d_lng / 2) ** 2
+    c = 2 * math.asin(math.sqrt(a))
+    return radius_km * c
+
+
+def estimate_logistics_eta_hours(origin: AmapGeocodeResult | None, destination: AmapGeocodeResult | None) -> int:
+    if not origin or not destination:
+        return 72
+
+    distance_km = haversine_distance_km(origin.lng, origin.lat, destination.lng, destination.lat)
+    if distance_km <= 30:
+        return 12
+    if distance_km <= 120:
+        return 18
+    if distance_km <= 300:
+        return 24
+    if distance_km <= 800:
+        return 36
+    if distance_km <= 1500:
+        return 48
+    return 72
+
+
+def build_deterministic_route_steps(
+    ship_from: str,
+    ship_to: str,
+    origin: AmapGeocodeResult | None,
+    destination: AmapGeocodeResult | None,
+) -> list[LogisticsRouteStep]:
+    origin_city_label = resolve_city_label(origin, ship_from)
+    destination_city_label = resolve_city_label(destination, ship_to)
+    destination_station_label = resolve_station_label(destination, ship_to, destination_city_label)
+
+    origin_city_key = origin.city if origin and origin.city else (origin.province if origin else "")
+    destination_city_key = destination.city if destination and destination.city else (destination.province if destination else "")
+    same_city = bool(origin_city_key and destination_city_key and origin_city_key == destination_city_key)
+
+    if same_city:
+        return [
+            LogisticsRouteStep(name=f"{origin_city_label}揽收仓", amap_query=ship_from, stage="pickup"),
+            LogisticsRouteStep(
+                name=f"{destination_station_label}同城分拨中心",
+                amap_query=build_hub_query(destination, destination_city_label, ship_to),
+                stage="sorting",
+            ),
+            LogisticsRouteStep(name=f"{destination_station_label}配送站", amap_query=ship_to, stage="delivery_station"),
+        ]
+
+    return [
+        LogisticsRouteStep(name=f"{origin_city_label}揽收仓", amap_query=ship_from, stage="pickup"),
+        LogisticsRouteStep(
+            name=f"{origin_city_label}转运中心",
+            amap_query=build_hub_query(origin, origin_city_label, ship_from),
+            stage="origin_hub",
+        ),
+        LogisticsRouteStep(
+            name=f"{destination_city_label}转运中心",
+            amap_query=build_hub_query(destination, destination_city_label, ship_to),
+            stage="destination_hub",
+        ),
+        LogisticsRouteStep(name=f"{destination_station_label}配送站", amap_query=ship_to, stage="delivery_station"),
+    ]
+
+
+def build_fallback_route_steps(ship_from: str, ship_to: str) -> list[LogisticsRouteStep]:
     origin = infer_region_label(ship_from, "始发地")
     destination = infer_region_label(ship_to, "目的地")
     if origin == destination:
-        route = [
-            f"{origin}揽收仓",
-            f"{origin}同城分拨中心",
-            f"{destination}配送站",
-            "派送中",
+        return [
+            LogisticsRouteStep(name=f"{origin}揽收仓", amap_query=ship_from, stage="pickup"),
+            LogisticsRouteStep(name=f"{origin}同城分拨中心", amap_query=f"{origin} 分拨中心", stage="sorting"),
+            LogisticsRouteStep(name=f"{destination}配送站", amap_query=ship_to, stage="delivery_station"),
+            LogisticsRouteStep(name="派送中", amap_query=ship_to, stage="last_mile"),
         ]
-    else:
-        route = [
-            f"{origin}揽收仓",
-            f"{origin}转运中心",
-            f"{destination}转运中心",
-            f"{destination}配送站",
-        ]
+    return [
+        LogisticsRouteStep(name=f"{origin}揽收仓", amap_query=ship_from, stage="pickup"),
+        LogisticsRouteStep(name=f"{origin}转运中心", amap_query=f"{origin} 转运中心", stage="origin_hub"),
+        LogisticsRouteStep(name=f"{destination}转运中心", amap_query=f"{destination} 转运中心", stage="destination_hub"),
+        LogisticsRouteStep(name=f"{destination}配送站", amap_query=ship_to, stage="delivery_station"),
+    ]
+
+
+def build_fallback_route(ship_from: str, ship_to: str) -> tuple[str, list[str]]:
+    steps = build_fallback_route_steps(ship_from, ship_to)
+    route = [step.name for step in steps]
     return route[0], route
 
 
-def should_replace_with_fallback_route(route_points: list[str]) -> bool:
-    if not route_points:
-        return True
-    route_text = " ".join(route_points).lower()
-    generic_tokens = [
-        "origin warehouse",
-        "transit center",
-        "destination city",
-        "out for delivery",
-        "picked up",
-        "warehouse",
-    ]
-    if any(token in route_text for token in generic_tokens):
-        return True
-    return not any(re.search(r"[\u4e00-\u9fff]", item) for item in route_points)
+def normalize_route_steps(raw_steps: Any) -> list[LogisticsRouteStep]:
+    if not isinstance(raw_steps, list):
+        return []
+    normalized: list[LogisticsRouteStep] = []
+    for item in raw_steps:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        amap_query = str(item.get("amap_query") or item.get("address") or item.get("query") or "").strip()
+        stage = str(item.get("stage") or "").strip() or None
+        if not name:
+            continue
+        normalized.append(LogisticsRouteStep(name=name, amap_query=amap_query or name, stage=stage))
+    return normalized
 
 
-def should_replace_with_fallback_location(current_location: str) -> bool:
-    text = (current_location or "").strip()
-    if not text:
-        return True
-    lowered = text.lower()
-    generic_tokens = [
-        "origin warehouse",
-        "transit center",
-        "destination city",
-        "out for delivery",
-        "picked up",
-    ]
-    if any(token in lowered for token in generic_tokens):
-        return True
-    return not bool(re.search(r"[\u4e00-\u9fff]", text))
+def build_route_steps_from_route_points(route_points: Any) -> list[LogisticsRouteStep]:
+    if not isinstance(route_points, list):
+        return []
+    route_steps: list[LogisticsRouteStep] = []
+    for item in route_points:
+        if not isinstance(item, str):
+            continue
+        cleaned = item.strip()
+        if not cleaned:
+            continue
+        route_steps.append(LogisticsRouteStep(name=cleaned, amap_query=cleaned))
+    return route_steps
+
+
+def route_steps_to_plan(route_steps: list[LogisticsRouteStep]) -> list[str]:
+    return [step.name for step in route_steps if step.name]
+
+
+def extract_route_steps(route_geo: Any, route_plan: list[str] | None = None) -> list[LogisticsRouteStep]:
+    route_steps = normalize_route_steps(route_geo)
+    if route_steps:
+        return route_steps
+    return build_route_steps_from_route_points(route_plan or [])
+
+
+def find_route_step(route_steps: list[LogisticsRouteStep], location: str) -> LogisticsRouteStep | None:
+    cleaned_location = (location or "").strip()
+    if not cleaned_location:
+        return None
+    for step in route_steps:
+        if step.name == cleaned_location:
+            return step
+    return None
+
+
+def build_route_geo_queries(step: LogisticsRouteStep) -> list[str]:
+    def _push(values: list[str], candidate: str | None) -> None:
+        cleaned = re.sub(r"\s+", " ", (candidate or "").strip())
+        if cleaned and cleaned not in values:
+            values.append(cleaned)
+
+    queries: list[str] = []
+    _push(queries, step.amap_query)
+    _push(queries, step.name)
+
+    stripped_name = re.sub(r"(揽收仓|转运中心|同城分拨中心|配送站|派送中)$", "", step.name).strip()
+    _push(queries, stripped_name)
+
+    stripped_query = re.sub(r"(揽收仓|转运中心|同城分拨中心|配送站|派送中)$", "", step.amap_query).strip()
+    _push(queries, stripped_query)
+
+    if stripped_name:
+        _push(queries, infer_region_label(stripped_name, ""))
+    if stripped_query:
+        _push(queries, infer_region_label(stripped_query, ""))
+    return queries
 
 
 def normalize_geo_cache_text(address_text: str) -> str:
     cleaned = re.sub(r"\s+", " ", (address_text or "").strip())
     return cleaned[:512]
+
+
+def mask_secret_for_log(secret: str, visible: int = 4) -> str:
+    cleaned = (secret or "").strip()
+    if not cleaned:
+        return "<empty>"
+    if len(cleaned) <= visible:
+        return "*" * len(cleaned)
+    return f"{'*' * max(0, len(cleaned) - visible)}{cleaned[-visible:]}"
+
+
+def summarize_text_for_log(value: str, max_len: int = 80) -> str:
+    cleaned = normalize_geo_cache_text(value)
+    if len(cleaned) <= max_len:
+        return cleaned
+    return f"{cleaned[: max_len - 3]}..."
 
 
 def to_valid_coordinate(value: Any) -> float | None:
@@ -1789,14 +2069,19 @@ async def throttle_amap_requests() -> None:
         _amap_last_call_time = loop.time()
 
 
-async def call_amap_geocode(address_text: str) -> tuple[float, float] | None:
+async def request_amap_geocode_payload(address_text: str) -> dict[str, Any] | None:
+    query = normalize_geo_cache_text(address_text)
+    if not query:
+        logger.warning("AMap geocode skipped because query is empty.")
+        return None
     if not AMAP_WEB_KEY:
+        logger.warning("AMap geocode skipped because AMAP_WEB_KEY is empty. query=%s", summarize_text_for_log(query))
         return None
 
     await throttle_amap_requests()
     params: dict[str, Any] = {
         "key": AMAP_WEB_KEY,
-        "address": address_text,
+        "address": query,
         "output": "JSON",
     }
     if AMAP_WEB_SIG:
@@ -1804,26 +2089,92 @@ async def call_amap_geocode(address_text: str) -> tuple[float, float] | None:
 
     timeout_sec = max(1.0, AMAP_TIMEOUT_MS / 1000.0)
     try:
-        async with httpx.AsyncClient(timeout=timeout_sec) as client:
+        logger.info("AMap geocode request. query=%s timeout=%.2fs", summarize_text_for_log(query), timeout_sec)
+        async with httpx.AsyncClient(timeout=timeout_sec, trust_env=False) as client:
             response = await client.get("https://restapi.amap.com/v3/geocode/geo", params=params)
         response.raise_for_status()
         payload = response.json()
-        if str(payload.get("status")) != "1":
+        if not isinstance(payload, dict):
+            logger.warning("AMap geocode returned non-dict payload. query=%s", summarize_text_for_log(query))
             return None
+        status_value = str(payload.get("status") or "")
+        info_value = summarize_text_for_log(str(payload.get("info") or ""))
+        infocode_value = str(payload.get("infocode") or "")
         geocodes = payload.get("geocodes")
-        if not isinstance(geocodes, list) or not geocodes:
+        geocode_count = len(geocodes) if isinstance(geocodes, list) else 0
+        if status_value != "1":
+            logger.warning(
+                "AMap geocode rejected query=%s status=%s info=%s infocode=%s",
+                summarize_text_for_log(query),
+                status_value,
+                info_value,
+                infocode_value,
+            )
             return None
-        location_text = str(geocodes[0].get("location") or "").strip()
-        if "," not in location_text:
+        if geocode_count == 0:
+            logger.warning(
+                "AMap geocode returned empty result. query=%s info=%s infocode=%s",
+                summarize_text_for_log(query),
+                info_value,
+                infocode_value,
+            )
             return None
-        lng_text, lat_text = location_text.split(",", 1)
-        lng = to_valid_coordinate(lng_text)
-        lat = to_valid_coordinate(lat_text)
-        if lng is None or lat is None:
-            return None
-        return lng, lat
-    except Exception:
+        logger.info("AMap geocode success. query=%s geocodes=%s", summarize_text_for_log(query), geocode_count)
+        return payload
+    except Exception as exc:
+        logger.warning("AMap geocode request failed. query=%s error=%s", summarize_text_for_log(query), exc)
         return None
+
+
+def parse_amap_geocode_result(payload: dict[str, Any]) -> AmapGeocodeResult | None:
+    geocodes = payload.get("geocodes")
+    if not isinstance(geocodes, list) or not geocodes:
+        return None
+    first = geocodes[0]
+    if not isinstance(first, dict):
+        return None
+    location_text = str(first.get("location") or "").strip()
+    if "," not in location_text:
+        return None
+    lng_text, lat_text = location_text.split(",", 1)
+    lng = to_valid_coordinate(lng_text)
+    lat = to_valid_coordinate(lat_text)
+    if lng is None or lat is None:
+        return None
+    return AmapGeocodeResult(
+        formatted_address=str(first.get("formatted_address") or "").strip(),
+        province=normalize_amap_text(first.get("province")),
+        city=normalize_amap_text(first.get("city")),
+        district=normalize_amap_text(first.get("district")),
+        adcode=str(first.get("adcode") or "").strip(),
+        lng=lng,
+        lat=lat,
+    )
+
+
+async def call_amap_geocode_detail(address_text: str) -> AmapGeocodeResult | None:
+    payload = await request_amap_geocode_payload(address_text)
+    if not payload:
+        return None
+    detail = parse_amap_geocode_result(payload)
+    if not detail:
+        logger.warning("AMap geocode parse failed. query=%s", summarize_text_for_log(address_text))
+        return None
+    logger.info(
+        "AMap geocode resolved. query=%s address=%s lng=%s lat=%s",
+        summarize_text_for_log(address_text),
+        summarize_text_for_log(detail.formatted_address),
+        detail.lng,
+        detail.lat,
+    )
+    return detail
+
+
+async def call_amap_geocode(address_text: str) -> tuple[float, float] | None:
+    detail = await call_amap_geocode_detail(address_text)
+    if not detail:
+        return None
+    return detail.lng, detail.lat
 
 
 async def get_geo_cache_entry(session: AsyncSession, source_text: str) -> GeoCache | None:
@@ -1870,14 +2221,40 @@ async def geocode_with_cache(session: AsyncSession, address_text: str) -> tuple[
     return coords
 
 
-async def build_route_geo(session: AsyncSession, route_points: list[str]) -> list[GeoPointRead]:
-    points = normalize_route_points(route_points)
-    geo_points: list[GeoPointRead] = []
-    for point in points:
-        coords = await geocode_with_cache(session, point)
-        if not coords:
-            continue
-        geo_points.append(GeoPointRead(name=point, lng=coords[0], lat=coords[1]))
+async def build_route_geo(session: AsyncSession, route_steps: list[LogisticsRouteStep]) -> list[dict[str, Any]]:
+    geo_points: list[dict[str, Any]] = []
+    for step in route_steps:
+        coords: tuple[float, float] | None = None
+        attempted_queries = build_route_geo_queries(step)
+        for query in attempted_queries:
+            coords = await geocode_with_cache(session, query)
+            if coords:
+                break
+        point_payload: dict[str, Any] = {
+            "name": step.name,
+            "amap_query": step.amap_query,
+        }
+        if step.stage:
+            point_payload["stage"] = step.stage
+        if coords:
+            point_payload["lng"] = coords[0]
+            point_payload["lat"] = coords[1]
+            logger.info(
+                "Route geo resolved. step=%s stage=%s query=%s lng=%s lat=%s",
+                step.name,
+                step.stage or "",
+                summarize_text_for_log(query),
+                coords[0],
+                coords[1],
+            )
+        else:
+            logger.warning(
+                "Route geo missing. step=%s stage=%s tried=%s",
+                step.name,
+                step.stage or "",
+                [summarize_text_for_log(item) for item in attempted_queries],
+            )
+        geo_points.append(point_payload)
     return geo_points
 
 
@@ -2100,6 +2477,404 @@ def to_product_read(product: Product, shop: Shop | None = None, shop_name: str |
     )
 
 
+@dataclass
+class RecommendationHistoryProfile:
+    recent_product_ids: list[UUID]
+    category_scores: dict[str, int]
+    brand_scores: dict[str, int]
+    tag_scores: dict[str, int]
+    shop_scores: dict[UUID, int]
+
+
+def to_product_view_history_item(
+    history: ProductViewHistory,
+    product: Product,
+    *,
+    shop: Shop | None = None,
+    shop_name: str | None = None,
+) -> ProductViewHistoryItem:
+    product_read = to_product_read(product, shop=shop, shop_name=shop_name)
+    return ProductViewHistoryItem(
+        **dump_response_model(product_read),
+        view_count=history.view_count,
+        last_viewed_at=history.last_viewed_at,
+    )
+
+
+def product_read_to_chat_card(product: ProductRead) -> dict[str, Any]:
+    base_url = FRONTEND_BASE_URL.rstrip("/")
+    return {
+        "type": "product",
+        "data": {
+            "id": str(product.id),
+            "name": product.name,
+            "category": product.category or "未分类",
+            "brand": product.brand or "",
+            "model": product.model or "",
+            "price": float(product.price),
+            "original_price": float(product.original_price) if product.original_price is not None else None,
+            "stock": int(product.stock),
+            "rating": float(product.rating) if product.rating is not None else None,
+            "review_count": int(product.review_count),
+            "monthly_sales": int(product.monthly_sales),
+            "ship_in_hours": int(product.ship_in_hours),
+            "tags": list(product.tags or []),
+            "shop_name": product.shop_name,
+            "product_link": f"{base_url}/products/{product.id}",
+            "image_url": product.image_url or "",
+        },
+    }
+
+
+def normalize_match_text(value: str | None) -> str:
+    if not isinstance(value, str):
+        return ""
+    return re.sub(r"\s+", "", value.strip().lower())
+
+
+def extract_recommendation_query_terms(query: str) -> list[str]:
+    cleaned = (query or "").strip().lower()
+    if not cleaned:
+        return []
+
+    normalized = cleaned
+    for marker in [
+        "给我",
+        "帮我",
+        "推荐",
+        "几款",
+        "看看",
+        "想买",
+        "适合",
+        "有没有",
+        "哪些",
+        "什么",
+        "哪个",
+        "比较",
+        "一下",
+        "请问",
+        "可以",
+        "用于",
+        "一款",
+        "一个",
+    ]:
+        normalized = normalized.replace(marker, " ")
+
+    tokens = re.findall(r"[\u4e00-\u9fffA-Za-z0-9]+", normalized)
+    unique_terms: list[str] = []
+    seen: set[str] = set()
+    for token in tokens:
+        term = token.strip()
+        if len(term) < 2 or term in seen:
+            continue
+        seen.add(term)
+        unique_terms.append(term)
+    return unique_terms[:8]
+
+
+def infer_explicit_category_from_query(query: str, categories: list[str]) -> str:
+    normalized_query = normalize_match_text(query)
+    if not normalized_query:
+        return ""
+
+    sorted_categories = sorted(
+        [item.strip() for item in categories if isinstance(item, str) and item.strip()],
+        key=len,
+        reverse=True,
+    )
+    for category in sorted_categories:
+        if normalize_match_text(category) in normalized_query:
+            return category
+    return ""
+
+
+def build_recommendation_history_profile(rows: list[tuple[ProductViewHistory, Product]]) -> RecommendationHistoryProfile:
+    category_scores: Counter[str] = Counter()
+    brand_scores: Counter[str] = Counter()
+    tag_scores: Counter[str] = Counter()
+    shop_scores: Counter[UUID] = Counter()
+    recent_product_ids: list[UUID] = []
+
+    for index, (history, product) in enumerate(rows):
+        recent_product_ids.append(product.id)
+        recency_weight = max(1, PRODUCT_VIEW_HISTORY_MAX_ITEMS - index)
+        view_bonus = max(0, min(int(history.view_count), 5) - 1)
+        weight = recency_weight + view_bonus
+
+        category_key = normalize_match_text(product.category)
+        brand_key = normalize_match_text(product.brand)
+        if category_key:
+            category_scores[category_key] += weight
+        if brand_key:
+            brand_scores[brand_key] += weight
+        shop_scores[product.shop_id] += weight
+        for tag in list(product.tags or []):
+            tag_key = normalize_match_text(tag)
+            if tag_key:
+                tag_scores[tag_key] += weight
+
+    return RecommendationHistoryProfile(
+        recent_product_ids=recent_product_ids,
+        category_scores=dict(category_scores),
+        brand_scores=dict(brand_scores),
+        tag_scores=dict(tag_scores),
+        shop_scores=dict(shop_scores),
+    )
+
+
+def compute_product_query_score(
+    product: ProductRead,
+    *,
+    query: str,
+    query_terms: list[str],
+    explicit_category: str,
+) -> int:
+    score = 0
+    normalized_query = normalize_match_text(query)
+    normalized_category = normalize_match_text(product.category)
+    normalized_brand = normalize_match_text(product.brand)
+    normalized_model = normalize_match_text(product.model)
+    normalized_name = normalize_match_text(product.name)
+    normalized_description = normalize_match_text(product.description)
+    normalized_tags = [normalize_match_text(item) for item in list(product.tags or [])]
+
+    if explicit_category and normalized_category == normalize_match_text(explicit_category):
+        score += 1200
+
+    text_fields = [normalized_name, normalized_category, normalized_brand, normalized_model, normalized_description, *normalized_tags]
+    if normalized_query and any(normalized_query in field for field in text_fields if field):
+        score += 280
+
+    for term in query_terms:
+        normalized_term = normalize_match_text(term)
+        if not normalized_term:
+            continue
+        if normalized_term in normalized_name:
+            score += 130
+        elif normalized_term in normalized_brand or normalized_term in normalized_model:
+            score += 105
+        elif normalized_term in normalized_category:
+            score += 95
+        elif any(normalized_term in tag for tag in normalized_tags):
+            score += 80
+        elif normalized_term in normalized_description:
+            score += 45
+
+    return score
+
+
+def compute_product_history_score(product: ProductRead, profile: RecommendationHistoryProfile) -> int:
+    score = 0
+    normalized_category = normalize_match_text(product.category)
+    normalized_brand = normalize_match_text(product.brand)
+    if normalized_category:
+        score += profile.category_scores.get(normalized_category, 0) * 50
+    if normalized_brand:
+        score += profile.brand_scores.get(normalized_brand, 0) * 38
+    score += profile.shop_scores.get(product.shop_id, 0) * 24
+    for tag in list(product.tags or []):
+        score += profile.tag_scores.get(normalize_match_text(tag), 0) * 14
+    return score
+
+
+async def fetch_recent_product_view_rows(
+    session: AsyncSession,
+    *,
+    user_id: UUID,
+    limit: int,
+) -> list[tuple[ProductViewHistory, Product]]:
+    statement = (
+        select(ProductViewHistory, Product)
+        .join(Product, ProductViewHistory.product_id == Product.id)
+        .where(ProductViewHistory.user_id == user_id, Product.is_active == True)  # noqa: E712
+        .order_by(ProductViewHistory.last_viewed_at.desc(), ProductViewHistory.created_at.desc())
+        .limit(max(1, min(limit, PRODUCT_VIEW_HISTORY_MAX_ITEMS)))
+    )
+    result = await session.execute(statement)
+    return result.all()
+
+
+async def build_product_view_history_response(
+    session: AsyncSession,
+    *,
+    user_id: UUID,
+    limit: int,
+) -> ProductViewHistoryResponse:
+    rows = await fetch_recent_product_view_rows(session, user_id=user_id, limit=limit)
+    if not rows:
+        return ProductViewHistoryResponse(items=[])
+
+    shop_map = await get_shop_map(session, [product.shop_id for _history, product in rows])
+    items = [
+        to_product_view_history_item(
+            history,
+            product,
+            shop=shop_map.get(product.shop_id),
+            shop_name="Unknown Shop",
+        )
+        for history, product in rows
+    ]
+    return ProductViewHistoryResponse(items=items)
+
+
+async def record_product_view(session: AsyncSession, *, user_id: UUID, product_id: UUID) -> None:
+    now = datetime.utcnow()
+    table = ProductViewHistory.__table__
+    upsert_statement = (
+        insert(table)
+        .values(
+            user_id=user_id,
+            product_id=product_id,
+            view_count=1,
+            created_at=now,
+            last_viewed_at=now,
+        )
+        .on_conflict_do_update(
+            index_elements=[table.c.user_id, table.c.product_id],
+            set_={
+                "view_count": table.c.view_count + 1,
+                "last_viewed_at": now,
+            },
+        )
+    )
+    await session.execute(upsert_statement)
+
+    stale_id_statement = (
+        select(ProductViewHistory.id)
+        .where(ProductViewHistory.user_id == user_id)
+        .order_by(ProductViewHistory.last_viewed_at.desc(), ProductViewHistory.created_at.desc())
+        .offset(PRODUCT_VIEW_HISTORY_MAX_ITEMS)
+    )
+    stale_ids = list((await session.execute(stale_id_statement)).scalars().all())
+    if stale_ids:
+        await session.execute(delete(ProductViewHistory).where(ProductViewHistory.id.in_(stale_ids)))
+
+    await session.commit()
+
+
+async def list_active_product_categories(session: AsyncSession) -> list[str]:
+    statement = (
+        select(Product.category)
+        .where(Product.is_active == True, Product.stock > 0, Product.category.is_not(None), Product.category != "")  # noqa: E712
+        .distinct()
+        .order_by(Product.category.asc())
+    )
+    result = await session.execute(statement)
+    return [item for item in result.scalars().all() if isinstance(item, str) and item.strip()]
+
+
+async def get_personalized_product_recommendations(
+    session: AsyncSession,
+    *,
+    user_id: UUID | None,
+    query: str = "",
+    category: str = "",
+    limit: int = DEFAULT_PRODUCT_RECOMMENDATION_LIMIT,
+) -> ProductRecommendationResponse:
+    safe_limit = max(1, min(limit, PRODUCT_VIEW_HISTORY_MAX_ITEMS))
+    cleaned_query = (query or "").strip()
+    cleaned_category = (category or "").strip()
+
+    history_rows: list[tuple[ProductViewHistory, Product]] = []
+    history_profile = RecommendationHistoryProfile(
+        recent_product_ids=[],
+        category_scores={},
+        brand_scores={},
+        tag_scores={},
+        shop_scores={},
+    )
+    if user_id is not None:
+        history_rows = await fetch_recent_product_view_rows(
+            session,
+            user_id=user_id,
+            limit=PRODUCT_VIEW_HISTORY_MAX_ITEMS,
+        )
+        history_profile = build_recommendation_history_profile(history_rows)
+
+    resolved_category = cleaned_category
+    if not resolved_category and cleaned_query:
+        resolved_category = infer_explicit_category_from_query(cleaned_query, await list_active_product_categories(session))
+
+    async def load_candidates(category_filter: str) -> list[Product]:
+        filters = [Product.is_active == True, Product.stock > 0]  # noqa: E712
+        if category_filter:
+            filters.append(Product.category == category_filter)
+        statement = (
+            select(Product)
+            .where(*filters)
+            .order_by(Product.monthly_sales.desc(), Product.rating.desc().nullslast(), Product.created_at.desc())
+            .limit(200)
+        )
+        return list((await session.execute(statement)).scalars().all())
+
+    products = await load_candidates(resolved_category)
+    if not products and resolved_category:
+        products = await load_candidates("")
+
+    if not products:
+        return ProductRecommendationResponse(items=[], personalized=bool(history_profile.recent_product_ids))
+
+    shop_map = await get_shop_map(session, [product.shop_id for product in products])
+    query_terms = extract_recommendation_query_terms(cleaned_query)
+    recent_product_id_set = set(history_profile.recent_product_ids)
+
+    scored_items: list[tuple[ProductRead, int, int, int, float, float, datetime, bool]] = []
+    for product in products:
+        product_read = to_product_read(product, shop=shop_map.get(product.shop_id), shop_name="Unknown Shop")
+        query_score = compute_product_query_score(
+            product_read,
+            query=cleaned_query,
+            query_terms=query_terms,
+            explicit_category=resolved_category,
+        )
+        history_score = compute_product_history_score(product_read, history_profile)
+        sales_score = int(product.monthly_sales or 0)
+        rating_score = float(product.rating or 0.0)
+        review_score = float(product.review_count or 0)
+        scored_items.append(
+            (
+                product_read,
+                query_score,
+                history_score,
+                sales_score,
+                rating_score,
+                review_score,
+                product.created_at,
+                product.id in recent_product_id_set,
+            )
+        )
+
+    scored_items.sort(
+        key=lambda item: (
+            1 if item[1] > 0 else 0,
+            item[1],
+            item[2],
+            item[3],
+            item[4],
+            item[5],
+            item[6],
+        ),
+        reverse=True,
+    )
+
+    selected: list[ProductRead] = []
+    seen_product_ids: set[UUID] = set()
+    for include_recent in (False, True):
+        for product_read, *_rest, is_recent in scored_items:
+            if include_recent != is_recent:
+                continue
+            if product_read.id in seen_product_ids:
+                continue
+            selected.append(product_read)
+            seen_product_ids.add(product_read.id)
+            if len(selected) >= safe_limit:
+                break
+        if len(selected) >= safe_limit:
+            break
+
+    return ProductRecommendationResponse(items=selected, personalized=bool(history_profile.recent_product_ids))
+
+
 async def get_shop_map(session: AsyncSession, shop_ids: list[UUID]) -> dict[UUID, Shop]:
     unique_ids = list({shop_id for shop_id in shop_ids})
     if not unique_ids:
@@ -2296,15 +3071,44 @@ async def build_order_detail(session: AsyncSession, order: Order) -> OrderRead:
     after_sales = await get_after_sales_by_order(session, order.id)
     logistics_read = None
     if logistics:
-        normalized_route_geo = normalize_route_geo(list(logistics.route_geo or []))
+        route_plan_value = list(logistics.route_plan or [])
+        route_geo_payload = list(logistics.route_geo or [])
+        normalized_route_geo = normalize_route_geo(route_geo_payload)
+        if not normalized_route_geo:
+            route_steps = extract_route_steps(route_geo_payload, route_plan_value)
+            if logistics.shipped_from_address_id:
+                shipped_from_address = await session.get(ShopAddress, logistics.shipped_from_address_id)
+                if shipped_from_address:
+                    _, _, route_steps, _ = await predict_logistics(
+                        build_full_address(shipped_from_address),
+                        order.address,
+                        logistics.updated_at,
+                    )
+                    route_plan_value = route_steps_to_plan(route_steps)
+            if route_steps:
+                rebuilt_route_geo = await build_route_geo(session, route_steps)
+                normalized_route_geo = normalize_route_geo(rebuilt_route_geo)
+                if normalized_route_geo:
+                    route_geo_payload = rebuilt_route_geo
+
+        current_lng = to_valid_coordinate(logistics.current_lng)
+        current_lat = to_valid_coordinate(logistics.current_lat)
+        if current_lng is None or current_lat is None:
+            current_geo = pick_geo_from_route(normalized_route_geo, logistics.current_location or "")
+            if not current_geo and normalized_route_geo:
+                current_geo = (normalized_route_geo[0].lng, normalized_route_geo[0].lat)
+            if current_geo:
+                current_lng = current_geo[0]
+                current_lat = current_geo[1]
+
         logistics_read = LogisticsRead(
             tracking_no=logistics.tracking_no,
             status=logistics.status,
             current_location=logistics.current_location,
-            current_lng=to_valid_coordinate(logistics.current_lng),
-            current_lat=to_valid_coordinate(logistics.current_lat),
+            current_lng=current_lng,
+            current_lat=current_lat,
             estimated_delivery_at=logistics.estimated_delivery_at,
-            route_plan=list(logistics.route_plan or []),
+            route_plan=route_plan_value,
             route_geo=normalized_route_geo,
             updated_at=logistics.updated_at,
         )
@@ -2335,94 +3139,95 @@ async def build_order_detail(session: AsyncSession, order: Order) -> OrderRead:
     )
 
 
-def parse_ollama_json(content: str) -> dict:
-    try:
-        data = json.loads(content)
-        if isinstance(data, dict):
-            return data
-    except json.JSONDecodeError:
-        pass
-
-    match = re.search(r"\{[\s\S]*\}", content)
-    if not match:
-        return {}
-    try:
-        data = json.loads(match.group(0))
-        if isinstance(data, dict):
-            return data
-    except json.JSONDecodeError:
-        return {}
-    return {}
-
-
 async def predict_logistics(
     ship_from: str,
     ship_to: str,
     now: datetime,
-) -> tuple[datetime, str, list[str], str]:
+) -> tuple[datetime, str, list[LogisticsRouteStep], str]:
     fallback_eta = now + timedelta(hours=72)
-    fallback_location, fallback_route = build_fallback_route(ship_from, ship_to)
-    fallback_raw = "fallback"
-
-    system_prompt = (
-        "You are a logistics planning assistant. "
-        "Return strict JSON with keys: eta_hours (int), current_location (string), route_points (array of strings), summary (string). "
-        "No markdown, no extra keys."
+    fallback_steps = build_fallback_route_steps(ship_from, ship_to)
+    fallback_route = route_steps_to_plan(fallback_steps)
+    fallback_location = fallback_route[0]
+    origin_detail = await call_amap_geocode_detail(ship_from)
+    destination_detail = await call_amap_geocode_detail(ship_to)
+    logger.info(
+        "Predict logistics geocode result. ship_from=%s origin_ok=%s ship_to=%s destination_ok=%s",
+        summarize_text_for_log(ship_from),
+        bool(origin_detail),
+        summarize_text_for_log(ship_to),
+        bool(destination_detail),
     )
-    user_prompt = (
-        f"Shipment time: {now.isoformat()} UTC\n"
-        f"Ship from: {ship_from}\n"
-        f"Ship to: {ship_to}\n"
-        "Estimate route and delivery ETA."
+    if not origin_detail and not destination_detail:
+        fallback_raw = json.dumps(
+            {
+                "provider": "deterministic_fallback",
+                "eta_hours": 72,
+                "current_location": fallback_location,
+                "route_steps": [
+                    {
+                        "name": step.name,
+                        "amap_query": step.amap_query,
+                        "stage": step.stage,
+                    }
+                    for step in fallback_steps
+                ],
+                "summary": "amap geocode unavailable, use text fallback",
+            },
+            ensure_ascii=False,
+        )
+        logger.warning(
+            "Predict logistics fell back to text route because both AMap geocode lookups failed. ship_from=%s ship_to=%s",
+            summarize_text_for_log(ship_from),
+            summarize_text_for_log(ship_to),
+        )
+        return fallback_eta, fallback_location, fallback_steps, fallback_raw
+
+    route_steps = build_deterministic_route_steps(ship_from, ship_to, origin_detail, destination_detail)
+    eta_hours = estimate_logistics_eta_hours(origin_detail, destination_detail)
+    current_location = route_steps[0].name
+    raw_payload = {
+        "provider": "deterministic_geocode",
+        "eta_hours": eta_hours,
+        "current_location": current_location,
+        "route_steps": [
+            {
+                "name": step.name,
+                "amap_query": step.amap_query,
+                "stage": step.stage,
+            }
+            for step in route_steps
+        ],
+        "origin": (
+            {
+                "formatted_address": origin_detail.formatted_address,
+                "province": origin_detail.province,
+                "city": origin_detail.city,
+                "district": origin_detail.district,
+                "location": [origin_detail.lng, origin_detail.lat],
+            }
+            if origin_detail
+            else None
+        ),
+        "destination": (
+            {
+                "formatted_address": destination_detail.formatted_address,
+                "province": destination_detail.province,
+                "city": destination_detail.city,
+                "district": destination_detail.district,
+                "location": [destination_detail.lng, destination_detail.lat],
+            }
+            if destination_detail
+            else None
+        ),
+        "summary": "generated from ship-from and ship-to addresses via AMap geocode",
+    }
+    logger.info(
+        "Predict logistics generated deterministic route. current_location=%s steps=%s eta_hours=%s",
+        current_location,
+        len(route_steps),
+        eta_hours,
     )
-
-    try:
-        timeout_sec = max(1.0, min(OLLAMA_TIMEOUT_SEC, LOGISTICS_LLM_MAX_WAIT_SEC))
-        async with httpx.AsyncClient(timeout=timeout_sec) as client:
-            response = await client.post(
-                f"{OLLAMA_BASE_URL.rstrip('/')}/api/chat",
-                json={
-                    "model": OLLAMA_MODEL,
-                    "stream": False,
-                    "format": "json",
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                },
-            )
-        response.raise_for_status()
-        payload = response.json()
-        content = payload.get("message", {}).get("content", "") if isinstance(payload, dict) else ""
-        if not isinstance(content, str) or not content.strip():
-            return fallback_eta, fallback_location, fallback_route, fallback_raw
-
-        parsed = parse_ollama_json(content)
-        eta_hours_raw = parsed.get("eta_hours")
-        eta_hours = 72
-        if isinstance(eta_hours_raw, (int, float)):
-            eta_hours = int(eta_hours_raw)
-        eta_hours = max(4, min(240, eta_hours))
-
-        current_location = parsed.get("current_location")
-        if not isinstance(current_location, str) or not current_location.strip():
-            current_location = fallback_location
-
-        route_points = parsed.get("route_points")
-        cleaned_route: list[str] = []
-        if isinstance(route_points, list):
-            for item in route_points:
-                if isinstance(item, str) and item.strip():
-                    cleaned_route.append(item.strip())
-        if should_replace_with_fallback_route(cleaned_route):
-            cleaned_route = fallback_route
-
-        if should_replace_with_fallback_location(current_location):
-            current_location = cleaned_route[0]
-
-        return now + timedelta(hours=eta_hours), current_location, cleaned_route, content.strip()
-    except Exception:
-        return fallback_eta, fallback_location, fallback_route, fallback_raw
+    return now + timedelta(hours=eta_hours), current_location, route_steps, json.dumps(raw_payload, ensure_ascii=False)
 
 
 async def to_user_read(session: AsyncSession, user: User) -> UserRead:
@@ -3098,6 +3903,36 @@ async def chat_internal_after_sales_summary(
     return response
 
 
+@app.get("/api/v1/chat/internal/product-recommendations", response_model=ProductRecommendationResponse)
+async def chat_internal_product_recommendations(
+    user_id: str | None = Query(default=None),
+    category: str = Query(default=""),
+    query: str = Query(default=""),
+    limit: int = Query(default=DEFAULT_PRODUCT_RECOMMENDATION_LIMIT, ge=1, le=20),
+    x_rasa_token: str | None = Header(default=None, alias="X-Rasa-Token"),
+    session: AsyncSession = Depends(get_session),
+):
+    expected_token = (RASA_INTERNAL_TOKEN or "").strip()
+    provided_token = (x_rasa_token or "").strip()
+    if expected_token and provided_token != expected_token:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    parsed_user_id: UUID | None = None
+    if isinstance(user_id, str) and user_id.strip():
+        try:
+            parsed_user_id = UUID(user_id.strip())
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=400, detail="Invalid user_id") from exc
+
+    return await get_personalized_product_recommendations(
+        session,
+        user_id=parsed_user_id,
+        query=query,
+        category=category,
+        limit=limit,
+    )
+
+
 @app.post("/api/v1/auth/register", response_model=UserRead)
 async def register(user: UserCreate, session: AsyncSession = Depends(get_session)):
     normalized_email = normalize_email(user.email)
@@ -3297,6 +4132,22 @@ async def list_products(
     )
 
 
+@app.get("/api/v1/products/history", response_model=ProductViewHistoryResponse)
+async def get_product_view_history(
+    limit: int = Query(default=DEFAULT_PRODUCT_HISTORY_LIMIT, ge=1, le=PRODUCT_VIEW_HISTORY_MAX_ITEMS),
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_db_user),
+):
+    if normalize_role(current_user.role) != "customer":
+        raise HTTPException(status_code=403, detail="Only customer accounts can view product history")
+
+    return await build_product_view_history_response(
+        session,
+        user_id=current_user.id,
+        limit=limit,
+    )
+
+
 @app.get("/api/v1/products/{product_id}", response_model=ProductRead)
 async def get_product(
     product_id: UUID = Path(...),
@@ -3307,6 +4158,20 @@ async def get_product(
     if not shop:
         raise HTTPException(status_code=500, detail="Shop not found for product")
     return to_product_read(product, shop=shop)
+
+
+@app.post("/api/v1/products/{product_id}/history", status_code=status.HTTP_204_NO_CONTENT)
+async def create_product_view_history(
+    product_id: UUID = Path(...),
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_db_user),
+):
+    if normalize_role(current_user.role) != "customer":
+        raise HTTPException(status_code=403, detail="Only customer accounts can record product history")
+
+    await get_active_product_or_404(session, product_id)
+    await record_product_view(session, user_id=current_user.id, product_id=product_id)
+    return None
 
 
 @app.get("/api/v1/cart", response_model=CartResponse)
@@ -3977,10 +4842,11 @@ async def merchant_ship_order(
     now = datetime.utcnow()
     ship_from_text = build_full_address(address)
     ship_to_text = order.address
-    eta, current_location, route_points, llm_raw_text = await predict_logistics(ship_from_text, ship_to_text, now)
+    eta, current_location, route_steps, llm_raw_text = await predict_logistics(ship_from_text, ship_to_text, now)
     current_location_value = (payload.current_location or "").strip() or current_location
-    route_geo_points = await build_route_geo(session, route_points)
-    route_geo_payload = [dump_response_model(item) for item in route_geo_points]
+    route_points = route_steps_to_plan(route_steps)
+    route_geo_payload = await build_route_geo(session, route_steps)
+    route_geo_points = normalize_route_geo(route_geo_payload)
     current_geo = pick_geo_from_route(route_geo_points, current_location_value)
     if not current_geo:
         current_geo = await geocode_with_cache(session, current_location_value)
@@ -4071,13 +4937,28 @@ async def merchant_advance_order_logistics(
 
     now = datetime.utcnow()
     next_location, next_status = compute_next_logistics_state(logistics)
-    route_geo_points = normalize_route_geo(list(logistics.route_geo or []))
+    route_steps = extract_route_steps(list(logistics.route_geo or []), list(logistics.route_plan or []))
+    route_geo_payload = list(logistics.route_geo or [])
+    route_geo_points = normalize_route_geo(route_geo_payload)
+    if not route_steps and logistics.shipped_from_address_id:
+        shipped_from_address = await session.get(ShopAddress, logistics.shipped_from_address_id)
+        if shipped_from_address:
+            _, _, route_steps, _ = await predict_logistics(
+                build_full_address(shipped_from_address),
+                order.address,
+                logistics.updated_at,
+            )
     if not route_geo_points:
-        route_geo_points = await build_route_geo(session, list(logistics.route_plan or []))
-        logistics.route_geo = [dump_response_model(item) for item in route_geo_points]
+        route_geo_payload = await build_route_geo(session, route_steps)
+        route_geo_points = normalize_route_geo(route_geo_payload)
+        logistics.route_geo = route_geo_payload
     current_geo = pick_geo_from_route(route_geo_points, next_location)
     if not current_geo:
-        current_geo = await geocode_with_cache(session, next_location)
+        next_step = find_route_step(route_steps, next_location)
+        if next_step:
+            current_geo = await geocode_with_cache(session, next_step.amap_query)
+        if not current_geo:
+            current_geo = await geocode_with_cache(session, next_location)
     if not current_geo and route_geo_points:
         current_geo = (route_geo_points[-1].lng, route_geo_points[-1].lat)
 
