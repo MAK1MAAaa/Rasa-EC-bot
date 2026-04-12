@@ -173,50 +173,25 @@ uv run python scripts/eval_lora.py `
 
 说明：本次微调后在 20 条离线约束集上未超过基座（少通过 1 条）。
 
-## 9. 导出为 Ollama 模型（用于系统形态 Benchmark）
+## 9. 兼容导出脚本（非当前主链路）
 
-为了让 LoRA 微调后的模型参与接口级 benchmark，需要先把 adapter 注册为 Ollama 模型。
-这一节主要面向 benchmark 或兼容旧链路；当前默认推荐的复杂 Agent 推理方式见第 10 节的 `vLLM + PEFT Runtime`。
+当前默认链路不会把 LoRA adapter 注册到 Ollama。复杂客服 Agent 和系统形态 benchmark 默认直接使用训练产物 `adapter/` 目录，通过第 10 节的 `vLLM + PEFT Runtime` 加载。
 
-新增脚本：`scripts/export_ollama_model.py`
+仓库中仍保留兼容脚本：`scripts/export_ollama_model.py`
 
-### 9.1 生成 Modelfile
+它只面向历史兼容或单独实验，不属于当前推荐部署。
 
-```powershell
-cd LoRA
-uv run python scripts/export_ollama_model.py `
-  --adapter-dir outputs/smoke_ec_faq_only/adapter `
-  --base-model qwen3.5:2b `
-  --model-name qwen3.5:2b-lora `
-  --output-dir outputs/smoke_ec_faq_only/ollama_export
-```
+### 9.1 当前推荐用法
 
-输出：
+训练完成后，直接使用：
 
-- `outputs/smoke_ec_faq_only/ollama_export/Modelfile`
+- `outputs/<run_name>/adapter`
 
-### 9.2 注册到 Ollama
+作为 vLLM 的 `--lora-modules` 输入，不需要执行 `ollama create`。
 
-```powershell
-ollama create qwen3.5:2b-lora -f outputs/smoke_ec_faq_only/ollama_export/Modelfile
-ollama run qwen3.5:2b-lora "你好"
-```
+### 9.2 兼容脚本说明
 
-如果你希望脚本直接执行 `ollama create`，可以追加：
-
-```powershell
-uv run python scripts/export_ollama_model.py `
-  --adapter-dir outputs/smoke_ec_faq_only/adapter `
-  --base-model qwen3.5:2b `
-  --model-name qwen3.5:2b-lora `
-  --output-dir outputs/smoke_ec_faq_only/ollama_export `
-  --run-create
-```
-
-说明：
-
-- `--base-model` 必须是本机 `ollama list` 中已经存在的基础模型名。
-- benchmark 脚本只消费已经能被 `ollama /api/chat` 调用的模型，不负责训练。
+如果你确实需要为旧链路生成 Ollama `Modelfile`，仍可以单独使用 `scripts/export_ollama_model.py`。但这不是当前 benchmark 或默认部署所依赖的步骤。
 
 ## 10. LoRA 推理改为 vLLM + PEFT Runtime（替代 Ollama ADAPTER）
 

@@ -108,12 +108,7 @@ graph TD
     C --> G
     B --> H[(pgvector)]
     B --> I[上传图片目录]
-    J[LoRA 导出脚本] --> F
-    M[LoRA Adapter] --> L
-    K[System Benchmark] --> B
-    K --> C
-    K --> F
-    K --> L
+    J[LoRA 训练产物 Adapter] --> L
 ```
 
 说明：
@@ -123,7 +118,25 @@ graph TD
 - Action Server 不直接访问数据库，而是优先通过后端内部接口取业务摘要。
 - Ollama 负责基础聊天、多模态与 embedding 模型。
 - 复杂 Agent 默认通过 OpenAI-compatible / vLLM 加载 LoRA adapter。
+
+### 4.1 Benchmark 拓扑
+
+```mermaid
+graph TD
+    K[System Benchmark Runner] --> B0[Backend Base 8000]
+    K --> B1[Backend LoRA 8001]
+    K --> R0[Rasa Only 5006]
+    K --> O0[Ollama Base Chat]
+    K --> O1[Ollama LoRA Chat]
+    B0 --> KB0[KB Index API]
+    B1 --> KB1[KB Index API]
+```
+
+说明：
+
 - benchmark 只通过 HTTP 接口访问系统，不直接调用内部函数。
+- benchmark 与业务运行拓扑解耦，便于单独说明对照系统和外部依赖。
+- backend 系统若声明支持知识检索，benchmark 会在运行前通过现有 KB 接口写入种子文档。
 
 ## 5. 关键业务链路
 
@@ -282,13 +295,19 @@ LoRA 目录负责：
 - 数据准备
 - 训练
 - 评估
-- 导出为 Ollama 可用模型
+- 产出可被 PEFT runtime 加载的 adapter
 
-当前导出入口：
+当前主链路入口：
+
+- `LoRA/scripts/train_lora.py`
+
+训练产物默认直接输出为 adapter 目录，供 vLLM / OpenAI-compatible 推理端按 PEFT runtime 加载。
+
+仓库中仍保留：
 
 - `LoRA/scripts/export_ollama_model.py`
 
-它通过生成 `Modelfile`，把 LoRA 适配器注册为 Ollama 可直接调用的模型名，供后端和 benchmark 使用。
+但该脚本只用于历史兼容或单独实验，不属于当前默认部署链路，也不是当前 benchmark 的必需步骤。
 
 ### 7.3 多模态与知识库
 
@@ -301,7 +320,7 @@ LoRA 目录负责：
 
 ## 8. Benchmark 体系设计
 
-当前 benchmark 已经从旧版 provider/layer 口径切换到“系统形态”口径。
+当前 benchmark 已经从旧版 provider/layer 口径升级为“客服链路多轮会话 + 系统形态对照”口径。
 
 ### 8.1 对照系统
 
@@ -311,28 +330,90 @@ LoRA 目录负责：
 - `rasa_plus_llm_base`
 - `rasa_plus_llm_lora`
 
-### 8.2 业务场景
+### 8.2 场景范围
+
+benchmark 范围严格锁定客服入口及其图片上传、待确认动作链路，不扩展到全量电商 REST API。当前固定 6 个场景族：
 
 - `recommendation`
-- `after_sales`
-- `image_after_sales`
+- `order_query`
+- `logistics_query`
+- `after_sales_query`
+- `knowledge_and_multimodal`
+- `transactional_action`
 
-### 8.3 核心脚本
+其中：
 
-- `backend/scripts/build_system_benchmark_dataset.py`
-- `backend/scripts/run_system_benchmark.py`
+- `core` 数据集用于论文主实验，固定 15 个人工编排会话样本
+- `extended` 数据集用于常规回归、补充实验和压力实验
 
-### 8.4 评测维度
+### 8.3 数据集与核心脚本
 
-- 性能维度：时延、吞吐、错误率
-- 质量维度：任务成功率、规则通过率、能力支持情况
+- 数据集目录：`backend/benchmarks/prompts/core/`
+- 扩展集目录：`backend/benchmarks/prompts/extended/`
+- 数据清单：`backend/benchmarks/prompts/dataset_manifest.json`
+- 知识库种子：`backend/benchmarks/kb_seed/`
+- 构建脚本：`backend/scripts/build_system_benchmark_dataset.py`
+- 执行脚本：`backend/scripts/run_system_benchmark.py`
+
+每条样本固定包含：
+
+- `scenario_family`
+- `scenario`
+- `turns`
+- `account`
+- `required_capabilities`
+- `preconditions`
+- `expected_outcomes`
+- `tags`
+
+多轮步骤当前支持：
+
+- `login`
+- `upload_image`
+- `chat_send`
+- `pending_decision`
+- `sleep_until_expired`
+
+### 8.4 能力矩阵与评测维度
+
+系统能力位包括：
+
+- `supports_auth_queries`
+- `supports_kb_policy`
+- `supports_kb_manual`
+- `supports_pending_action`
+- `supports_pending_decision`
+- `supports_attachments`
+- `supports_image_analysis`
+- `supports_cards`
+
+评测维度分为三层：
+
+- 能力型评分：推荐、查询、检索、图片分析、草案生成是否完成
+- 结构型评分：卡片、按钮、待确认卡、附件流程结果是否符合预期
+- 流程型评分：登录拦截、订单号要求、越权阻止、确认/取消、过期拦截是否正确
+
+同时保留性能指标：
+
+- 时延
+- 吞吐
+- 错误率
+
+并新增会话与覆盖率指标：
+
+- 会话成功率
+- 能力覆盖率
+- 流程完成率
+- 确认动作成功率
+- 过期动作拦截率
 
 ### 8.5 设计原则
 
 - 只走 HTTP 接口，不直接调用内部函数
+- 不修改业务主协议语义，不新增专用 benchmark API
 - 纯 Rasa 必须是单独实例，不能混用带 LLM fallback 的服务
-- 图片场景采用全矩阵 + `unsupported/na`
-- 输出结果直接服务论文写作
+- 不支持能力统一记为 `unsupported/na`，不混淆为系统失败
+- 输出结果直接服务论文写作与系统对照分析
 
 ## 9. 启动与部署顺序
 
@@ -362,7 +443,7 @@ LoRA 目录负责：
 
 ## 11. 后续可扩展方向
 
-- 引入 vLLM 作为第二套模型服务后端，并保持同一 benchmark 口径
-- 将图片与知识库检索进一步统一到单一 Agent 工具协议
-- 把 benchmark 结果自动转换为论文图表
-- 把配置拆成开发、论文实验、演示三套 profile
+- 将 `extended` 数据集从“目录级复制”进一步收敛为“缺省回退到 core”的去重加载策略
+- 把 benchmark 结果继续自动转换为更完整的论文图表和附录素材
+- 在不破坏黑盒原则的前提下，补充更细粒度的错误归因与流程可视化
+- 将图片分析、知识检索、待确认动作继续统一到更稳定的 Agent 工具协议

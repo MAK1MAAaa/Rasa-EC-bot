@@ -12,7 +12,7 @@
 - 规则型客服与 LLM 客服对照
 - 基础模型与 LoRA 模型对照
 - 单纯 Rasa、单纯 LLM、Rasa + LLM 等系统形态对照
-- 推荐、售后、图片售后三类业务场景 benchmark
+- 六类客服场景族、多轮会话、知识检索、图片售后、待确认动作 benchmark
 - 最低可交付客服闭环已补齐：订单查询、物流查询、订单取消、收货信息修改、物流投诉、退换货售后
 
 ## 1. 项目结构
@@ -20,7 +20,7 @@
 - `frontend/`：Vue 3 前端
 - `backend/`：FastAPI 后端、数据库脚本、benchmark 脚本
 - `rasa/`：Rasa 机器人、Action Server、纯 Rasa benchmark 配置
-- `LoRA/`：LoRA 数据准备、训练、评估、导出到 Ollama
+- `LoRA/`：LoRA 数据准备、训练、评估、兼容导出脚本
 - `database/`：PostgreSQL / Redis 本地数据目录
 - `tests/`：benchmark 规则与脚本测试
 - `design.md`：当前项目架构设计说明
@@ -241,7 +241,7 @@ pnpm dev
 
 ## 8. 系统形态 Benchmark
 
-当前论文实验口径已经统一到系统形态 benchmark，不再使用旧版 provider/layer benchmark。
+当前论文实验统一使用“客服链路多轮会话 benchmark”，继续保持系统形态对照和 HTTP 黑盒评测原则，不直接调用内部业务函数，也不新增专用 benchmark API。
 
 ### 8.1 对照系统
 
@@ -251,35 +251,82 @@ pnpm dev
 - `rasa_plus_llm_base`
 - `rasa_plus_llm_lora`
 
-### 8.2 业务场景
+### 8.2 场景族
 
 - `recommendation`
-- `after_sales`
-- `image_after_sales`
+- `order_query`
+- `logistics_query`
+- `after_sales_query`
+- `knowledge_and_multimodal`
+- `transactional_action`
 
-### 8.3 关键脚本
+核心集固定覆盖 15 个人工编排客服子场景，扩展集在核心集基础上放大量级，用于压力实验，不作为论文主表唯一来源。
 
-- `backend/scripts/build_system_benchmark_dataset.py`
-- `backend/scripts/run_system_benchmark.py`
-- `backend/benchmarks/experiment.yaml`
+### 8.3 数据集与配置
 
-### 8.4 生成数据集
+- 脚本：`backend/scripts/build_system_benchmark_dataset.py`
+- 执行器：`backend/scripts/run_system_benchmark.py`
+- 主配置：`backend/benchmarks/experiment.yaml`
+- 核心集目录：`backend/benchmarks/prompts/core/`
+- 扩展集目录：`backend/benchmarks/prompts/extended/`
+- 数据清单：`backend/benchmarks/prompts/dataset_manifest.json`
+- 知识库种子：`backend/benchmarks/kb_seed/`
+
+每条样本固定包含：
+
+- `scenario_family`
+- `scenario`
+- `turns`
+- `account`
+- `required_capabilities`
+- `preconditions`
+- `expected_outcomes`
+- `tags`
+
+### 8.4 能力矩阵
+
+`experiment.yaml` 为每个系统声明能力位：
+
+- `supports_auth_queries`
+- `supports_kb_policy`
+- `supports_kb_manual`
+- `supports_pending_action`
+- `supports_pending_decision`
+- `supports_attachments`
+- `supports_image_analysis`
+- `supports_cards`
+
+样本会声明 `required_capabilities`。系统缺少所需能力时，结果记为 `unsupported/na`，不计入成功率，但会进入覆盖率统计和论文补充表。
+
+### 8.5 Profile
+
+- `quick`：使用 `core` 数据集，每个场景族至少覆盖一条会话，用于冒烟和联调。
+- `standard`：使用 `extended` 数据集，带多并发层级，用于常规回归和压力观察。
+- `paper`：使用 `core` 数据集、固定并发和重复次数，用于论文主实验。
+
+### 8.6 生成数据集
 
 ```bash
 uv run python backend/scripts/build_system_benchmark_dataset.py
 ```
 
-### 8.5 运行快速实验
+### 8.7 运行快速实验
 
 ```bash
 uv run python backend/scripts/run_system_benchmark.py \
   --profile quick \
   --systems rasa_only,llm_base_ollama,llm_lora_ollama,rasa_plus_llm_base,rasa_plus_llm_lora \
-  --scenarios recommendation,after_sales,image_after_sales \
+  --scenarios recommendation,order_query,logistics_query,after_sales_query,knowledge_and_multimodal,transactional_action \
   --verbose
 ```
 
-### 8.6 结果目录
+说明：
+
+- `rasa_plus_llm_base` 与 `rasa_plus_llm_lora` 会在运行前按能力矩阵自动尝试写入 benchmark 专用 KB 种子文档。
+- 多轮样本支持 `login`、`upload_image`、`chat_send`、`pending_decision`、`sleep_until_expired` 五类步骤。
+- `transactional_action` 场景会验证待确认草案、确认执行、取消执行和过期拦截。
+
+### 8.8 结果目录
 
 输出目录位于：
 
@@ -288,10 +335,14 @@ uv run python backend/scripts/run_system_benchmark.py \
 主要文件包括：
 
 - `raw_events.jsonl`
+- `turn_events.jsonl`
 - `summary.csv`
 - `scenario_quality.csv`
+- `conversation_summary.csv`
+- `capability_coverage.csv`
 - `system_matrix.csv`
 - `report.md`
+- `paper_tables.md`
 
 ## 9. 纯 Rasa 对照实例
 
@@ -322,24 +373,11 @@ uv run rasa run \
   --port 5006
 ```
 
-## 10. LoRA 导出到 Ollama
+## 10. LoRA 训练产物与兼容导出
 
-如果已经完成 LoRA 训练，可通过下面的脚本生成 Ollama `Modelfile` 并注册模型：
+当前默认链路不会把 LoRA 导出到 Ollama。复杂客服 Agent 直接使用训练产物 `adapter/` 目录，由 `vLLM(OpenAI Compatible API) + PEFT runtime` 加载。
 
-```bash
-cd LoRA
-uv run python scripts/export_ollama_model.py \
-  --adapter-dir outputs/smoke_ec_faq_only/adapter \
-  --base-model qwen3.5:2b \
-  --model-name qwen3.5:2b-lora \
-  --output-dir outputs/smoke_ec_faq_only/ollama_export
-```
-
-然后执行：
-
-```bash
-ollama create qwen3.5:2b-lora -f LoRA/outputs/smoke_ec_faq_only/ollama_export/Modelfile
-```
+仓库中仍保留 `LoRA/scripts/export_ollama_model.py`，但它只用于历史兼容或单独实验，不属于当前默认部署和 benchmark 必需步骤。
 
 ## 11. 常用端口
 

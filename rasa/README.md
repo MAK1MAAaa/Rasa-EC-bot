@@ -119,6 +119,13 @@ Action Server 仍复用：
 uv run rasa run actions --actions actions --port 5055
 ```
 
+在新版客服链路多轮会话 benchmark 中，`rasa_only` 主要用于规则链路对照，默认只覆盖其真实支持能力：
+
+- 支持：基础推荐、登录后订单查询、物流查询、售后进度查询、卡片输出
+- 不支持：知识库检索、图片上传分析、待确认写操作、确认/取消决策链路
+
+这些不支持能力在 benchmark 中会被标记为 `unsupported/na`，进入覆盖率统计，但不按系统失败计入主成功率。
+
 ## 7. 当前对话能力
 
 ### 7.1 已支持意图
@@ -173,6 +180,8 @@ uv run rasa run actions --actions actions --port 5055
 
 - 纯 Rasa Server：`5006`
 - LoRA 后端实例：`8001`
+
+当前 benchmark 已从旧的 3 个单轮场景升级为 6 个客服场景族、多轮步骤执行和能力矩阵判定。Rasa 侧只需要继续保证 `benchmark/rasa_only/` 资产与真实规则能力对齐，不要为了 benchmark 人为补入图片、知识库或待确认写操作能力。
 
 ## 10. 说明
 

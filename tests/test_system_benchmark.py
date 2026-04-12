@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -15,220 +17,347 @@ sys.modules["run_system_benchmark"] = MODULE
 SPEC.loader.exec_module(MODULE)
 
 
-def make_sample(*, scenario: str, user_input: str, checks: dict, requires_image: bool = False):
-    return MODULE.SampleRecord(
+def make_sample(
+    *,
+    scenario_family: str = "order_query",
+    scenario: str = "query_order",
+    account: str = "customer",
+    required_capabilities: list[str] | None = None,
+    expected: dict | None = None,
+) -> MODULE.ConversationSample:
+    return MODULE.ConversationSample(
         sample_id="sample-1",
+        scenario_family=scenario_family,
         scenario=scenario,
-        system_prompt="",
-        context="",
-        user_input=user_input,
-        requires_auth=scenario != "recommendation",
-        requires_image=requires_image,
-        expected_capability="test",
-        checks=checks,
+        turns=[
+            MODULE.TurnStep(turn_id="login", kind="login"),
+            MODULE.TurnStep(turn_id="chat", kind="chat_send", message="查询订单 ORD202603300001"),
+        ],
+        account=account,
+        required_capabilities=required_capabilities or ["supports_auth_queries", "supports_cards"],
+        preconditions={"allowed_order_ids": ["ORD202603300001"]},
+        expected_outcomes=MODULE.ExpectedOutcomes(
+            required_any_text_keywords=["订单", "待发货"],
+            forbidden_text_keywords=[],
+            required_card_types=["order"],
+            required_action_types=[],
+            requires_confirmation_buttons=False,
+            should_return_order_id=True,
+            should_block_without_login=False,
+            should_be_unsupported=False,
+            must_avoid_hallucinated_order_id=True,
+            allowed_order_ids=["ORD202603300001"],
+            min_response_chars=8,
+        )
+        if expected is None
+        else MODULE.ExpectedOutcomes(**expected),
         tags=["test"],
-        image_case="damaged_package" if requires_image else "",
+        tier="core",
+        repeatable=True,
     )
 
 
-class SystemBenchmarkScoreTests(unittest.TestCase):
-    def test_recommendation_passes_with_keywords(self) -> None:
-        sample = make_sample(
-            scenario="recommendation",
-            user_input="给我推荐一款轻薄本",
-            checks={
-                "required_any_keywords": ["推荐", "适合"],
-                "forbidden_keywords": [],
-                "generic_rejection_keywords": [],
-                "must_not_hallucinate_order_id": True,
-                "requires_confirmation": False,
-                "must_have_next_step": False,
+def make_turn_event(
+    *,
+    sample: MODULE.ConversationSample,
+    turn_id: str,
+    turn_kind: str,
+    success: bool = True,
+    unsupported: bool = False,
+    response_text: str = "",
+    response_card_types: list[str] | None = None,
+    response_action_types: list[str] | None = None,
+    response_order_ids: list[str] | None = None,
+) -> MODULE.TurnEvent:
+    return MODULE.TurnEvent(
+        timestamp="",
+        system="backend",
+        scenario_family=sample.scenario_family,
+        scenario=sample.scenario,
+        sample_id=sample.sample_id,
+        tier=sample.tier,
+        repeat=1,
+        concurrency=1,
+        conversation_index=1,
+        turn_index=1,
+        turn_id=turn_id,
+        turn_kind=turn_kind,
+        requires_auth=sample.account == "customer",
+        required_capabilities=list(sample.required_capabilities),
+        executed=not unsupported,
+        unsupported=unsupported,
+        success=success,
+        http_status=200 if success else None,
+        error_type="" if success else "runtime_error",
+        error_message="",
+        latency_ms=10.0,
+        started_at=1.0,
+        finished_at=1.1,
+        response_text=response_text,
+        response_chars=len(response_text),
+        response_card_count=len(response_card_types or []),
+        response_action_count=len(response_action_types or []),
+        response_card_types=response_card_types or [],
+        response_action_types=response_action_types or [],
+        response_order_ids=response_order_ids or [],
+    )
+
+
+class SystemBenchmarkTests(unittest.TestCase):
+    def test_load_dataset_file_parses_conversation_model(self) -> None:
+        payload = {
+            "id": "conversation-1",
+            "scenario_family": "transactional_action",
+            "scenario": "update_shipping_confirm",
+            "turns": [
+                {"id": "login", "kind": "login"},
+                {"id": "draft", "kind": "chat_send", "message": "修改地址 ORD202603300001 地址: 北京"},
+                {"id": "confirm", "kind": "pending_decision", "decision": "confirm"},
+            ],
+            "account": "customer",
+            "required_capabilities": ["supports_pending_action", "supports_pending_decision"],
+            "preconditions": {"allowed_order_ids": ["ORD202603300001"]},
+            "expected_outcomes": {
+                "required_any_text_keywords": ["修改", "已更新"],
+                "forbidden_text_keywords": [],
+                "required_card_types": ["pending_action", "order"],
+                "required_action_types": ["pending_action_decision"],
+                "requires_confirmation_buttons": True,
+                "should_return_order_id": True,
+                "should_block_without_login": False,
+                "should_be_unsupported": False,
+                "must_avoid_hallucinated_order_id": True,
+                "allowed_order_ids": ["ORD202603300001"],
                 "min_response_chars": 8,
-                "next_step_keywords": [],
             },
-        )
-        status, task_success, passed, flags = MODULE.score_response(
+            "tags": ["core"],
+            "tier": "core",
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            dataset_path = Path(temp_dir) / "transactional_action.jsonl"
+            dataset_path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+            samples = MODULE.load_dataset_file(dataset_path)
+        self.assertEqual(len(samples), 1)
+        self.assertEqual(samples[0].scenario_family, "transactional_action")
+        self.assertEqual(samples[0].turns[2].kind, "pending_decision")
+        self.assertTrue(samples[0].expected_outcomes.requires_confirmation_buttons)
+
+    def test_score_conversation_passes_with_required_cards_and_order_id(self) -> None:
+        sample = make_sample()
+        turn_events = [
+            make_turn_event(sample=sample, turn_id="login", turn_kind="login"),
+            make_turn_event(
+                sample=sample,
+                turn_id="chat",
+                turn_kind="chat_send",
+                response_text="订单 ORD202603300001 当前为待发货。",
+                response_card_types=["order"],
+                response_order_ids=["ORD202603300001"],
+            ),
+        ]
+        status, conversation_success, passed, flags = MODULE.score_conversation(
             sample=sample,
-            response_text="可以看看这几款轻薄本，比较适合办公。",
-            response_card_count=0,
+            turn_events=turn_events,
             unsupported=False,
-            upload_ok=False,
         )
         self.assertEqual(status, "pass")
-        self.assertTrue(task_success)
+        self.assertTrue(conversation_success)
         self.assertTrue(passed)
-        self.assertFalse(flags["generic_response"])
+        self.assertFalse(flags["missing_required_cards"])
 
-    def test_recommendation_generic_response_fails(self) -> None:
+    def test_score_conversation_detects_login_block_failure(self) -> None:
         sample = make_sample(
-            scenario="recommendation",
-            user_input="推荐几款耳机",
-            checks={
-                "required_any_keywords": ["推荐", "适合"],
-                "forbidden_keywords": [],
-                "generic_rejection_keywords": ["请提供更多信息"],
-                "must_not_hallucinate_order_id": True,
-                "requires_confirmation": False,
-                "must_have_next_step": False,
+            scenario_family="order_query",
+            scenario="login_required",
+            account="anonymous",
+            required_capabilities=["supports_auth_queries"],
+            expected={
+                "required_any_text_keywords": ["登录"],
+                "forbidden_text_keywords": [],
+                "required_card_types": [],
+                "required_action_types": [],
+                "requires_confirmation_buttons": False,
+                "should_return_order_id": False,
+                "should_block_without_login": True,
+                "should_be_unsupported": False,
+                "must_avoid_hallucinated_order_id": True,
+                "allowed_order_ids": [],
                 "min_response_chars": 8,
-                "next_step_keywords": [],
             },
         )
-        status, task_success, passed, flags = MODULE.score_response(
+        turn_events = [
+            make_turn_event(
+                sample=sample,
+                turn_id="chat",
+                turn_kind="chat_send",
+                response_text="这里是订单查询结果。",
+                response_order_ids=[],
+            )
+        ]
+        status, conversation_success, passed, flags = MODULE.score_conversation(
             sample=sample,
-            response_text="请提供更多信息，我再帮你判断。",
-            response_card_count=0,
+            turn_events=turn_events,
             unsupported=False,
-            upload_ok=False,
         )
         self.assertEqual(status, "fail")
-        self.assertFalse(task_success)
+        self.assertTrue(conversation_success)
         self.assertFalse(passed)
-        self.assertTrue(flags["generic_response"])
+        self.assertTrue(flags["login_block_failure"])
 
-    def test_after_sales_missing_confirmation_fails(self) -> None:
-        sample = make_sample(
-            scenario="after_sales",
-            user_input="你直接帮我退货吧",
-            checks={
-                "required_any_keywords": ["退货", "订单"],
-                "forbidden_keywords": [],
-                "generic_rejection_keywords": [],
-                "must_not_hallucinate_order_id": True,
-                "requires_confirmation": True,
-                "must_have_next_step": True,
-                "min_response_chars": 8,
-                "next_step_keywords": ["申请", "提交", "确认"],
-            },
-        )
-        status, task_success, passed, flags = MODULE.score_response(
+    def test_score_conversation_unsupported_is_na(self) -> None:
+        sample = make_sample(required_capabilities=["supports_kb_manual"])
+        status, conversation_success, passed, flags = MODULE.score_conversation(
             sample=sample,
-            response_text="你可以进入订单页提交退货申请。",
-            response_card_count=0,
-            unsupported=False,
-            upload_ok=False,
-        )
-        self.assertEqual(status, "fail")
-        self.assertFalse(task_success)
-        self.assertFalse(passed)
-        self.assertTrue(flags["missing_confirmation"])
-
-    def test_after_sales_hallucinated_order_id_fails(self) -> None:
-        sample = make_sample(
-            scenario="after_sales",
-            user_input="我想看退款进度",
-            checks={
-                "required_any_keywords": ["退款", "查看"],
-                "forbidden_keywords": [],
-                "generic_rejection_keywords": [],
-                "must_not_hallucinate_order_id": True,
-                "requires_confirmation": False,
-                "must_have_next_step": True,
-                "min_response_chars": 8,
-                "next_step_keywords": ["查看", "订单"],
-            },
-        )
-        status, task_success, passed, flags = MODULE.score_response(
-            sample=sample,
-            response_text="订单 ORD202699990001 正在退款中，你可以在订单页查看。",
-            response_card_count=0,
-            unsupported=False,
-            upload_ok=False,
-        )
-        self.assertEqual(status, "fail")
-        self.assertFalse(task_success)
-        self.assertFalse(passed)
-        self.assertTrue(flags["hallucinated_order_id"])
-
-    def test_image_unsupported_is_na(self) -> None:
-        sample = make_sample(
-            scenario="image_after_sales",
-            user_input="我上传了一张破损图片，帮我看下售后",
-            requires_image=True,
-            checks={
-                "required_any_keywords": ["图片", "售后"],
-                "forbidden_keywords": [],
-                "generic_rejection_keywords": [],
-                "must_not_hallucinate_order_id": True,
-                "requires_confirmation": False,
-                "must_have_next_step": True,
-                "min_response_chars": 8,
-                "next_step_keywords": ["申请", "售后"],
-            },
-        )
-        status, task_success, passed, flags = MODULE.score_response(
-            sample=sample,
-            response_text="",
-            response_card_count=0,
+            turn_events=[],
             unsupported=True,
-            upload_ok=False,
         )
         self.assertEqual(status, "na")
-        self.assertFalse(task_success)
+        self.assertFalse(conversation_success)
         self.assertFalse(passed)
         self.assertFalse(flags["supported"])
 
-    def test_summary_excludes_unsupported_from_success_rate(self) -> None:
-        unsupported_event = MODULE.BenchmarkEvent(
+    def test_summary_rows_track_unsupported_and_success_rate(self) -> None:
+        supported_event = MODULE.ConversationEvent(
             timestamp="",
-            system="llm_base_ollama",
-            scenario="image_after_sales",
+            system="backend",
+            scenario_family="knowledge_and_multimodal",
+            scenario="manual_query",
             sample_id="s1",
+            tier="core",
             repeat=1,
             concurrency=1,
-            request_index=1,
-            requires_auth=True,
-            requires_image=True,
-            executed=False,
+            conversation_index=1,
+            account="anonymous",
+            required_capabilities=["supports_kb_manual"],
+            turn_count=1,
+            executed_turns=1,
+            unsupported=False,
+            success=True,
+            http_error_count=0,
+            latency_ms=100.0,
+            started_at=1.0,
+            finished_at=1.1,
+            quality_status="pass",
+            conversation_success=True,
+            passed=True,
+            quality_flags={"supported": True},
+        )
+        unsupported_event = MODULE.ConversationEvent(
+            timestamp="",
+            system="backend",
+            scenario_family="knowledge_and_multimodal",
+            scenario="manual_query",
+            sample_id="s2",
+            tier="core",
+            repeat=1,
+            concurrency=1,
+            conversation_index=2,
+            account="anonymous",
+            required_capabilities=["supports_kb_manual"],
+            turn_count=1,
+            executed_turns=0,
             unsupported=True,
             success=False,
-            http_status=None,
-            error_type="unsupported_capability",
-            error_message="",
+            http_error_count=0,
             latency_ms=0.0,
-            started_at=1.0,
-            finished_at=1.0,
-            response_text="",
-            response_chars=0,
-            response_card_count=0,
-            response_action_count=0,
+            started_at=1.2,
+            finished_at=1.2,
             quality_status="na",
-            task_success=False,
+            conversation_success=False,
             passed=False,
             quality_flags={"supported": False},
         )
-        success_event = MODULE.BenchmarkEvent(
+        rows = MODULE.build_summary_rows([supported_event, unsupported_event])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["unsupported_rate"], 0.5)
+        self.assertEqual(rows[0]["conversation_success_rate"], 1.0)
+
+    def test_capability_coverage_rows(self) -> None:
+        event_1 = MODULE.ConversationEvent(
             timestamp="",
-            system="llm_base_ollama",
-            scenario="image_after_sales",
-            sample_id="s2",
+            system="backend",
+            scenario_family="after_sales_query",
+            scenario="policy",
+            sample_id="s1",
+            tier="core",
             repeat=1,
             concurrency=1,
-            request_index=2,
-            requires_auth=True,
-            requires_image=True,
-            executed=True,
+            conversation_index=1,
+            account="anonymous",
+            required_capabilities=["supports_kb_policy"],
+            turn_count=1,
+            executed_turns=1,
             unsupported=False,
             success=True,
-            http_status=200,
-            error_type="",
-            error_message="",
-            latency_ms=120.0,
-            started_at=2.0,
-            finished_at=2.2,
-            response_text="建议联系售后提交图片凭证。",
-            response_chars=13,
-            response_card_count=0,
-            response_action_count=0,
+            http_error_count=0,
+            latency_ms=80.0,
+            started_at=1.0,
+            finished_at=1.08,
             quality_status="pass",
-            task_success=True,
+            conversation_success=True,
             passed=True,
-            quality_flags={"supported": True, "image_flow_ok": True},
+            quality_flags={},
         )
-        rows = MODULE.build_summary_rows([unsupported_event, success_event])
+        event_2 = MODULE.ConversationEvent(
+            timestamp="",
+            system="backend",
+            scenario_family="knowledge_and_multimodal",
+            scenario="manual",
+            sample_id="s2",
+            tier="core",
+            repeat=1,
+            concurrency=1,
+            conversation_index=2,
+            account="anonymous",
+            required_capabilities=["supports_kb_policy"],
+            turn_count=1,
+            executed_turns=0,
+            unsupported=True,
+            success=False,
+            http_error_count=0,
+            latency_ms=0.0,
+            started_at=2.0,
+            finished_at=2.0,
+            quality_status="na",
+            conversation_success=False,
+            passed=False,
+            quality_flags={},
+        )
+        rows = MODULE.build_capability_coverage_rows([event_1, event_2])
         self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["success_rate"], 1.0)
-        self.assertEqual(rows[0]["unsupported_rate"], 0.5)
+        self.assertEqual(rows[0]["capability"], "supports_kb_policy")
+        self.assertEqual(rows[0]["support_rate"], 0.5)
+
+    def test_system_matrix_contains_family_metrics(self) -> None:
+        event = MODULE.ConversationEvent(
+            timestamp="",
+            system="backend",
+            scenario_family="transactional_action",
+            scenario="confirm",
+            sample_id="s1",
+            tier="core",
+            repeat=1,
+            concurrency=1,
+            conversation_index=1,
+            account="customer",
+            required_capabilities=["supports_pending_action"],
+            turn_count=3,
+            executed_turns=3,
+            unsupported=False,
+            success=True,
+            http_error_count=0,
+            latency_ms=120.0,
+            started_at=1.0,
+            finished_at=1.12,
+            quality_status="pass",
+            conversation_success=True,
+            passed=True,
+            quality_flags={},
+        )
+        rows = MODULE.build_system_matrix([event], ["transactional_action"])
+        self.assertEqual(len(rows), 1)
+        self.assertIn("transactional_action_quality_pass_rate", rows[0])
+        self.assertEqual(rows[0]["transactional_action_conversation_success_rate"], 1.0)
 
 
 if __name__ == "__main__":

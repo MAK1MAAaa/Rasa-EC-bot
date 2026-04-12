@@ -393,7 +393,7 @@ WHERE email IN (
   - 沐川厨房电器馆：家电、家居
   - 脉搏健康穿戴馆：穿戴、智能家居
 
-### 10.3 新增环境变量
+### 11.5 新增环境变量
 ```env
 RASA_PARSE_PATH=/model/parse
 CHAT_ROUTER_ENABLE_AGENT=true
@@ -402,14 +402,14 @@ AGENT_LLM_MODEL=qwen3.5-2b-lora
 AGENT_LLM_TIMEOUT_SEC=45
 ```
 
-### 10.4 可观测性
+### 11.6 可观测性
 - 每次聊天请求生成 `trace_id`。
 - 内部路由标记：`route=rule|agent`。
 - Agent 模式会记录工具调用日志（工具名/读写级别/参数/成功状态）。
 
 ## 12. Multi-modal RAG（新增）
 
-### 11.1 环境变量
+### 12.1 环境变量
 在 `.env` 中新增：
 
 ```env
@@ -423,7 +423,7 @@ CHAT_UPLOAD_DIR=data/chat_uploads
 CHAT_UPLOAD_MAX_MB=8
 ```
 
-### 11.2 新增接口
+### 12.2 新增接口
 - `POST /api/v1/chat/upload-image`
   - `multipart/form-data`，字段名 `file`，仅支持 jpg/png/webp
   - 返回：`attachment_id/mime/size_bytes/width/height`
@@ -433,13 +433,13 @@ CHAT_UPLOAD_MAX_MB=8
   - 请求体新增可选：`attachments: string[]`
   - 带附件请求会强制走 Agent 路由
 
-### 11.3 安全与执行边界
+### 12.3 安全与执行边界
 - 图片附件会校验归属，禁止跨用户读取。
 - 写操作仍保持“待确认草案”机制，不会由 Agent 直接落库执行退款/退换货。
 
 ## 13. 物流地图集成（新增）
 
-### 12.1 环境变量
+### 13.1 环境变量
 请在 `backend/.env` 中新增：
 
 ```env
@@ -451,14 +451,14 @@ AMAP_QPS_LIMIT=5
 
 后端启动时会自动加载 `backend/.env`，并在日志中输出 AMap key 是否已生效的掩码信息，便于确认当前进程读到的是不是正确配置。
 
-### 12.2 数据模型扩展
+### 13.2 数据模型扩展
 - `logistics` 新增字段：
   - `current_lng`
   - `current_lat`
   - `route_geo`（对外响应仍为 `name/lng/lat`，库内原始 JSON 可额外保留 `amap_query/stage`）
 - 新增表：`geo_cache`（地址地理编码缓存）。
 
-### 12.3 运行时行为
+### 13.3 运行时行为
 - 商家发货时不再依赖本地 Ollama 生成路线，改为基于“发货地址 + 收货地址 + AMap geocode”生成内部 `route_steps[]`：
   - `name`：站点显示名
   - `amap_query`：用于调用高德地理编码的查询词
@@ -473,13 +473,13 @@ AMAP_QPS_LIMIT=5
 - 启动阶段包含轻量 schema 自检（`CREATE TABLE IF NOT EXISTS` + `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`）。
 - 为避免本机代理环境干扰高德请求，后端 geocode 调用会忽略系统代理变量，并把 query、状态码、`info/infocode`、是否命中坐标写入日志，方便排查“只有文本路线没有地图”的问题。
 
-### 12.4 向后兼容
+### 13.4 向后兼容
 API 路径保持不变，`logistics` 响应仅新增可选字段：
 - `current_lng?: number`
 - `current_lat?: number`
 - `route_geo?: { name: string; lng: number; lat: number }[]`
 
-### 12.5 AMap 密钥放置说明（重要）
+### 13.5 AMap 密钥放置说明（重要）
 本项目同时使用两类 AMap 密钥：
 
 1. Web Service Key（后端地理编码）
@@ -498,7 +498,7 @@ AMAP_QPS_LIMIT=5
 - `AMAP_WEB_KEY` 仅后端使用，不要暴露到前端。
 - `AMAP_WEB_SIG` 为可选项，若你在高德控制台开启签名校验则需要配置。
 
-### 12.6 `securityJsCode` 使用说明
+### 13.6 `securityJsCode` 使用说明
 `securityJsCode` 用于 JS API 安全增强，应配置在前端环境变量中：
 
 ```env
@@ -517,16 +517,16 @@ VITE_AMAP_SECURITY_JS_CODE=your_security_js_code
 
 ## 14. Benchmark 口径说明
 
-旧版 `provider/layer` benchmark 脚本已经从仓库移除。  
-当前推荐的论文主实验入口统一使用第 15 节的系统形态接口级 benchmark。
+旧版 `provider/layer` benchmark 已从仓库移除。当前统一使用客服链路多轮会话 benchmark，目标是做论文级系统形态对照，而不是最小化 CI 成本。
+
 ## 15. 接口级 Benchmark（系统形态）
 
-当前推荐的论文实验入口是：
+当前推荐的论文实验入口：
 
 - `backend/scripts/build_system_benchmark_dataset.py`
 - `backend/scripts/run_system_benchmark.py`
 
-它直接对比 5 种系统形态，而不是旧版 `provider/layer` 基准：
+它直接对比 5 种系统形态：
 
 - `rasa_only`
 - `llm_base_ollama`
@@ -534,35 +534,103 @@ VITE_AMAP_SECURITY_JS_CODE=your_security_js_code
 - `rasa_plus_llm_base`
 - `rasa_plus_llm_lora`
 
-默认场景：
+### 15.1 场景范围
+
+benchmark 只覆盖客服入口及其图片上传、待确认动作链路，不扩展到全量电商 REST API。当前固定 6 个场景族：
 
 - `recommendation`
-- `after_sales`
-- `image_after_sales`
+- `order_query`
+- `logistics_query`
+- `after_sales_query`
+- `knowledge_and_multimodal`
+- `transactional_action`
 
-### 14.1 配置文件
+其中核心集固定 15 个人工编排子场景，扩展集用于放大量级和压力实验。
+
+### 15.2 数据集结构
+
+数据集由脚本生成到以下目录：
+
+- `backend/benchmarks/prompts/core/`
+- `backend/benchmarks/prompts/extended/`
+- `backend/benchmarks/prompts/dataset_manifest.json`
+
+每条会话样本固定包含：
+
+- `scenario_family`
+- `scenario`
+- `turns`
+- `account`
+- `required_capabilities`
+- `preconditions`
+- `expected_outcomes`
+- `tags`
+
+`turns` 显式描述多轮步骤，当前支持：
+
+- `login`
+- `upload_image`
+- `chat_send`
+- `pending_decision`
+- `sleep_until_expired`
+
+### 15.3 配置文件
 
 主配置：`backend/benchmarks/experiment.yaml`
 
-关键字段：
+重点字段：
 
-- `profiles`
-- `auth.login_url`
-- `auth.me_url`
-- `auth.customer.email`
-- `auth.customer.password`
-- `image_assets_dir`
-- `image_case_map`
+- `profiles.quick`
+- `profiles.standard`
+- `profiles.paper`
+- `knowledge_seed`
+- `auth.customer`
+- `auth.merchant`
 - `systems.<name>.kind`
 - `systems.<name>.base_url`
 - `systems.<name>.path`
-- `systems.<name>.model`
+- `systems.<name>.upload_path`
+- `systems.<name>.pending_action_path`
 - `systems.<name>.auth_mode`
-- `systems.<name>.supports_image`
-- `systems.<name>.supports_cards`
-- `systems.<name>.requires_upload_step`
+- `systems.<name>.capabilities`
 
-### 14.2 纯 Rasa 实例要求
+### 15.4 能力矩阵与 `unsupported/na`
+
+系统能力位固定为：
+
+- `supports_auth_queries`
+- `supports_kb_policy`
+- `supports_kb_manual`
+- `supports_pending_action`
+- `supports_pending_decision`
+- `supports_attachments`
+- `supports_image_analysis`
+- `supports_cards`
+
+每个样本会声明 `required_capabilities`。若系统缺少所需能力，执行器会将该样本标记为 `unsupported/na`：
+
+- 不计入成功率和质量通过率
+- 计入覆盖率和 `unsupported_rate`
+- 会出现在 `capability_coverage.csv` 与 `paper_tables.md`
+
+### 15.5 知识库种子
+
+为了保持黑盒评测原则，benchmark 不依赖预置内部数据。对支持知识检索的 backend system，执行器会在运行前通过现有接口自动写入 benchmark 专用 KB 种子：
+
+- `backend/benchmarks/kb_seed/after_sales_policy.md`
+- `backend/benchmarks/kb_seed/product_manual.md`
+
+接口入口仍是：
+
+- `POST /api/v1/kb/index`
+
+### 15.6 Profile
+
+- `quick`：`core` 数据集，单次并发，用于联调和冒烟。
+- `standard`：`extended` 数据集，多并发层级，用于常规回归和压力观察。
+- `paper`：`core` 数据集，固定并发与重复次数，用于论文主实验。
+
+### 15.7 纯 Rasa 实例要求
 
 为了保证 `rasa_only` 真正不含 LLM fallback，请使用独立 benchmark 资产：
 
@@ -596,7 +664,7 @@ cd rasa
 uv run rasa run actions --actions actions --port 5055
 ```
 
-### 14.3 基础模型 / LoRA 模型 / 双后端
+### 15.8 基础模型 / LoRA 模型 / 双后端
 
 基础模型：
 
@@ -604,18 +672,7 @@ uv run rasa run actions --actions actions --port 5055
 ollama pull qwen3.5:2b
 ```
 
-LoRA 适配器导出为 Ollama 模型：
-
-```bash
-cd LoRA
-uv run python scripts/export_ollama_model.py \
-  --adapter-dir outputs/smoke_ec_faq_only/adapter \
-  --base-model qwen3.5:2b \
-  --model-name qwen3.5:2b-lora \
-  --output-dir outputs/smoke_ec_faq_only/ollama_export
-
-ollama create qwen3.5:2b-lora -f outputs/smoke_ec_faq_only/ollama_export/Modelfile
-```
+LoRA 对照实例不需要把 adapter 导出到 Ollama。当前默认做法是直接加载训练产物 `outputs/.../adapter`，通过第 16 节的 `vLLM + PEFT runtime` 提供 OpenAI-compatible 接口。
 
 后端基础模型实例：
 
@@ -628,18 +685,12 @@ AGENT_LLM_PROVIDER=ollama AGENT_LLM_BASE_URL=http://127.0.0.1:11434 AGENT_LLM_MO
 
 ```bash
 cd backend
-AGENT_LLM_MODEL=qwen3.5-2b-lora uv run uvicorn app.main:app --host 127.0.0.1 --port 8001
+AGENT_LLM_PROVIDER=openai_compat AGENT_LLM_BASE_URL=http://127.0.0.1:8002/v1 AGENT_LLM_API_KEY=EMPTY AGENT_LLM_MODEL=qwen3.5-2b-lora uv run uvicorn app.main:app --host 127.0.0.1 --port 8001
 ```
 
-### 14.4 数据集与运行命令
+### 15.9 数据集与运行命令
 
-默认 prompt 文件：
-
-- `backend/benchmarks/prompts/recommendation.jsonl`
-- `backend/benchmarks/prompts/after_sales.jsonl`
-- `backend/benchmarks/prompts/image_after_sales.jsonl`
-
-若要重新生成默认语料：
+重建 benchmark 数据集：
 
 ```bash
 uv run python backend/scripts/build_system_benchmark_dataset.py
@@ -651,21 +702,28 @@ uv run python backend/scripts/build_system_benchmark_dataset.py
 uv run python backend/scripts/run_system_benchmark.py \
   --profile quick \
   --systems rasa_only,llm_base_ollama,llm_lora_ollama,rasa_plus_llm_base,rasa_plus_llm_lora \
-  --scenarios recommendation,after_sales,image_after_sales \
+  --scenarios recommendation,order_query,logistics_query,after_sales_query,knowledge_and_multimodal,transactional_action \
   --verbose
 ```
 
-中等强度实验：
+标准实验：
 
 ```bash
 uv run python backend/scripts/run_system_benchmark.py \
-  --profile medium \
+  --profile standard \
   --systems rasa_only,llm_base_ollama,llm_lora_ollama,rasa_plus_llm_base,rasa_plus_llm_lora \
-  --scenarios recommendation,after_sales,image_after_sales \
-  --repeats 2
+  --scenarios recommendation,order_query,logistics_query,after_sales_query,knowledge_and_multimodal,transactional_action
 ```
 
-### 14.5 结果字段
+论文实验：
+
+```bash
+uv run python backend/scripts/run_system_benchmark.py \
+  --profile paper \
+  --systems rasa_only,llm_base_ollama,llm_lora_ollama,rasa_plus_llm_base,rasa_plus_llm_lora
+```
+
+### 15.10 结果文件与论文引用
 
 输出目录：
 
@@ -673,25 +731,30 @@ uv run python backend/scripts/run_system_benchmark.py \
 
 文件说明：
 
-- `raw_events.jsonl`：逐请求原始记录。
-- `summary.csv`：逐批次聚合结果。
-- `scenario_quality.csv`：按系统和场景统计评分失败原因。
-- `system_matrix.csv`：论文主表。
+- `raw_events.jsonl`：会话级原始事件。
+- `turn_events.jsonl`：逐步骤事件，适合排查多轮流程和附件上传。
+- `summary.csv`：按系统、场景族、并发和重复次数聚合。
+- `scenario_quality.csv`：按系统和场景族统计质量失败原因。
+- `conversation_summary.csv`：会话级成功率、流程完成率、确认动作结果。
+- `capability_coverage.csv`：能力覆盖率与 `unsupported/na` 统计。
+- `system_matrix.csv`：论文主表，按场景族输出 `quality_pass_rate`、`conversation_success_rate`、`unsupported_rate`、`p95_ms`。
 - `report.md`：中文摘要报告。
+- `paper_tables.md`：可直接引用到论文的主表、补充表和威胁说明。
 
-建议论文引用口径：
+建议论文主文引用：
 
-- 接口性能：`p95_ms`、`throughput_rps`、`success_rate`
-- 任务效果：`task_success_rate`、`quality_pass_rate`
+- 质量：`quality_pass_rate`
+- 会话成功：`conversation_success_rate`
 - 能力缺失：`unsupported_rate`
+- 性能：`p95_ms`
 
-## 15. Agent LoRA 推理改为 vLLM + PEFT
+## 16. Agent LoRA 推理改为 vLLM + PEFT
 
 当前推荐方案：
 - 复杂客服 Agent：`vLLM + PEFT adapter runtime`
 - 视觉与向量：继续使用 Ollama（`qwen3-vl:2b`、`mxbai-embed-large`）
 
-### 15.1 后端环境变量
+### 16.1 后端环境变量
 
 `backend/.env` 新增/更新：
 
@@ -707,7 +770,7 @@ AGENT_LLM_TIMEOUT_SEC=45
 - 旧字段 `AGENT_OLLAMA_MODEL`、`AGENT_OLLAMA_TIMEOUT_SEC` 仍可被读取，但仅用于平滑迁移。
 - 新部署请统一使用 `AGENT_LLM_*`。
 
-### 15.2 启动 vLLM（PEFT Runtime）
+### 16.2 启动 vLLM（PEFT Runtime）
 
 ```bash
 cd LoRA
@@ -724,7 +787,7 @@ uv run --with vllm python -m vllm.entrypoints.openai.api_server \
   --enforce-eager
 ```
 
-### 15.3 启动后端
+### 16.3 启动后端
 
 ```bash
 cd backend
