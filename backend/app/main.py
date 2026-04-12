@@ -5428,6 +5428,39 @@ async def merchant_update_address(
     return to_shop_address_read(address)
 
 
+@app.delete("/api/v1/merchant/addresses/{address_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def merchant_delete_address(
+    address_id: UUID = Path(...),
+    shop: Shop = Depends(get_current_merchant_shop),
+    session: AsyncSession = Depends(get_session),
+):
+    address = await session.get(ShopAddress, address_id)
+    if not address:
+        raise HTTPException(status_code=404, detail="Address not found")
+    if address.shop_id != shop.id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    logistics_result = await session.execute(
+        select(Logistics).where(Logistics.shipped_from_address_id == address.id)
+    )
+    for logistics in logistics_result.scalars().all():
+        logistics.shipped_from_address_id = None
+
+    peers_result = await session.execute(
+        select(ShopAddress)
+        .where(ShopAddress.shop_id == shop.id, ShopAddress.id != address.id)
+        .order_by(ShopAddress.is_default.desc(), ShopAddress.created_at.desc())
+    )
+    peers = peers_result.scalars().all()
+
+    await session.delete(address)
+    if address.is_default and peers:
+        for index, peer in enumerate(peers):
+            peer.is_default = index == 0
+
+    await session.commit()
+
+
 @app.get("/api/v1/merchant/products", response_model=ProductListResponse)
 async def merchant_list_products(
     page: int = Query(default=1, ge=1),
