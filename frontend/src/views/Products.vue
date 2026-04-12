@@ -256,6 +256,27 @@ const formatShipHours = (value: number) => {
   return `${value} 小时发货`
 }
 
+const formatCardSummary = (product: Product) => {
+  const text = (product.description || '').replace(/\s+/g, ' ').trim()
+  if (!text) {
+    return product.model ? `型号 ${product.model}` : '点击查看完整规格与店铺信息'
+  }
+  return text.length > 34 ? `${text.slice(0, 34)}...` : text
+}
+
+const formatIdentityLine = (product: Product) => {
+  const parts = [product.brand, product.model].filter(Boolean)
+  return parts.length > 0 ? parts.join(' · ') : product.category || '精选商品'
+}
+
+const formatShopLine = (product: Product) => {
+  const parts = [product.shop_name]
+  if (product.shop_shipping_city) {
+    parts.push(`${product.shop_shipping_city} 发货`)
+  }
+  return parts.join(' · ')
+}
+
 const addCart = async (productId: string) => {
   if (!authStore.isLoggedIn) {
     router.push('/login')
@@ -476,31 +497,27 @@ onBeforeUnmount(() => {
             <div class="card-headline">
               <Badge variant="muted">{{ product.category || '未分类' }}</Badge>
               <Badge v-if="product.brand" variant="default">{{ product.brand }}</Badge>
+              <Badge v-if="product.stock <= 0" variant="danger">售罄</Badge>
             </div>
 
             <div class="copy-stack">
               <h3 @click="openProductDetail(product.id)">{{ product.name }}</h3>
-              <p>{{ product.description || '暂无商品描述，点击详情查看完整规格与店铺信息。' }}</p>
+              <p class="identity-line">{{ formatIdentityLine(product) }}</p>
+              <p class="summary-line">{{ formatCardSummary(product) }}</p>
             </div>
 
             <button class="shop-link" type="button" @click="filterByShop(product.shop_id, product.shop_name)">
-              {{ product.shop_name }}
+              {{ formatShopLine(product) }}
             </button>
 
-            <div class="metrics">
+            <div class="metrics compact">
               <span>{{ formatRating(product.rating) }}</span>
-              <span>{{ product.review_count }} 条评价</span>
               <span>月销 {{ product.monthly_sales }}</span>
-            </div>
-
-            <div class="metrics muted-row">
-              <span v-if="product.shop_rating">店铺 {{ formatRating(product.shop_rating) }}</span>
-              <span v-if="product.shop_shipping_city">{{ product.shop_shipping_city }} 发货</span>
               <span>{{ formatShipHours(product.ship_in_hours) }}</span>
             </div>
 
             <div v-if="product.tags?.length" class="tags">
-              <Badge v-for="tag in product.tags.slice(0, 4)" :key="tag" variant="warn">{{ tag }}</Badge>
+              <Badge v-for="tag in product.tags.slice(0, 3)" :key="tag" variant="warn">{{ tag }}</Badge>
             </div>
 
             <div class="price-row">
@@ -508,9 +525,7 @@ onBeforeUnmount(() => {
                 <strong>¥ {{ product.price.toFixed(2) }}</strong>
                 <span v-if="product.original_price && product.original_price > product.price">¥ {{ product.original_price.toFixed(2) }}</span>
               </div>
-              <Badge :variant="product.stock > 0 ? 'success' : 'danger'">
-                {{ product.stock > 0 ? `库存 ${product.stock}` : '售罄' }}
-              </Badge>
+              <Badge v-if="product.stock > 0" variant="success">库存 {{ product.stock }}</Badge>
             </div>
 
             <div class="actions">
@@ -722,6 +737,18 @@ onBeforeUnmount(() => {
   font-size: 13px;
 }
 
+.identity-line {
+  font-weight: 700;
+  color: #5d503f;
+}
+
+.summary-line {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
 .shop-link {
   justify-self: start;
   border: none;
@@ -738,8 +765,11 @@ onBeforeUnmount(() => {
   gap: 10px;
 }
 
-.muted-row {
+.metrics.compact {
+  padding-top: 2px;
+  border-top: 1px solid rgba(106, 81, 47, 0.08);
   color: #807261;
+  font-size: 12px;
 }
 
 .price-row {
@@ -827,6 +857,11 @@ onBeforeUnmount(() => {
   .metrics,
   .price-row {
     flex-wrap: wrap;
+  }
+
+  .shop-link {
+    width: 100%;
+    justify-content: center;
   }
 }
 </style>
