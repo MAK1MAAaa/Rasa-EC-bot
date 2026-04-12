@@ -62,17 +62,23 @@ from .models import (
     ChatSendResponse,
     ChatUploadImageResponse,
     CreateAfterSalesRequest,
+    CreateLogisticsComplaintRequest,
     CreateOrderRequest,
     KBIndexRequest,
     KBIndexResponse,
     GeoPointRead,
     GeoCache,
     Logistics,
+    LogisticsComplaint,
+    LogisticsComplaintRead,
     LogisticsRead,
     LoginRequest,
     MerchantAfterSalesItem,
     MerchantAfterSalesListResponse,
     MerchantAfterSalesUpdateRequest,
+    MerchantLogisticsComplaintItem,
+    MerchantLogisticsComplaintListResponse,
+    MerchantLogisticsComplaintUpdateRequest,
     MerchantOrderListResponse,
     MerchantOrderShipRequest,
     MerchantProductCreate,
@@ -96,12 +102,14 @@ from .models import (
     Shop,
     ShopAddress,
     ShopAddressCreate,
+    ShopAddressListResponse,
     ShopAddressRead,
     ShopAddressUpdate,
     ShopBrief,
     ShopRead,
     Token,
     TokenData,
+    UpdateOrderShippingRequest,
     UpdateCartItemRequest,
     User,
     UserCreate,
@@ -179,6 +187,7 @@ UPLOAD_ROOT_DIR = (
 
 ORDER_STATUS_PENDING_SHIPMENT = "pending_shipment"
 ORDER_STATUS_SHIPPED = "shipped"
+ORDER_STATUS_CANCELLED = "cancelled"
 LOGISTICS_STATUS_IN_TRANSIT = "in_transit"
 LOGISTICS_STATUS_DELIVERED = "delivered"
 
@@ -192,6 +201,18 @@ AFTER_SALES_STATUS_PROCESSING = "processing"
 AFTER_SALES_STATUS_MERCHANT_REJECTED = "merchant_rejected"
 AFTER_SALES_STATUS_COMPLETED = "completed"
 AFTER_SALES_STATUS_CANCELLED = "cancelled"
+
+LOGISTICS_COMPLAINT_STATUS_SUBMITTED = "submitted"
+LOGISTICS_COMPLAINT_STATUS_PROCESSING = "processing"
+LOGISTICS_COMPLAINT_STATUS_RESOLVED = "resolved"
+LOGISTICS_COMPLAINT_STATUS_REJECTED = "rejected"
+LOGISTICS_COMPLAINT_STATUS_CANCELLED = "cancelled"
+
+LOGISTICS_COMPLAINT_TERMINAL_STATUSES = {
+    LOGISTICS_COMPLAINT_STATUS_RESOLVED,
+    LOGISTICS_COMPLAINT_STATUS_REJECTED,
+    LOGISTICS_COMPLAINT_STATUS_CANCELLED,
+}
 
 AFTER_SALES_TERMINAL_STATUSES = {
     AFTER_SALES_STATUS_MERCHANT_REJECTED,
@@ -219,6 +240,9 @@ PRODUCT_FILTER_CACHE_KEY = "products:filters:v2"
 CHAT_ACTION_TTL_SEC = int(os.getenv("CHAT_ACTION_TTL_SEC", "300"))
 CHAT_ACTION_TYPE_CHECKOUT = "checkout"
 CHAT_ACTION_TYPE_AFTER_SALES = "after_sales"
+CHAT_ACTION_TYPE_CANCEL_ORDER = "cancel_order"
+CHAT_ACTION_TYPE_UPDATE_ORDER_SHIPPING = "update_order_shipping"
+CHAT_ACTION_TYPE_LOGISTICS_COMPLAINT = "logistics_complaint"
 PRODUCT_VIEW_HISTORY_MAX_ITEMS = 20
 DEFAULT_PRODUCT_HISTORY_LIMIT = 8
 DEFAULT_PRODUCT_RECOMMENDATION_LIMIT = 5
@@ -401,6 +425,30 @@ async def ensure_product_view_history_schema() -> None:
             await conn.execute(text(statement))
 
 
+async def ensure_order_service_schema() -> None:
+    statements = [
+        """
+        CREATE TABLE IF NOT EXISTS logistics_complaints (
+            id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+            order_id VARCHAR(50) NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+            reason TEXT NOT NULL,
+            status VARCHAR(50) NOT NULL,
+            resolution_note TEXT,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_logistics_complaints_order_id ON logistics_complaints(order_id)",
+        """
+        CREATE INDEX IF NOT EXISTS idx_logistics_complaints_status_updated_at
+        ON logistics_complaints(status, updated_at DESC)
+        """,
+    ]
+    async with engine.begin() as conn:
+        for statement in statements:
+            await conn.execute(text(statement))
+
+
 @app.on_event("startup")
 async def on_startup() -> None:
     logger.info(
@@ -418,6 +466,7 @@ async def on_startup() -> None:
     await ensure_logistics_geo_schema()
     await ensure_catalog_schema()
     await ensure_product_view_history_schema()
+    await ensure_order_service_schema()
     await cache.connect()
 
 
@@ -954,6 +1003,20 @@ def extract_address_from_message(message: str) -> str | None:
     return value or None
 
 
+def extract_logistics_complaint_reason_from_message(message: str) -> str | None:
+    reason = extract_reason_from_message(message)
+    if reason:
+        return reason
+    text = (message or "").strip()
+    if not text:
+        return None
+    for pattern in [r"(?:投诉|抱怨|问题)[:：]\s*(.+)$", r"(?:太慢了|一直没动静|一直未更新)\s*(.+)$"]:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match and match.group(1).strip():
+            return match.group(1).strip()
+    return None
+
+
 def contains_action_marker(text: str) -> bool:
     markers = ["帮我", "给我", "代我", "立即", "马上", "现在", "直接", "自动", "提交", "发起"]
     return any(marker in text for marker in markers)
@@ -987,6 +1050,45 @@ def is_after_sales_request(message: str) -> bool:
     return any(command in text for command in explicit_commands) or contains_action_marker(text)
 
 
+def is_cancel_order_request(message: str) -> bool:
+    text = (message or "").strip()
+    if not text:
+        return False
+    lowered = text.lower()
+    keywords = ["取消订单", "撤销订单", "cancel order", "cancel my order"]
+    if not any(keyword in text or keyword in lowered for keyword in keywords):
+        return False
+    if text.startswith(("如何", "怎么", "怎样", "可以", "请问")):
+        return False
+    return True
+
+
+def is_update_shipping_request(message: str) -> bool:
+    text = (message or "").strip()
+    if not text:
+        return False
+    lowered = text.lower()
+    keywords = ["修改地址", "修改收货地址", "更新地址", "改地址", "change address", "update address"]
+    if not any(keyword in text or keyword in lowered for keyword in keywords):
+        return False
+    if text.startswith(("如何", "怎么", "怎样", "可以", "请问")):
+        return False
+    return True
+
+
+def is_logistics_complaint_request(message: str) -> bool:
+    text = (message or "").strip()
+    if not text:
+        return False
+    lowered = text.lower()
+    keywords = ["投诉物流", "物流投诉", "投诉快递", "快递投诉", "complain logistics", "delivery complaint"]
+    if not any(keyword in text or keyword in lowered for keyword in keywords):
+        return False
+    if text.startswith(("如何", "怎么", "怎样", "可以", "请问")):
+        return False
+    return True
+
+
 async def get_latest_order_for_user(session: AsyncSession, user_id: UUID) -> Order | None:
     statement = select(Order).where(Order.user_id == user_id).order_by(Order.created_at.desc()).limit(1)
     result = await session.execute(statement)
@@ -999,6 +1101,19 @@ async def has_active_after_sales_request(session: AsyncSession, order_id: str) -
         .where(
             AfterSales.order_id == order_id,
             ~AfterSales.status.in_(tuple(AFTER_SALES_TERMINAL_STATUSES)),
+        )
+        .limit(1)
+    )
+    result = await session.execute(statement)
+    return result.scalar_one_or_none() is not None
+
+
+async def has_active_logistics_complaint(session: AsyncSession, order_id: str) -> bool:
+    statement = (
+        select(LogisticsComplaint)
+        .where(
+            LogisticsComplaint.order_id == order_id,
+            ~LogisticsComplaint.status.in_(tuple(LOGISTICS_COMPLAINT_TERMINAL_STATUSES)),
         )
         .limit(1)
     )
@@ -1119,6 +1234,137 @@ async def prepare_after_sales_chat_action(message: str, current_user: User, sess
     )
 
 
+async def prepare_cancel_order_chat_action(message: str, current_user: User, session: AsyncSession) -> ChatReplyMessage:
+    order_id = extract_order_id_from_message(message)
+    if not order_id:
+        return build_chat_message("请提供订单号后我才能帮你取消订单，例如：取消订单 ORD202604010001。")
+
+    order = await get_order_or_404(session, order_id)
+    if order.user_id != current_user.id:
+        return build_chat_message("该订单不属于当前登录账号，无法为你取消。")
+    if order.status == ORDER_STATUS_CANCELLED:
+        return build_chat_message("该订单已经取消，无需重复操作。")
+    if order.status != ORDER_STATUS_PENDING_SHIPMENT:
+        return build_chat_message("只有待发货订单支持取消。订单已发货后请改走售后流程。")
+    if await has_active_after_sales_request(session, order.id):
+        return build_chat_message("该订单已有进行中的售后申请，请先处理售后记录。")
+
+    pending_payload = {
+        "type": CHAT_ACTION_TYPE_CANCEL_ORDER,
+        "created_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "expires_at_ts": now_unix_ts() + CHAT_ACTION_TTL_SEC,
+        "payload": {
+            "order_id": order.id,
+        },
+        "summary": {
+            "title": "取消订单草案",
+            "description": "取消后会恢复商品库存，请确认是否继续。",
+            "details": [
+                {"label": "订单号", "value": order.id},
+                {"label": "当前状态", "value": "待发货"},
+                {"label": "订单金额", "value": f"¥ {float(order.total_amount):.2f}"},
+            ],
+        },
+    }
+    await set_pending_chat_action(current_user.id, pending_payload)
+    return build_chat_message(
+        "已生成取消订单草案，请在下方卡片中确认或取消（5分钟内有效）。",
+        cards=[{"type": "pending_action", "data": build_pending_action_card(pending_payload)}],
+        actions=build_pending_action_buttons(),
+    )
+
+
+async def prepare_update_shipping_chat_action(message: str, current_user: User, session: AsyncSession) -> ChatReplyMessage:
+    order_id = extract_order_id_from_message(message)
+    if not order_id:
+        return build_chat_message(
+            "请提供订单号和新地址后我才能帮你修改收货信息，例如：修改地址 ORD202604010001 地址: 上海市浦东新区XX路88号。"
+        )
+
+    address = extract_address_from_message(message)
+    if not address:
+        return build_chat_message("请补充新的收货地址，例如：修改地址 ORD202604010001 地址: 上海市浦东新区XX路88号。")
+
+    order = await get_order_or_404(session, order_id)
+    if order.user_id != current_user.id:
+        return build_chat_message("该订单不属于当前登录账号，无法为你修改收货信息。")
+    if order.status == ORDER_STATUS_CANCELLED:
+        return build_chat_message("该订单已经取消，不能再修改收货信息。")
+    if order.status != ORDER_STATUS_PENDING_SHIPMENT:
+        return build_chat_message("只有待发货订单支持修改收货信息。订单发货后请联系人工处理。")
+
+    next_contact_email = extract_email_from_message(message) or normalize_email(order.contact_email)
+    pending_payload = {
+        "type": CHAT_ACTION_TYPE_UPDATE_ORDER_SHIPPING,
+        "created_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "expires_at_ts": now_unix_ts() + CHAT_ACTION_TTL_SEC,
+        "payload": {
+            "order_id": order.id,
+            "address": address,
+            "contact_email": next_contact_email,
+        },
+        "summary": {
+            "title": "修改收货信息草案",
+            "description": "请确认新的收货地址与联系邮箱。",
+            "details": [
+                {"label": "订单号", "value": order.id},
+                {"label": "新地址", "value": address},
+                {"label": "联系邮箱", "value": next_contact_email},
+            ],
+        },
+    }
+    await set_pending_chat_action(current_user.id, pending_payload)
+    return build_chat_message(
+        "已生成收货信息修改草案，请在下方卡片中确认或取消（5分钟内有效）。",
+        cards=[{"type": "pending_action", "data": build_pending_action_card(pending_payload)}],
+        actions=build_pending_action_buttons(),
+    )
+
+
+async def prepare_logistics_complaint_chat_action(message: str, current_user: User, session: AsyncSession) -> ChatReplyMessage:
+    order_id = extract_order_id_from_message(message)
+    if not order_id:
+        return build_chat_message("请提供订单号后我才能帮你发起物流投诉，例如：投诉物流 ORD202604010001 原因: 包裹长时间未更新。")
+
+    reason = extract_logistics_complaint_reason_from_message(message)
+    if not reason:
+        return build_chat_message("请补充投诉原因，例如：投诉物流 ORD202604010001 原因: 包裹长时间未更新。")
+
+    order = await get_order_or_404(session, order_id)
+    if order.user_id != current_user.id:
+        return build_chat_message("该订单不属于当前登录账号，无法为你发起物流投诉。")
+    if order.status != ORDER_STATUS_SHIPPED:
+        return build_chat_message("只有已发货订单支持物流投诉。未发货订单建议先联系商家或直接取消。")
+    if not await get_logistics_by_order(session, order.id):
+        return build_chat_message("该订单还没有有效物流信息，暂时无法发起物流投诉。")
+    if await has_active_logistics_complaint(session, order.id):
+        return build_chat_message("该订单已有进行中的物流投诉，请等待处理结果。")
+
+    pending_payload = {
+        "type": CHAT_ACTION_TYPE_LOGISTICS_COMPLAINT,
+        "created_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "expires_at_ts": now_unix_ts() + CHAT_ACTION_TTL_SEC,
+        "payload": {
+            "order_id": order.id,
+            "reason": reason,
+        },
+        "summary": {
+            "title": "物流投诉草案",
+            "description": "请确认投诉内容，提交后将进入处理队列。",
+            "details": [
+                {"label": "订单号", "value": order.id},
+                {"label": "投诉原因", "value": reason},
+            ],
+        },
+    }
+    await set_pending_chat_action(current_user.id, pending_payload)
+    return build_chat_message(
+        "已生成物流投诉草案，请在下方卡片中确认或取消（5分钟内有效）。",
+        cards=[{"type": "pending_action", "data": build_pending_action_card(pending_payload)}],
+        actions=build_pending_action_buttons(),
+    )
+
+
 async def execute_pending_checkout_action(
     current_user: User,
     session: AsyncSession,
@@ -1207,6 +1453,105 @@ async def execute_pending_after_sales_action(
     )
 
 
+async def execute_pending_cancel_order_action(
+    current_user: User,
+    session: AsyncSession,
+    payload: dict[str, Any],
+) -> ChatReplyMessage:
+    order_id = (payload.get("order_id") or "").strip()
+    if not order_id:
+        raise HTTPException(status_code=400, detail="Pending cancel-order payload is incomplete")
+
+    order_detail = await cancel_order(order_id=order_id, session=session, current_user=current_user)
+    return build_chat_message(
+        "订单已取消。",
+        cards=[
+            {
+                "type": "order",
+                "data": {
+                    "id": order_detail.id,
+                    "status": order_detail.status,
+                    "total_amount": float(order_detail.total_amount),
+                    "item_count": len(order_detail.items),
+                    "created_at": order_detail.created_at.isoformat(),
+                    "order_link": f"{FRONTEND_BASE_URL.rstrip('/')}/order/{order_detail.id}",
+                },
+            }
+        ],
+    )
+
+
+async def execute_pending_update_order_shipping_action(
+    current_user: User,
+    session: AsyncSession,
+    payload: dict[str, Any],
+) -> ChatReplyMessage:
+    order_id = (payload.get("order_id") or "").strip()
+    address = (payload.get("address") or "").strip()
+    contact_email = normalize_email((payload.get("contact_email") or "").strip())
+    if not order_id or not address:
+        raise HTTPException(status_code=400, detail="Pending update-shipping payload is incomplete")
+
+    order_detail = await update_order_shipping(
+        order_id=order_id,
+        payload=UpdateOrderShippingRequest(address=address, contact_email=contact_email or None),
+        session=session,
+        current_user=current_user,
+    )
+    return build_chat_message(
+        "收货信息已更新。",
+        cards=[
+            {
+                "type": "order",
+                "data": {
+                    "id": order_detail.id,
+                    "status": order_detail.status,
+                    "total_amount": float(order_detail.total_amount),
+                    "item_count": len(order_detail.items),
+                    "created_at": order_detail.created_at.isoformat(),
+                    "order_link": f"{FRONTEND_BASE_URL.rstrip('/')}/order/{order_detail.id}",
+                },
+            }
+        ],
+    )
+
+
+async def execute_pending_logistics_complaint_action(
+    current_user: User,
+    session: AsyncSession,
+    payload: dict[str, Any],
+) -> ChatReplyMessage:
+    order_id = (payload.get("order_id") or "").strip()
+    reason = (payload.get("reason") or "").strip()
+    if not order_id or not reason:
+        raise HTTPException(status_code=400, detail="Pending logistics-complaint payload is incomplete")
+
+    complaint = await create_logistics_complaint(
+        payload=CreateLogisticsComplaintRequest(reason=reason),
+        order_id=order_id,
+        session=session,
+        current_user=current_user,
+    )
+    return build_chat_message(
+        "物流投诉已提交。",
+        cards=[
+            {
+                "type": "logistics_complaint",
+                "data": {
+                    "id": str(complaint.id),
+                    "order_id": complaint.order_id,
+                    "status": complaint.status,
+                    "reason": complaint.reason,
+                    "resolution_note": complaint.resolution_note,
+                    "created_at": complaint.created_at.isoformat(),
+                    "updated_at": complaint.updated_at.isoformat(),
+                    "order_link": f"{FRONTEND_BASE_URL.rstrip('/')}/order/{complaint.order_id}",
+                },
+            }
+        ],
+    )
+
+
 async def decide_pending_chat_action(
     decision: str,
     current_user: User,
@@ -1232,6 +1577,12 @@ async def decide_pending_chat_action(
             result_message = await execute_pending_checkout_action(current_user, session, action_payload)
         elif action_type == CHAT_ACTION_TYPE_AFTER_SALES:
             result_message = await execute_pending_after_sales_action(current_user, session, action_payload)
+        elif action_type == CHAT_ACTION_TYPE_CANCEL_ORDER:
+            result_message = await execute_pending_cancel_order_action(current_user, session, action_payload)
+        elif action_type == CHAT_ACTION_TYPE_UPDATE_ORDER_SHIPPING:
+            result_message = await execute_pending_update_order_shipping_action(current_user, session, action_payload)
+        elif action_type == CHAT_ACTION_TYPE_LOGISTICS_COMPLAINT:
+            result_message = await execute_pending_logistics_complaint_action(current_user, session, action_payload)
         else:
             raise HTTPException(status_code=400, detail="Unsupported pending action type")
     except HTTPException as exc:
@@ -1255,7 +1606,13 @@ async def handle_chat_transaction_action(message: str, current_user: User, sessi
     if command:
         return await decide_pending_chat_action(command, current_user, session)
 
-    if pending and (is_checkout_request(message) or is_after_sales_request(message)):
+    if pending and (
+        is_checkout_request(message)
+        or is_after_sales_request(message)
+        or is_cancel_order_request(message)
+        or is_update_shipping_request(message)
+        or is_logistics_complaint_request(message)
+    ):
         return build_chat_message(
             "你有待确认操作，请先在下方卡片中确认或取消。",
             cards=[{"type": "pending_action", "data": build_pending_action_card(pending)}],
@@ -1267,6 +1624,15 @@ async def handle_chat_transaction_action(message: str, current_user: User, sessi
 
     if is_after_sales_request(message):
         return await prepare_after_sales_chat_action(message, current_user, session)
+
+    if is_cancel_order_request(message):
+        return await prepare_cancel_order_chat_action(message, current_user, session)
+
+    if is_update_shipping_request(message):
+        return await prepare_update_shipping_chat_action(message, current_user, session)
+
+    if is_logistics_complaint_request(message):
+        return await prepare_logistics_complaint_chat_action(message, current_user, session)
 
     return None
 
@@ -2407,6 +2773,27 @@ async def publish_after_sales_changed(
     await realtime_manager.broadcast(event="after_sales_changed", data=payload, role="merchant", shop_id=shop_id)
 
 
+async def publish_logistics_complaint_changed(
+    *,
+    complaint_id: UUID,
+    order_id: str,
+    user_id: UUID,
+    shop_id: UUID,
+    status: str,
+    reason: str,
+) -> None:
+    payload = {
+        "reason": reason,
+        "complaint_id": str(complaint_id),
+        "order_id": order_id,
+        "status": status,
+        "user_id": str(user_id),
+        "shop_id": str(shop_id),
+    }
+    await realtime_manager.broadcast(event="logistics_complaint_changed", data=payload, user_id=user_id)
+    await realtime_manager.broadcast(event="logistics_complaint_changed", data=payload, role="merchant", shop_id=shop_id)
+
+
 async def get_current_merchant_shop(
     current_user: User = Depends(get_current_db_user),
     session: AsyncSession = Depends(get_session),
@@ -2962,6 +3349,16 @@ async def get_after_sales_by_order(session: AsyncSession, order_id: str) -> list
     return result.scalars().all()
 
 
+async def get_logistics_complaints_by_order(session: AsyncSession, order_id: str) -> list[LogisticsComplaint]:
+    statement = (
+        select(LogisticsComplaint)
+        .where(LogisticsComplaint.order_id == order_id)
+        .order_by(LogisticsComplaint.updated_at.desc(), LogisticsComplaint.created_at.desc())
+    )
+    result = await session.execute(statement)
+    return result.scalars().all()
+
+
 def normalize_route_points(route_plan: list[str] | None) -> list[str]:
     if not isinstance(route_plan, list):
         return []
@@ -3042,6 +3439,18 @@ def to_after_sales_read(item: AfterSales) -> AfterSalesRead:
     )
 
 
+def to_logistics_complaint_read(item: LogisticsComplaint) -> LogisticsComplaintRead:
+    return LogisticsComplaintRead(
+        id=item.id,
+        order_id=item.order_id,
+        reason=item.reason,
+        status=item.status,
+        resolution_note=item.resolution_note,
+        created_at=item.created_at,
+        updated_at=item.updated_at,
+    )
+
+
 def to_merchant_after_sales_item(item: AfterSales, order: Order) -> MerchantAfterSalesItem:
     base_url = FRONTEND_BASE_URL.rstrip("/")
     return MerchantAfterSalesItem(
@@ -3051,6 +3460,22 @@ def to_merchant_after_sales_item(item: AfterSales, order: Order) -> MerchantAfte
         reason=item.reason,
         status=item.status,
         created_at=item.created_at,
+        order_status=order.status,
+        contact_email=order.contact_email,
+        order_link=f"{base_url}/orders?orderId={item.order_id}",
+    )
+
+
+def to_merchant_logistics_complaint_item(item: LogisticsComplaint, order: Order) -> MerchantLogisticsComplaintItem:
+    base_url = FRONTEND_BASE_URL.rstrip("/")
+    return MerchantLogisticsComplaintItem(
+        id=item.id,
+        order_id=item.order_id,
+        reason=item.reason,
+        status=item.status,
+        resolution_note=item.resolution_note,
+        created_at=item.created_at,
+        updated_at=item.updated_at,
         order_status=order.status,
         contact_email=order.contact_email,
         order_link=f"{base_url}/orders?orderId={item.order_id}",
@@ -3069,6 +3494,7 @@ async def build_order_detail(session: AsyncSession, order: Order) -> OrderRead:
     base_url = FRONTEND_BASE_URL.rstrip("/")
     logistics = await get_logistics_by_order(session, order.id)
     after_sales = await get_after_sales_by_order(session, order.id)
+    logistics_complaints = await get_logistics_complaints_by_order(session, order.id)
     logistics_read = None
     if logistics:
         route_plan_value = list(logistics.route_plan or [])
@@ -3136,6 +3562,7 @@ async def build_order_detail(session: AsyncSession, order: Order) -> OrderRead:
         ],
         logistics=logistics_read,
         after_sales=[to_after_sales_read(item) for item in after_sales],
+        logistics_complaints=[to_logistics_complaint_read(item) for item in logistics_complaints],
     )
 
 
@@ -3384,6 +3811,27 @@ def resolve_after_sales_next_status(current_status: str, action: str) -> str | N
         },
         AFTER_SALES_STATUS_PROCESSING: {
             "complete": AFTER_SALES_STATUS_COMPLETED,
+        },
+    }
+    return transition_map.get(current_status, {}).get(action)
+
+
+def normalize_logistics_complaint_action(raw: str) -> str:
+    return (raw or "").strip().lower()
+
+
+def resolve_logistics_complaint_next_status(current_status: str, action: str) -> str | None:
+    transition_map: dict[str, dict[str, str]] = {
+        LOGISTICS_COMPLAINT_STATUS_SUBMITTED: {
+            "processing": LOGISTICS_COMPLAINT_STATUS_PROCESSING,
+            "resolve": LOGISTICS_COMPLAINT_STATUS_RESOLVED,
+            "reject": LOGISTICS_COMPLAINT_STATUS_REJECTED,
+            "cancel": LOGISTICS_COMPLAINT_STATUS_CANCELLED,
+        },
+        LOGISTICS_COMPLAINT_STATUS_PROCESSING: {
+            "resolve": LOGISTICS_COMPLAINT_STATUS_RESOLVED,
+            "reject": LOGISTICS_COMPLAINT_STATUS_REJECTED,
+            "cancel": LOGISTICS_COMPLAINT_STATUS_CANCELLED,
         },
     }
     return transition_map.get(current_status, {}).get(action)
@@ -4368,17 +4816,122 @@ async def create_order(
     return await build_order_detail(session, new_order)
 
 
-@app.get("/api/v1/orders", response_model=OrderListResponse)
-async def list_orders(
+@app.post("/api/v1/orders/{order_id}/cancel", response_model=OrderRead)
+async def cancel_order(
+    order_id: str = Path(...),
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_db_user),
 ):
-    statement = select(Order).where(Order.user_id == current_user.id).order_by(Order.created_at.desc())
+    if normalize_role(current_user.role) != "customer":
+        raise HTTPException(status_code=403, detail="Only customer accounts can cancel orders")
+
+    order = await get_order_or_404(session, order_id)
+    if order.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if order.status == ORDER_STATUS_CANCELLED:
+        raise HTTPException(status_code=400, detail="Order is already cancelled")
+    if order.status != ORDER_STATUS_PENDING_SHIPMENT:
+        raise HTTPException(status_code=400, detail="Only pending shipment orders can be cancelled")
+    if await has_active_after_sales_request(session, order.id):
+        raise HTTPException(status_code=409, detail="Order has an active after-sales request")
+
+    items_result = await session.execute(select(OrderItem).where(OrderItem.order_id == order.id))
+    order_items = items_result.scalars().all()
+    product_ids = [item.product_id for item in order_items]
+
+    if product_ids:
+        product_result = await session.execute(select(Product).where(Product.id.in_(tuple(product_ids))))
+        products = product_result.scalars().all()
+        product_map = {product.id: product for product in products}
+        for item in order_items:
+            product = product_map.get(item.product_id)
+            if product:
+                product.stock = int(product.stock) + int(item.quantity)
+
+    order.status = ORDER_STATUS_CANCELLED
+    await session.commit()
+    await session.refresh(order)
+    await invalidate_product_filter_cache()
+    await invalidate_chat_cache_for_user(current_user.id, orders=True, logistics=True)
+    if product_ids:
+        await publish_inventory_changed(reason="order_cancelled", shop_id=order.shop_id, product_ids=product_ids)
+    await publish_order_changed(
+        order_id=order.id,
+        user_id=order.user_id,
+        shop_id=order.shop_id,
+        status=order.status,
+        reason="cancelled",
+    )
+    return await build_order_detail(session, order)
+
+
+@app.patch("/api/v1/orders/{order_id}/shipping", response_model=OrderRead)
+async def update_order_shipping(
+    payload: UpdateOrderShippingRequest,
+    order_id: str = Path(...),
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_db_user),
+):
+    if normalize_role(current_user.role) != "customer":
+        raise HTTPException(status_code=403, detail="Only customer accounts can update shipping info")
+
+    order = await get_order_or_404(session, order_id)
+    if order.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if order.status == ORDER_STATUS_CANCELLED:
+        raise HTTPException(status_code=400, detail="Cancelled order cannot update shipping info")
+    if order.status != ORDER_STATUS_PENDING_SHIPMENT:
+        raise HTTPException(status_code=400, detail="Only pending shipment orders can update shipping info")
+
+    address = (payload.address or "").strip()
+    if not address:
+        raise HTTPException(status_code=400, detail="Address is required")
+
+    order.address = address
+    if payload.contact_email is not None:
+        normalized_email = normalize_email(payload.contact_email)
+        if not normalized_email:
+            raise HTTPException(status_code=400, detail="Contact email is invalid")
+        order.contact_email = normalized_email
+
+    await session.commit()
+    await session.refresh(order)
+    await invalidate_chat_cache_for_user(current_user.id, orders=True, logistics=True)
+    await publish_order_changed(
+        order_id=order.id,
+        user_id=order.user_id,
+        shop_id=order.shop_id,
+        status=order.status,
+        reason="shipping_updated",
+    )
+    return await build_order_detail(session, order)
+
+
+@app.get("/api/v1/orders", response_model=OrderListResponse)
+async def list_orders(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=8, ge=1, le=50),
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_db_user),
+):
+    filters = [Order.user_id == current_user.id]
+    count_statement = select(func.count()).select_from(Order).where(*filters)
+    count_result = await session.execute(count_statement)
+    total = int(count_result.scalar_one() or 0)
+
+    offset = (page - 1) * page_size
+    statement = (
+        select(Order)
+        .where(*filters)
+        .order_by(Order.created_at.desc())
+        .offset(offset)
+        .limit(page_size)
+    )
     result = await session.execute(statement)
     orders = result.scalars().all()
 
     if not orders:
-        return OrderListResponse(items=[])
+        return OrderListResponse(items=[], total=total, page=page, page_size=page_size)
 
     order_ids = [order.id for order in orders]
     count_statement = (
@@ -4404,7 +4957,10 @@ async def list_orders(
                 shop_name=shop_name_map.get(order.shop_id, "Unknown Shop"),
             )
             for order in orders
-        ]
+        ],
+        total=total,
+        page=page,
+        page_size=page_size,
     )
 
 
@@ -4431,6 +4987,19 @@ async def list_order_after_sales(
         raise HTTPException(status_code=403, detail="Forbidden")
     items = await get_after_sales_by_order(session, order.id)
     return [to_after_sales_read(item) for item in items]
+
+
+@app.get("/api/v1/orders/{order_id}/logistics-complaints", response_model=list[LogisticsComplaintRead])
+async def list_order_logistics_complaints(
+    order_id: str = Path(...),
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_db_user),
+):
+    order = await get_order_or_404(session, order_id)
+    if order.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    items = await get_logistics_complaints_by_order(session, order.id)
+    return [to_logistics_complaint_read(item) for item in items]
 
 
 @app.post("/api/v1/orders/{order_id}/after-sales", response_model=AfterSalesRead, status_code=201)
@@ -4499,9 +5068,64 @@ async def create_after_sales_request(
     return to_after_sales_read(item)
 
 
+@app.post("/api/v1/orders/{order_id}/logistics-complaints", response_model=LogisticsComplaintRead, status_code=201)
+async def create_logistics_complaint(
+    payload: CreateLogisticsComplaintRequest,
+    order_id: str = Path(...),
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_db_user),
+):
+    if normalize_role(current_user.role) != "customer":
+        raise HTTPException(status_code=403, detail="Only customer accounts can create logistics complaints")
+
+    order = await get_order_or_404(session, order_id)
+    if order.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if order.status != ORDER_STATUS_SHIPPED:
+        raise HTTPException(status_code=400, detail="Only shipped orders can create logistics complaints")
+
+    logistics = await get_logistics_by_order(session, order.id)
+    if not logistics:
+        raise HTTPException(status_code=400, detail="Order has no logistics record")
+
+    reason = (payload.reason or "").strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail="reason is required")
+    if await has_active_logistics_complaint(session, order.id):
+        raise HTTPException(status_code=409, detail="There is already an active logistics complaint for this order")
+
+    item = LogisticsComplaint(
+        order_id=order.id,
+        reason=reason,
+        status=LOGISTICS_COMPLAINT_STATUS_SUBMITTED,
+        updated_at=datetime.utcnow(),
+    )
+    session.add(item)
+    await session.commit()
+    await session.refresh(item)
+    await publish_logistics_complaint_changed(
+        complaint_id=item.id,
+        order_id=order.id,
+        user_id=order.user_id,
+        shop_id=order.shop_id,
+        status=item.status,
+        reason="created",
+    )
+    await publish_order_changed(
+        order_id=order.id,
+        user_id=order.user_id,
+        shop_id=order.shop_id,
+        status=order.status,
+        reason="logistics_complaint_created",
+    )
+    return to_logistics_complaint_read(item)
+
+
 @app.get("/api/v1/merchant/after-sales", response_model=MerchantAfterSalesListResponse)
 async def merchant_list_after_sales(
     status_filter: str = Query(default="open"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=8, ge=1, le=100),
     shop: Shop = Depends(get_current_merchant_shop),
     session: AsyncSession = Depends(get_session),
 ):
@@ -4526,12 +5150,20 @@ async def merchant_list_after_sales(
     elif normalized_filter != "all":
         statement = statement.where(AfterSales.status == normalized_filter)
 
-    statement = statement.order_by(AfterSales.created_at.desc())
+    count_statement = select(func.count()).select_from(statement.subquery())
+    count_result = await session.execute(count_statement)
+    total = int(count_result.scalar_one() or 0)
+
+    offset = (page - 1) * page_size
+    statement = statement.order_by(AfterSales.created_at.desc()).offset(offset).limit(page_size)
     result = await session.execute(statement)
     rows = result.all()
 
     return MerchantAfterSalesListResponse(
-        items=[to_merchant_after_sales_item(after_sales, order) for after_sales, order in rows]
+        items=[to_merchant_after_sales_item(after_sales, order) for after_sales, order in rows],
+        total=total,
+        page=page,
+        page_size=page_size,
     )
 
 
@@ -4580,6 +5212,96 @@ async def merchant_update_after_sales(
     return to_merchant_after_sales_item(item, order)
 
 
+@app.get("/api/v1/merchant/logistics-complaints", response_model=MerchantLogisticsComplaintListResponse)
+async def merchant_list_logistics_complaints(
+    status_filter: str = Query(default="open"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=8, ge=1, le=100),
+    shop: Shop = Depends(get_current_merchant_shop),
+    session: AsyncSession = Depends(get_session),
+):
+    normalized_filter = status_filter.strip().lower() or "open"
+
+    statement = (
+        select(LogisticsComplaint, Order)
+        .join(Order, LogisticsComplaint.order_id == Order.id)
+        .where(Order.shop_id == shop.id)
+    )
+
+    if normalized_filter == "open":
+        statement = statement.where(
+            LogisticsComplaint.status.in_(
+                (
+                    LOGISTICS_COMPLAINT_STATUS_SUBMITTED,
+                    LOGISTICS_COMPLAINT_STATUS_PROCESSING,
+                )
+            )
+        )
+    elif normalized_filter != "all":
+        statement = statement.where(LogisticsComplaint.status == normalized_filter)
+
+    count_statement = select(func.count()).select_from(statement.subquery())
+    count_result = await session.execute(count_statement)
+    total = int(count_result.scalar_one() or 0)
+
+    offset = (page - 1) * page_size
+    statement = statement.order_by(LogisticsComplaint.updated_at.desc()).offset(offset).limit(page_size)
+    result = await session.execute(statement)
+    rows = result.all()
+
+    return MerchantLogisticsComplaintListResponse(
+        items=[to_merchant_logistics_complaint_item(item, order) for item, order in rows],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@app.patch("/api/v1/merchant/logistics-complaints/{complaint_id}", response_model=MerchantLogisticsComplaintItem)
+async def merchant_update_logistics_complaint(
+    payload: MerchantLogisticsComplaintUpdateRequest,
+    complaint_id: UUID = Path(...),
+    shop: Shop = Depends(get_current_merchant_shop),
+    session: AsyncSession = Depends(get_session),
+):
+    item = await session.get(LogisticsComplaint, complaint_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Logistics complaint not found")
+
+    order = await get_order_or_404(session, item.order_id)
+    if order.shop_id != shop.id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    action = normalize_logistics_complaint_action(payload.action)
+    next_status = resolve_logistics_complaint_next_status(item.status, action)
+    if not next_status:
+        raise HTTPException(status_code=400, detail="Invalid action for current logistics complaint status")
+
+    item.status = next_status
+    if payload.note:
+        item.resolution_note = append_merchant_note(item.resolution_note, payload.note)
+    item.updated_at = datetime.utcnow()
+
+    await session.commit()
+    await session.refresh(item)
+    await publish_logistics_complaint_changed(
+        complaint_id=item.id,
+        order_id=order.id,
+        user_id=order.user_id,
+        shop_id=order.shop_id,
+        status=item.status,
+        reason=f"merchant_{action}",
+    )
+    await publish_order_changed(
+        order_id=order.id,
+        user_id=order.user_id,
+        shop_id=order.shop_id,
+        status=order.status,
+        reason="logistics_complaint_updated",
+    )
+    return to_merchant_logistics_complaint_item(item, order)
+
+
 @app.get("/api/v1/merchant/shop", response_model=ShopRead)
 async def merchant_get_shop(shop: Shop = Depends(get_current_merchant_shop)):
     return to_shop_read(shop)
@@ -4599,19 +5321,34 @@ async def merchant_update_shop(
     return to_shop_read(shop)
 
 
-@app.get("/api/v1/merchant/addresses", response_model=list[ShopAddressRead])
+@app.get("/api/v1/merchant/addresses", response_model=ShopAddressListResponse)
 async def merchant_list_addresses(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=8, ge=1, le=100),
     shop: Shop = Depends(get_current_merchant_shop),
     session: AsyncSession = Depends(get_session),
 ):
+    filters = [ShopAddress.shop_id == shop.id]
+    count_statement = select(func.count()).select_from(ShopAddress).where(*filters)
+    count_result = await session.execute(count_statement)
+    total = int(count_result.scalar_one() or 0)
+
+    offset = (page - 1) * page_size
     statement = (
         select(ShopAddress)
-        .where(ShopAddress.shop_id == shop.id)
+        .where(*filters)
         .order_by(ShopAddress.is_default.desc(), ShopAddress.created_at.desc())
+        .offset(offset)
+        .limit(page_size)
     )
     result = await session.execute(statement)
     addresses = result.scalars().all()
-    return [to_shop_address_read(address) for address in addresses]
+    return ShopAddressListResponse(
+        items=[to_shop_address_read(address) for address in addresses],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @app.post("/api/v1/merchant/addresses", response_model=ShopAddressRead)
@@ -4784,6 +5521,8 @@ async def merchant_update_product(
 @app.get("/api/v1/merchant/orders", response_model=MerchantOrderListResponse)
 async def merchant_list_orders(
     status_filter: Literal["all", "pending_shipment", "shipped"] = Query(default="pending_shipment"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=8, ge=1, le=100),
     shop: Shop = Depends(get_current_merchant_shop),
     session: AsyncSession = Depends(get_session),
 ):
@@ -4791,14 +5530,25 @@ async def merchant_list_orders(
     if status_filter != "all":
         filters.append(Order.status == status_filter)
 
-    statement = select(Order).where(*filters).order_by(Order.created_at.desc())
+    count_statement = select(func.count()).select_from(Order).where(*filters)
+    count_result = await session.execute(count_statement)
+    total = int(count_result.scalar_one() or 0)
+
+    offset = (page - 1) * page_size
+    statement = (
+        select(Order)
+        .where(*filters)
+        .order_by(Order.created_at.desc())
+        .offset(offset)
+        .limit(page_size)
+    )
     result = await session.execute(statement)
     orders = result.scalars().all()
 
     details: list[OrderRead] = []
     for order in orders:
         details.append(await build_order_detail(session, order))
-    return MerchantOrderListResponse(items=details)
+    return MerchantOrderListResponse(items=details, total=total, page=page, page_size=page_size)
 
 
 @app.post("/api/v1/merchant/orders/{order_id}/ship", response_model=OrderRead)

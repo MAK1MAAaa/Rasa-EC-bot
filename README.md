@@ -2,7 +2,7 @@
 
 本项目是一个可运行的电商客服实验系统，包含以下四部分：
 
-- 电商前端：商品浏览、购物车、下单、订单、售后、商家中心
+- 电商前端：商品浏览、购物车、下单、订单、订单取消、收货信息修改、物流投诉、售后、商家中心
 - 业务后端：FastAPI + PostgreSQL + Redis
 - 客服系统：Rasa 规则链路 + 后端 Fast Router + Agent
 - 论文实验：LoRA 微调、Ollama 部署、系统形态 benchmark
@@ -13,6 +13,7 @@
 - 基础模型与 LoRA 模型对照
 - 单纯 Rasa、单纯 LLM、Rasa + LLM 等系统形态对照
 - 推荐、售后、图片售后三类业务场景 benchmark
+- 最低可交付客服闭环已补齐：订单查询、物流查询、订单取消、收货信息修改、物流投诉、退换货售后
 
 ## 1. 项目结构
 
@@ -230,6 +231,14 @@ pnpm dev
 - 推荐排序规则为“显式类目/关键词优先，历史浏览偏好加权次之，再按销量、评分、上架时间排序”。
 - 历史浏览只对登录客户账号生效，访客与商家账号不记录。
 
+### 7.3 列表空态与分页升级
+
+- 用户侧 `购物车` 与 `订单列表` 已统一为固定内容面板：无数据时保留同一块背景壳层，有数据后直接在原位置填充卡片，不再出现空态和内容态视觉断裂。
+- 购物车改为前端分页，默认按页展示购物车条目，并保留右侧结算概览面板。
+- 用户订单改为后端分页，接口与前端页码同步；实时刷新时会尽量保持当前页。
+- 商家中心的 `订单 / 商品 / 地址 / 售后` 四个列表都已支持分页，并统一使用同一类列表壳层与空态占位。
+- 商家订单页里的发货地址选择与地址列表分页解耦，避免默认地址因为地址分页而在发货操作中丢失。
+
 ## 8. 系统形态 Benchmark
 
 当前论文实验口径已经统一到系统形态 benchmark，不再使用旧版 provider/layer benchmark。
@@ -379,8 +388,10 @@ uv run --with vllm python -m vllm.entrypoints.openai.api_server \
   --served-model-name qwen3.5-2b-lora \
   --enable-lora \
   --lora-modules qwen3.5-2b-lora=/mnt/d/Github/Rasa-EC-bot/LoRA/outputs/smoke_ec_faq_only/adapter \
-  --gpu-memory-utilization 0.85 \
-  --max-model-len 32768
+  --max-model-len 4096 \
+  --max-num-seqs 2 \
+  --gpu-memory-utilization 0.55 \
+  --enforce-eager
 ```
 
 ### 13.2 后端 Agent 对接 vLLM

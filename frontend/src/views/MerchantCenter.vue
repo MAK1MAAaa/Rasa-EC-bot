@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import api from '@/api/client'
+import ListPager from '@/components/ListPager.vue'
 import { useAuthStore } from '@/stores/auth'
 import { createRealtimeClient, type RealtimeEvent } from '@/utils/realtime'
 
@@ -108,6 +109,34 @@ interface MerchantAfterSalesItem {
   order_link: string
 }
 
+interface AddressListResponse {
+  items: AddressItem[]
+  total: number
+  page: number
+  page_size: number
+}
+
+interface MerchantProductListResponse {
+  items: MerchantProduct[]
+  total: number
+  page: number
+  page_size: number
+}
+
+interface MerchantOrderListResponse {
+  items: MerchantOrder[]
+  total: number
+  page: number
+  page_size: number
+}
+
+interface MerchantAfterSalesListResponse {
+  items: MerchantAfterSalesItem[]
+  total: number
+  page: number
+  page_size: number
+}
+
 type TabKey = 'orders' | 'products' | 'addresses' | 'afterSales'
 type ToastKind = 'success' | 'error'
 type AfterSalesFilter = 'open' | 'submitted' | 'merchant_approved' | 'processing' | 'merchant_rejected' | 'completed' | 'all'
@@ -121,8 +150,18 @@ const success = ref('')
 
 const shop = ref<ShopInfo | null>(null)
 const addresses = ref<AddressItem[]>([])
+const shippingAddresses = ref<AddressItem[]>([])
+const addressPage = ref(1)
+const addressPageSize = 6
+const addressTotal = ref(0)
 const products = ref<MerchantProduct[]>([])
+const productPage = ref(1)
+const productPageSize = 8
+const productTotal = ref(0)
 const orders = ref<MerchantOrder[]>([])
+const orderPage = ref(1)
+const orderPageSize = 6
+const orderTotal = ref(0)
 const orderFilter = ref<'pending_shipment' | 'shipped' | 'all'>('pending_shipment')
 const shipAddressByOrder = ref<Record<string, string>>({})
 const shippingOrderState = ref<Record<string, boolean>>({})
@@ -134,6 +173,9 @@ const SLOW_HINT_DELAY_MS = 1200
 const SLOW_SHIPMENT_HOURS = 24
 
 const afterSalesItems = ref<MerchantAfterSalesItem[]>([])
+const afterSalesPage = ref(1)
+const afterSalesPageSize = 6
+const afterSalesTotal = ref(0)
 const afterSalesFilter = ref<AfterSalesFilter>('open')
 const afterSalesActionState = ref<Record<string, boolean>>({})
 
@@ -189,6 +231,10 @@ const addressForm = reactive({
 })
 
 const shopDisplay = computed(() => shop.value?.name || authStore.user?.shop?.name || '商家店铺')
+const addressTotalPages = computed(() => Math.max(1, Math.ceil(addressTotal.value / addressPageSize)))
+const productTotalPages = computed(() => Math.max(1, Math.ceil(productTotal.value / productPageSize)))
+const orderTotalPages = computed(() => Math.max(1, Math.ceil(orderTotal.value / orderPageSize)))
+const afterSalesTotalPages = computed(() => Math.max(1, Math.ceil(afterSalesTotal.value / afterSalesPageSize)))
 
 const splitMultiValue = (raw: string) =>
   raw
@@ -298,6 +344,7 @@ const parseErr = (err: any, fallback: string) => {
 const orderStatusLabel = (status: string) => {
   if (status === 'pending_shipment') return '待发货'
   if (status === 'shipped') return '已发货'
+  if (status === 'cancelled') return '已取消'
   return status
 }
 
@@ -348,38 +395,55 @@ const loadShop = async () => {
   fillShopForm(shop.value)
 }
 
-const loadAddresses = async () => {
-  const response = await api.get('/merchant/addresses')
-  addresses.value = response.data
+const loadAddresses = async (targetPage = addressPage.value) => {
+  const response = await api.get<AddressListResponse>('/merchant/addresses', {
+    params: { page: targetPage, page_size: addressPageSize }
+  })
+  addresses.value = response.data.items || []
+  addressTotal.value = Number(response.data.total || 0)
+  addressPage.value = Number(response.data.page || targetPage)
+  const maxPage = Math.max(1, Math.ceil(addressTotal.value / addressPageSize))
+  if (addressTotal.value > 0 && addressPage.value > maxPage) {
+    await loadAddresses(maxPage)
+  }
 }
 
-const loadProducts = async () => {
-  const pageSize = 100
-  let page = 1
-  let allItems: MerchantProduct[] = []
-  let total = 0
+const loadShippingAddresses = async () => {
+  const response = await api.get<AddressListResponse>('/merchant/addresses', {
+    params: { page: 1, page_size: 100 }
+  })
+  shippingAddresses.value = response.data.items || []
+}
 
-  do {
-    const response = await api.get('/merchant/products', {
-      params: { page, page_size: pageSize }
-    })
-    const items: MerchantProduct[] = response.data.items || []
-    total = Number(response.data.total || 0)
-    if (items.length === 0) {
-      break
+const loadProducts = async (targetPage = productPage.value) => {
+  const response = await api.get<MerchantProductListResponse>('/merchant/products', {
+    params: { page: targetPage, page_size: productPageSize }
+  })
+  products.value = response.data.items || []
+  productTotal.value = Number(response.data.total || 0)
+  productPage.value = Number(response.data.page || targetPage)
+  const maxPage = Math.max(1, Math.ceil(productTotal.value / productPageSize))
+  if (productTotal.value > 0 && productPage.value > maxPage) {
+    await loadProducts(maxPage)
+  }
+}
+
+const loadOrders = async (targetPage = orderPage.value) => {
+  const response = await api.get<MerchantOrderListResponse>('/merchant/orders', {
+    params: {
+      status_filter: orderFilter.value,
+      page: targetPage,
+      page_size: orderPageSize
     }
-    allItems = allItems.concat(items)
-    page += 1
-  } while (allItems.length < total)
-
-  products.value = allItems
-}
-
-const loadOrders = async () => {
-  const response = await api.get('/merchant/orders', {
-    params: { status_filter: orderFilter.value }
   })
   orders.value = response.data.items || []
+  orderTotal.value = Number(response.data.total || 0)
+  orderPage.value = Number(response.data.page || targetPage)
+  const maxPage = Math.max(1, Math.ceil(orderTotal.value / orderPageSize))
+  if (orderTotal.value > 0 && orderPage.value > maxPage) {
+    await loadOrders(maxPage)
+    return
+  }
   const activeOrderIds = new Set(orders.value.map((item) => item.id))
   shippingSlowHintState.value = Object.fromEntries(
     Object.entries(shippingSlowHintState.value).filter(([orderId]) => activeOrderIds.has(orderId))
@@ -390,7 +454,7 @@ const loadOrders = async () => {
 
   const map: Record<string, string> = {}
   for (const order of orders.value) {
-    const defaultAddress = addresses.value.find((item) => item.is_default)
+    const defaultAddress = shippingAddresses.value.find((item) => item.is_default)
     if (defaultAddress) {
       map[order.id] = defaultAddress.id
     }
@@ -398,11 +462,21 @@ const loadOrders = async () => {
   shipAddressByOrder.value = { ...shipAddressByOrder.value, ...map }
 }
 
-const loadAfterSales = async () => {
-  const response = await api.get('/merchant/after-sales', {
-    params: { status_filter: afterSalesFilter.value }
+const loadAfterSales = async (targetPage = afterSalesPage.value) => {
+  const response = await api.get<MerchantAfterSalesListResponse>('/merchant/after-sales', {
+    params: {
+      status_filter: afterSalesFilter.value,
+      page: targetPage,
+      page_size: afterSalesPageSize
+    }
   })
   afterSalesItems.value = response.data.items || []
+  afterSalesTotal.value = Number(response.data.total || 0)
+  afterSalesPage.value = Number(response.data.page || targetPage)
+  const maxPage = Math.max(1, Math.ceil(afterSalesTotal.value / afterSalesPageSize))
+  if (afterSalesTotal.value > 0 && afterSalesPage.value > maxPage) {
+    await loadAfterSales(maxPage)
+  }
 }
 
 const loadAll = async () => {
@@ -411,6 +485,7 @@ const loadAll = async () => {
   try {
     await loadShop()
     await loadAddresses()
+    await loadShippingAddresses()
     await loadProducts()
     await loadOrders()
     await loadAfterSales()
@@ -419,6 +494,36 @@ const loadAll = async () => {
   } finally {
     loading.value = false
   }
+}
+
+watch(orderFilter, async () => {
+  orderPage.value = 1
+  if (!loading.value) {
+    await loadOrders(1)
+  }
+})
+
+watch(afterSalesFilter, async () => {
+  afterSalesPage.value = 1
+  if (!loading.value) {
+    await loadAfterSales(1)
+  }
+})
+
+const handleAddressPageChange = async (nextPage: number) => {
+  await loadAddresses(nextPage)
+}
+
+const handleProductPageChange = async (nextPage: number) => {
+  await loadProducts(nextPage)
+}
+
+const handleOrderPageChange = async (nextPage: number) => {
+  await loadOrders(nextPage)
+}
+
+const handleAfterSalesPageChange = async (nextPage: number) => {
+  await loadAfterSales(nextPage)
 }
 
 const createProduct = async () => {
@@ -463,7 +568,8 @@ const createProduct = async () => {
     productForm.description = ''
     productForm.tags = ''
     productForm.spec_highlights = ''
-    await loadProducts()
+    productPage.value = 1
+    await loadProducts(1)
   } catch (err: any) {
     error.value = parseErr(err, '商品上架失败')
   } finally {
@@ -502,7 +608,7 @@ const toggleProductActive = async (item: MerchantProduct) => {
       is_active: !item.is_active
     })
     success.value = item.is_active ? '商品已下架' : '商品已上架'
-    await loadProducts()
+    await loadProducts(productPage.value)
   } catch (err: any) {
     error.value = parseErr(err, '更新商品状态失败')
   } finally {
@@ -528,8 +634,10 @@ const createAddress = async () => {
     addressForm.address_line = ''
     addressForm.postal_code = ''
     addressForm.is_default = false
-    await loadAddresses()
-    await loadOrders()
+    addressPage.value = 1
+    await loadAddresses(1)
+    await loadShippingAddresses()
+    await loadOrders(orderPage.value)
   } catch (err: any) {
     error.value = parseErr(err, '新增地址失败')
   } finally {
@@ -543,8 +651,9 @@ const setDefaultAddress = async (addressId: string) => {
   try {
     await api.patch(`/merchant/addresses/${addressId}`, { is_default: true })
     success.value = '默认地址已更新'
-    await loadAddresses()
-    await loadOrders()
+    await loadAddresses(addressPage.value)
+    await loadShippingAddresses()
+    await loadOrders(orderPage.value)
   } catch (err: any) {
     error.value = parseErr(err, '更新默认地址失败')
   } finally {
@@ -572,7 +681,7 @@ const shipOrder = async (order: MerchantOrder) => {
       }
     )
     showToast('success', `订单 ${order.id} 已发货`)
-    await loadOrders()
+    await loadOrders(orderPage.value)
   } catch (err: any) {
     showToast('error', parseErr(err, '发货失败'))
   } finally {
@@ -591,7 +700,7 @@ const advanceLogistics = async (order: MerchantOrder) => {
   try {
     await api.post(`/merchant/orders/${order.id}/logistics/advance`)
     showToast('success', `订单 ${order.id} 物流已推进到下一站`)
-    await loadOrders()
+    await loadOrders(orderPage.value)
   } catch (err: any) {
     showToast('error', parseErr(err, '推进物流失败'))
   } finally {
@@ -609,8 +718,8 @@ const handleAfterSales = async (item: MerchantAfterSalesItem, action: string) =>
   try {
     await api.patch(`/merchant/after-sales/${item.id}`, { action })
     showToast('success', `售后 ${item.order_id} 已更新`)
-    await loadAfterSales()
-    await loadOrders()
+    await loadAfterSales(afterSalesPage.value)
+    await loadOrders(orderPage.value)
   } catch (err: any) {
     showToast('error', parseErr(err, '售后处理失败'))
   } finally {
@@ -626,18 +735,22 @@ const scheduleRealtimeRefresh = (target: 'orders' | 'products' | 'after_sales' |
     realtimeRefreshTimer = null
     try {
       if (target === 'all') {
-        await Promise.all([loadProducts(), loadOrders(), loadAfterSales()])
+        await Promise.all([
+          loadProducts(productPage.value),
+          loadOrders(orderPage.value),
+          loadAfterSales(afterSalesPage.value)
+        ])
         return
       }
       if (target === 'orders') {
-        await loadOrders()
+        await loadOrders(orderPage.value)
         return
       }
       if (target === 'products') {
-        await loadProducts()
+        await loadProducts(productPage.value)
         return
       }
-      await loadAfterSales()
+      await loadAfterSales(afterSalesPage.value)
     } catch {
       // Keep current page responsive even if one realtime refresh fails.
     }
@@ -716,92 +829,107 @@ onBeforeUnmount(() => {
         <div class="panel-head">
           <h2>订单</h2>
           <div class="filter-row">
-            <select v-model="orderFilter" @change="loadOrders">
+            <select v-model="orderFilter">
               <option value="pending_shipment">待发货</option>
               <option value="shipped">已发货</option>
               <option value="all">全部</option>
             </select>
-            <button @click="loadOrders">刷新</button>
+            <button @click="loadOrders(orderPage)">刷新</button>
           </div>
         </div>
 
-        <div v-if="orders.length === 0" class="state-card">暂无订单</div>
-
-        <article v-for="order in orders" :key="order.id" class="order-card">
-          <div class="row">
-            <strong>{{ order.id }}</strong>
-            <div class="order-meta">
-              <span class="status">{{ orderStatusLabel(order.status) }}</span>
-              <span
-                v-if="order.status === 'pending_shipment'"
-                :class="['age-badge', { 'is-slow': isSlowShipment(order) }]"
-              >
-                待处理 {{ pendingHoursLabel(order.created_at) }}
-              </span>
-            </div>
-          </div>
-          <p class="muted">收货地址：{{ order.address }}</p>
-          <p class="muted">售后申请：{{ order.after_sales?.length || 0 }} 条</p>
-
-          <ul class="items">
-            <li v-for="item in order.items" :key="item.id">
-              <a :href="`/products/${item.product_id}`" target="_blank">{{ item.product_name }}</a>
-              <span>x {{ item.quantity }}</span>
-              <strong>¥ {{ item.subtotal.toFixed(2) }}</strong>
-            </li>
-          </ul>
-
-          <div class="chips" v-if="order.after_sales && order.after_sales.length > 0">
-            <span class="badge" v-for="asItem in order.after_sales" :key="asItem.id">
-              {{ afterSalesTypeLabel(asItem.type) }} · {{ afterSalesStatusLabel(asItem.status) }}
-            </span>
+        <div class="list-surface">
+          <div v-if="orders.length === 0" class="empty-shell">
+            <p class="empty-shell-eyebrow">Order Queue</p>
+            <h3>当前筛选下没有订单</h3>
+            <p>列表壳层保持不变，后续有订单进入时会直接在这里延续显示和分页。</p>
           </div>
 
-          <div class="ship-row" v-if="order.status === 'pending_shipment'">
-            <select v-model="shipAddressByOrder[order.id]">
-              <option value="">默认发货地址</option>
-              <option v-for="addr in addresses" :key="addr.id" :value="addr.id">
-                {{ addr.label }} · {{ addr.province }}{{ addr.city }}{{ addr.district }}{{ addr.address_line }}
-              </option>
-            </select>
-            <button
-              :class="{ 'btn-busy': isShippingOrder(order.id) }"
-              :disabled="actionLoading || isShippingOrder(order.id)"
-              @click="shipOrder(order)"
-            >
-              <span v-if="isShippingOrder(order.id)" class="cute-loader" aria-hidden="true"></span>
-              <span>{{ isShippingOrder(order.id) ? '发货中...' : '发货' }}</span>
-            </button>
-            <p v-if="shippingSlowHintState[order.id]" class="slow-hint">正在联系仓库并同步物流，请稍候...</p>
-            <div v-if="isShippingOrder(order.id)" class="slow-skeleton"></div>
-          </div>
+          <template v-else>
+            <article v-for="order in orders" :key="order.id" class="order-card">
+              <div class="row">
+                <strong>{{ order.id }}</strong>
+                <div class="order-meta">
+                  <span class="status">{{ orderStatusLabel(order.status) }}</span>
+                  <span
+                    v-if="order.status === 'pending_shipment'"
+                    :class="['age-badge', { 'is-slow': isSlowShipment(order) }]"
+                  >
+                    待处理 {{ pendingHoursLabel(order.created_at) }}
+                  </span>
+                </div>
+              </div>
+              <p class="muted">收货地址：{{ order.address }}</p>
+              <p class="muted">售后申请：{{ order.after_sales?.length || 0 }} 条</p>
 
-          <div v-if="order.logistics" class="logistics">
-            <p><strong>运单号：</strong>{{ order.logistics.tracking_no || '待生成' }}</p>
-            <p><strong>物流状态：</strong>{{ logisticsStatusLabel(order.logistics.status) }}</p>
-            <p><strong>当前位置：</strong>{{ order.logistics.current_location || '-' }}</p>
-            <p><strong>预计送达：</strong>{{ order.logistics.estimated_delivery_at ? new Date(order.logistics.estimated_delivery_at).toLocaleString() : '-' }}</p>
-            <p><strong>途径：</strong>{{ (order.logistics.route_plan || []).join(' -> ') || '-' }}</p>
-            <div class="logistics-actions">
-              <button
-                :class="{ 'btn-busy': isAdvancingLogistics(order.id) }"
-                :disabled="actionLoading || isAdvancingLogistics(order.id) || order.logistics.status === 'delivered'"
-                @click="advanceLogistics(order)"
-              >
-                <span v-if="isAdvancingLogistics(order.id)" class="cute-loader" aria-hidden="true"></span>
-                <span>{{ isAdvancingLogistics(order.id) ? '推进中...' : (order.logistics.status === 'delivered' ? '已送达' : '推进到下一站') }}</span>
-              </button>
-              <p v-if="advancingSlowHintState[order.id]" class="slow-hint">正在同步下一站轨迹，请稍候...</p>
-            </div>
-          </div>
-        </article>
+              <ul class="items">
+                <li v-for="item in order.items" :key="item.id">
+                  <a :href="`/products/${item.product_id}`" target="_blank">{{ item.product_name }}</a>
+                  <span>x {{ item.quantity }}</span>
+                  <strong>¥ {{ item.subtotal.toFixed(2) }}</strong>
+                </li>
+              </ul>
+
+              <div class="chips" v-if="order.after_sales && order.after_sales.length > 0">
+                <span class="badge" v-for="asItem in order.after_sales" :key="asItem.id">
+                  {{ afterSalesTypeLabel(asItem.type) }} · {{ afterSalesStatusLabel(asItem.status) }}
+                </span>
+              </div>
+
+              <div class="ship-row" v-if="order.status === 'pending_shipment'">
+                <select v-model="shipAddressByOrder[order.id]">
+                  <option value="">默认发货地址</option>
+                  <option v-for="addr in shippingAddresses" :key="addr.id" :value="addr.id">
+                    {{ addr.label }} · {{ addr.province }}{{ addr.city }}{{ addr.district }}{{ addr.address_line }}
+                  </option>
+                </select>
+                <button
+                  :class="{ 'btn-busy': isShippingOrder(order.id) }"
+                  :disabled="actionLoading || isShippingOrder(order.id)"
+                  @click="shipOrder(order)"
+                >
+                  <span v-if="isShippingOrder(order.id)" class="cute-loader" aria-hidden="true"></span>
+                  <span>{{ isShippingOrder(order.id) ? '发货中...' : '发货' }}</span>
+                </button>
+                <p v-if="shippingSlowHintState[order.id]" class="slow-hint">正在联系仓库并同步物流，请稍候...</p>
+                <div v-if="isShippingOrder(order.id)" class="slow-skeleton"></div>
+              </div>
+
+              <div v-if="order.logistics" class="logistics">
+                <p><strong>运单号：</strong>{{ order.logistics.tracking_no || '待生成' }}</p>
+                <p><strong>物流状态：</strong>{{ logisticsStatusLabel(order.logistics.status) }}</p>
+                <p><strong>当前位置：</strong>{{ order.logistics.current_location || '-' }}</p>
+                <p><strong>预计送达：</strong>{{ order.logistics.estimated_delivery_at ? new Date(order.logistics.estimated_delivery_at).toLocaleString() : '-' }}</p>
+                <p><strong>途径：</strong>{{ (order.logistics.route_plan || []).join(' -> ') || '-' }}</p>
+                <div class="logistics-actions">
+                  <button
+                    :class="{ 'btn-busy': isAdvancingLogistics(order.id) }"
+                    :disabled="actionLoading || isAdvancingLogistics(order.id) || order.logistics.status === 'delivered'"
+                    @click="advanceLogistics(order)"
+                  >
+                    <span v-if="isAdvancingLogistics(order.id)" class="cute-loader" aria-hidden="true"></span>
+                    <span>{{ isAdvancingLogistics(order.id) ? '推进中...' : (order.logistics.status === 'delivered' ? '已送达' : '推进到下一站') }}</span>
+                  </button>
+                  <p v-if="advancingSlowHintState[order.id]" class="slow-hint">正在同步下一站轨迹，请稍候...</p>
+                </div>
+              </div>
+            </article>
+
+            <ListPager
+              :page="orderPage"
+              :total-pages="orderTotalPages"
+              :total-items="orderTotal"
+              @change="handleOrderPageChange"
+            />
+          </template>
+        </div>
       </section>
 
       <section v-if="activeTab === 'afterSales'" class="panel">
         <div class="panel-head">
           <h2>售后处理</h2>
           <div class="filter-row">
-            <select v-model="afterSalesFilter" @change="loadAfterSales">
+            <select v-model="afterSalesFilter">
               <option value="open">进行中</option>
               <option value="submitted">待处理</option>
               <option value="merchant_approved">已同意</option>
@@ -810,33 +938,48 @@ onBeforeUnmount(() => {
               <option value="completed">已完成</option>
               <option value="all">全部</option>
             </select>
-            <button @click="loadAfterSales">刷新</button>
+            <button @click="loadAfterSales(afterSalesPage)">刷新</button>
           </div>
         </div>
 
-        <div v-if="afterSalesItems.length === 0" class="state-card">暂无售后申请</div>
-
-        <article v-for="item in afterSalesItems" :key="item.id" class="after-sales-row">
-          <div class="row">
-            <strong>{{ item.order_id }}</strong>
-            <span class="status">{{ afterSalesStatusLabel(item.status) }}</span>
+        <div class="list-surface">
+          <div v-if="afterSalesItems.length === 0" class="empty-shell">
+            <p class="empty-shell-eyebrow">After Sales</p>
+            <h3>当前没有售后申请</h3>
+            <p>后续出现退换货请求时，会在当前面板中保持同样的布局和分页位置。</p>
           </div>
-          <p class="muted">{{ afterSalesTypeLabel(item.type) }} · 下单邮箱 {{ item.contact_email }}</p>
-          <p class="muted">{{ new Date(item.created_at).toLocaleString() }}</p>
-          <p class="reason">{{ item.reason || '无说明' }}</p>
-          <a class="order-link" :href="item.order_link" target="_blank">查看订单</a>
 
-          <div class="action-row" v-if="afterSalesActions(item).length > 0">
-            <button
-              v-for="action in afterSalesActions(item)"
-              :key="action.key"
-              :disabled="isAfterSalesActing(item.id)"
-              @click="handleAfterSales(item, action.key)"
-            >
-              {{ isAfterSalesActing(item.id) ? '处理中...' : action.label }}
-            </button>
-          </div>
-        </article>
+          <template v-else>
+            <article v-for="item in afterSalesItems" :key="item.id" class="after-sales-row">
+              <div class="row">
+                <strong>{{ item.order_id }}</strong>
+                <span class="status">{{ afterSalesStatusLabel(item.status) }}</span>
+              </div>
+              <p class="muted">{{ afterSalesTypeLabel(item.type) }} · 下单邮箱 {{ item.contact_email }}</p>
+              <p class="muted">{{ new Date(item.created_at).toLocaleString() }}</p>
+              <p class="reason">{{ item.reason || '无说明' }}</p>
+              <a class="order-link" :href="item.order_link" target="_blank">查看订单</a>
+
+              <div class="action-row" v-if="afterSalesActions(item).length > 0">
+                <button
+                  v-for="action in afterSalesActions(item)"
+                  :key="action.key"
+                  :disabled="isAfterSalesActing(item.id)"
+                  @click="handleAfterSales(item, action.key)"
+                >
+                  {{ isAfterSalesActing(item.id) ? '处理中...' : action.label }}
+                </button>
+              </div>
+            </article>
+
+            <ListPager
+              :page="afterSalesPage"
+              :total-pages="afterSalesTotalPages"
+              :total-items="afterSalesTotal"
+              @change="handleAfterSalesPageChange"
+            />
+          </template>
+        </div>
       </section>
 
       <section v-if="activeTab === 'products'" class="panel merchant-editor-panel">
@@ -1059,22 +1202,44 @@ onBeforeUnmount(() => {
           </form>
         </article>
 
-        <h3>商品列表</h3>
-        <div class="table-list">
-          <article v-for="item in products" :key="item.id" class="product-row">
-            <div>
-              <strong>{{ item.name }}</strong>
-              <p class="muted">{{ item.brand || '未设品牌' }} {{ item.model || '' }} · SKU {{ item.sku_code || '-' }}</p>
-              <p class="muted">评分 {{ formatScore(item.rating) }} · 月销 {{ item.monthly_sales }} · {{ formatShipHours(item.ship_in_hours) }}</p>
-              <p class="muted" v-if="item.spec_highlights?.length">{{ item.spec_highlights.join(' / ') }}</p>
-              <p class="muted" v-if="item.tags?.length">{{ item.tags.join(' / ') }}</p>
-              <p class="muted">{{ item.category || '未分类' }} · 库存 {{ item.stock }} · ¥ {{ item.price.toFixed(2) }}</p>
-              <p class="muted">保修 {{ item.warranty_days }} 天<span v-if="item.original_price && item.original_price > item.price"> · 原价 ¥ {{ item.original_price.toFixed(2) }}</span></p>
+        <div class="list-block">
+          <div class="list-block-head">
+            <h3>商品列表</h3>
+            <span class="list-meta">共 {{ productTotal }} 个商品</span>
+          </div>
+          <div class="list-surface">
+            <div v-if="products.length === 0" class="empty-shell">
+              <p class="empty-shell-eyebrow">Product Shelf</p>
+              <h3>当前还没有商品</h3>
+              <p>上架后的商品会直接进入同一块列表区域，避免表单区与列表区在空态和有内容时视觉断层。</p>
             </div>
-            <button :disabled="actionLoading" @click="toggleProductActive(item)">
-              {{ item.is_active ? '下架' : '上架' }}
-            </button>
-          </article>
+
+            <template v-else>
+              <div class="table-list">
+                <article v-for="item in products" :key="item.id" class="product-row">
+                  <div>
+                    <strong>{{ item.name }}</strong>
+                    <p class="muted">{{ item.brand || '未设品牌' }} {{ item.model || '' }} · SKU {{ item.sku_code || '-' }}</p>
+                    <p class="muted">评分 {{ formatScore(item.rating) }} · 月销 {{ item.monthly_sales }} · {{ formatShipHours(item.ship_in_hours) }}</p>
+                    <p class="muted" v-if="item.spec_highlights?.length">{{ item.spec_highlights.join(' / ') }}</p>
+                    <p class="muted" v-if="item.tags?.length">{{ item.tags.join(' / ') }}</p>
+                    <p class="muted">{{ item.category || '未分类' }} · 库存 {{ item.stock }} · ¥ {{ item.price.toFixed(2) }}</p>
+                    <p class="muted">保修 {{ item.warranty_days }} 天<span v-if="item.original_price && item.original_price > item.price"> · 原价 ¥ {{ item.original_price.toFixed(2) }}</span></p>
+                  </div>
+                  <button :disabled="actionLoading" @click="toggleProductActive(item)">
+                    {{ item.is_active ? '下架' : '上架' }}
+                  </button>
+                </article>
+              </div>
+
+              <ListPager
+                :page="productPage"
+                :total-pages="productTotalPages"
+                :total-items="productTotal"
+                @change="handleProductPageChange"
+              />
+            </template>
+          </div>
         </div>
       </section>
 
@@ -1096,19 +1261,41 @@ onBeforeUnmount(() => {
           <button :disabled="actionLoading" type="submit">新增</button>
         </form>
 
-        <h3>地址列表</h3>
-        <div class="table-list">
-          <article v-for="addr in addresses" :key="addr.id" class="address-row">
-            <div>
-              <strong>{{ addr.label }}</strong>
-              <p class="muted">{{ addr.contact_name }} · {{ addr.contact_phone }}</p>
-              <p class="muted">{{ addr.province }}{{ addr.city }}{{ addr.district }}{{ addr.address_line }}</p>
+        <div class="list-block">
+          <div class="list-block-head">
+            <h3>地址列表</h3>
+            <span class="list-meta">共 {{ addressTotal }} 个地址</span>
+          </div>
+          <div class="list-surface">
+            <div v-if="addresses.length === 0" class="empty-shell">
+              <p class="empty-shell-eyebrow">Address Book</p>
+              <h3>当前还没有发货地址</h3>
+              <p>新增地址后会直接补齐到当前面板中，发货订单也会继续复用这里的地址选择。</p>
             </div>
-            <div class="right-tools">
-              <span v-if="addr.is_default" class="badge">默认</span>
-              <button v-else :disabled="actionLoading" @click="setDefaultAddress(addr.id)">设为默认</button>
-            </div>
-          </article>
+
+            <template v-else>
+              <div class="table-list">
+                <article v-for="addr in addresses" :key="addr.id" class="address-row">
+                  <div>
+                    <strong>{{ addr.label }}</strong>
+                    <p class="muted">{{ addr.contact_name }} · {{ addr.contact_phone }}</p>
+                    <p class="muted">{{ addr.province }}{{ addr.city }}{{ addr.district }}{{ addr.address_line }}</p>
+                  </div>
+                  <div class="right-tools">
+                    <span v-if="addr.is_default" class="badge">默认</span>
+                    <button v-else :disabled="actionLoading" @click="setDefaultAddress(addr.id)">设为默认</button>
+                  </div>
+                </article>
+              </div>
+
+              <ListPager
+                :page="addressPage"
+                :total-pages="addressTotalPages"
+                :total-items="addressTotal"
+                @change="handleAddressPageChange"
+              />
+            </template>
+          </div>
         </div>
       </section>
     </template>
@@ -1176,6 +1363,69 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   align-items: center;
   gap: 10px;
+}
+
+.list-block {
+  display: grid;
+  gap: 10px;
+}
+
+.list-block-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.list-block-head h3 {
+  margin: 0;
+  color: #312819;
+}
+
+.list-meta {
+  color: #7c6a4d;
+  font-size: 13px;
+}
+
+.list-surface {
+  min-height: 260px;
+  border: 1px solid #eadbc1;
+  border-radius: 16px;
+  padding: 14px;
+  background: linear-gradient(180deg, #fffdf8 0%, #fff7ea 100%);
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.empty-shell {
+  min-height: 230px;
+  border-radius: 14px;
+  border: 1px dashed #dbc8aa;
+  background: rgba(255, 252, 245, 0.9);
+  display: grid;
+  place-items: center;
+  text-align: center;
+  padding: 28px 20px;
+}
+
+.empty-shell-eyebrow {
+  margin: 0 0 6px;
+  color: #9a6c2c;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: 11px;
+}
+
+.empty-shell h3 {
+  margin: 0;
+  color: #3c2d14;
+}
+
+.empty-shell p:last-child {
+  margin: 8px 0 0;
+  color: #6f6657;
+  line-height: 1.7;
 }
 
 .score-tags {
@@ -1580,9 +1830,12 @@ onBeforeUnmount(() => {
 }
 
 .state-card {
-  background: #fffdf7;
+  min-height: 160px;
+  background: linear-gradient(180deg, #fffdf8 0%, #fff7ea 100%);
   border: 1px dashed #d7c9af;
   text-align: center;
+  display: grid;
+  place-items: center;
 }
 
 .error {
@@ -1643,7 +1896,8 @@ onBeforeUnmount(() => {
   .ship-row,
   .product-row,
   .address-row,
-  .panel-head {
+  .panel-head,
+  .list-block-head {
     grid-template-columns: 1fr;
     display: grid;
   }

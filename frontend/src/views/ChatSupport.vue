@@ -59,9 +59,9 @@ const selectedImagePreviewUrl = ref('')
 const quickPrompts = [
   '查询我的订单',
   '查询物流进度',
-  '帮我下单 地址: 上海市浦东新区世纪大道200号',
-  '申请退款 ORD202604010001 原因: 尺码不合适',
-  '推荐几款手机'
+  '取消订单 ORD202604010001',
+  '修改地址 ORD202604010001 地址: 上海市浦东新区世纪大道200号',
+  '投诉物流 ORD202604010001 原因: 包裹长时间未更新'
 ]
 
 const CHAT_GUEST_ID_KEY = 'chat_guest_id'
@@ -141,7 +141,7 @@ const decisionModal = ref<{
 const buildWelcomeBubble = (): ChatBubble =>
   buildBubble(
     'bot',
-    '你好，我是商城客服。可以帮你查询订单、物流、售后，也可以推荐商品；涉及退款或自动执行时，我会先请求你确认。'
+    '你好，我是商城客服。可以帮你查订单、改收货信息、取消订单、投诉物流，也能处理售后；涉及写操作时，我会先请求你确认。'
   )
 
 const deriveSessionTitle = (session: ChatSession) => {
@@ -425,6 +425,7 @@ const renderMessageHtml = (value: string) => {
 const orderStatusLabel = (status: string) => {
   if (status === 'pending_shipment') return '待发货'
   if (status === 'shipped') return '已发货'
+  if (status === 'cancelled') return '已取消'
   if (status === 'in_transit') return '运输中'
   if (status === 'delivered') return '已送达'
   return status || '未知状态'
@@ -446,6 +447,17 @@ const afterSalesTypeLabel = (value: string) => {
   if (value === 'return') return '退货'
   if (value === 'exchange') return '换货'
   return value || '售后'
+}
+
+const complaintStatusLabel = (status: string) => {
+  const map: Record<string, string> = {
+    submitted: '待处理',
+    processing: '处理中',
+    resolved: '已解决',
+    rejected: '已驳回',
+    cancelled: '已取消'
+  }
+  return map[status] || status || '未知状态'
 }
 
 const getText = (value: any, fallback = '-') => {
@@ -779,6 +791,22 @@ watch(
                     申请时间：{{ getText(card.data.created_at_text, formatDateText(card.data.created_at)) }}
                   </div>
                   <div class="card-row muted" v-if="card.data.reason">原因：{{ getText(card.data.reason) }}</div>
+                  <div class="card-actions" v-if="card.data.order_link">
+                    <button type="button" @click="openLink(card.data.order_link)">查看订单</button>
+                  </div>
+                </template>
+
+                <template v-else-if="card.type === 'logistics_complaint'">
+                  <div class="card-head">
+                    <strong>物流投诉 {{ getText(card.data.id) }}</strong>
+                    <span class="pill">{{ getText(card.data.status_label, complaintStatusLabel(getText(card.data.status, ''))) }}</span>
+                  </div>
+                  <div class="card-row">订单编号：{{ getText(card.data.order_id) }}</div>
+                  <div class="card-row muted" v-if="card.data.created_at || card.data.updated_at">
+                    更新时间：{{ formatDateText(card.data.updated_at || card.data.created_at) }}
+                  </div>
+                  <div class="card-row muted" v-if="card.data.reason">投诉原因：{{ getText(card.data.reason) }}</div>
+                  <div class="card-row muted" v-if="card.data.resolution_note">处理备注：{{ getText(card.data.resolution_note) }}</div>
                   <div class="card-actions" v-if="card.data.order_link">
                     <button type="button" @click="openLink(card.data.order_link)">查看订单</button>
                   </div>

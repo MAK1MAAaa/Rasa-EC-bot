@@ -234,8 +234,10 @@ uv run --with vllm python -m vllm.entrypoints.openai.api_server \
   --served-model-name qwen3.5-2b-lora \
   --enable-lora \
   --lora-modules qwen3.5-2b-lora=/mnt/d/Github/Rasa-EC-bot/LoRA/outputs/smoke_ec_faq_only/adapter \
-  --gpu-memory-utilization 0.85 \
-  --max-model-len 32768
+  --max-model-len 4096 \
+  --max-num-seqs 2 \
+  --gpu-memory-utilization 0.55 \
+  --enforce-eager
 ```
 
 WSL 路径注意：
@@ -248,9 +250,11 @@ WSL 路径注意：
 curl http://127.0.0.1:8002/v1/models
 ```
 
-若出现显存不足（例如 `desired GPU memory utilization (0.9)`）：
-- 进一步下调 `--gpu-memory-utilization`（如 `0.8`）。
-- 进一步下调 `--max-model-len`（如 `16384`）。
+若在 WSL2 或 12GB 左右显卡上仍出现显存不足：
+- 先进一步下调 `--gpu-memory-utilization`（如 `0.5`）。
+- 再下调 `--max-model-len`（如 `2048`）。
+- 调试阶段可继续收紧 `--max-num-seqs`（如 `1`）。
+- `--enforce-eager` 已用于减少 CUDA graph 额外显存占用。
 
 ### 10.3 后端接入参数
 

@@ -158,6 +158,13 @@ class ShopAddressRead(SQLModel):
     created_at: datetime
 
 
+class ShopAddressListResponse(SQLModel):
+    items: List[ShopAddressRead]
+    total: int
+    page: int
+    page_size: int
+
+
 class ProductBase(ProductCatalogFields):
     name: str
     price: float = Field(ge=0)
@@ -454,6 +461,18 @@ class Logistics(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class LogisticsComplaint(SQLModel, table=True):
+    __tablename__ = "logistics_complaints"
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    order_id: str = Field(foreign_key="orders.id", index=True)
+    reason: str
+    status: str
+    resolution_note: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class AfterSales(SQLModel, table=True):
     __tablename__ = "after_sales"
 
@@ -480,6 +499,15 @@ class GeoCache(SQLModel, table=True):
 class CreateOrderRequest(SQLModel):
     address: str
     contact_email: str
+
+
+class UpdateOrderShippingRequest(SQLModel):
+    address: str
+    contact_email: Optional[str] = None
+
+
+class CreateLogisticsComplaintRequest(SQLModel):
+    reason: str
 
 
 class OrderItemRead(SQLModel):
@@ -513,6 +541,16 @@ class AfterSalesRead(SQLModel):
     created_at: datetime
 
 
+class LogisticsComplaintRead(SQLModel):
+    id: UUID
+    order_id: str
+    reason: str
+    status: str
+    resolution_note: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+
 class OrderListItem(SQLModel):
     id: str
     status: str
@@ -527,6 +565,9 @@ class OrderListItem(SQLModel):
 
 class OrderListResponse(SQLModel):
     items: List[OrderListItem]
+    total: int
+    page: int
+    page_size: int
 
 
 class OrderRead(SQLModel):
@@ -541,6 +582,7 @@ class OrderRead(SQLModel):
     items: List[OrderItemRead]
     logistics: Optional[LogisticsRead] = None
     after_sales: List[AfterSalesRead] = Field(default_factory=list)
+    logistics_complaints: List[LogisticsComplaintRead] = Field(default_factory=list)
 
 
 class MerchantOrderShipRequest(SQLModel):
@@ -550,6 +592,9 @@ class MerchantOrderShipRequest(SQLModel):
 
 class MerchantOrderListResponse(SQLModel):
     items: List[OrderRead]
+    total: int
+    page: int
+    page_size: int
 
 
 class CreateAfterSalesRequest(SQLModel):
@@ -576,6 +621,34 @@ class MerchantAfterSalesItem(SQLModel):
 
 class MerchantAfterSalesListResponse(SQLModel):
     items: List[MerchantAfterSalesItem]
+    total: int
+    page: int
+    page_size: int
+
+
+class MerchantLogisticsComplaintUpdateRequest(SQLModel):
+    action: str
+    note: Optional[str] = None
+
+
+class MerchantLogisticsComplaintItem(SQLModel):
+    id: UUID
+    order_id: str
+    reason: str
+    status: str
+    resolution_note: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    order_status: str
+    contact_email: str
+    order_link: str
+
+
+class MerchantLogisticsComplaintListResponse(SQLModel):
+    items: List[MerchantLogisticsComplaintItem]
+    total: int
+    page: int
+    page_size: int
 
 
 class Token(SQLModel):

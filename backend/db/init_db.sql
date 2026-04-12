@@ -6,6 +6,7 @@ DROP TABLE IF EXISTS kb_chunks CASCADE;
 DROP TABLE IF EXISTS kb_documents CASCADE;
 DROP TABLE IF EXISTS chat_attachments CASCADE;
 DROP TABLE IF EXISTS geo_cache CASCADE;
+DROP TABLE IF EXISTS logistics_complaints CASCADE;
 DROP TABLE IF EXISTS after_sales CASCADE;
 DROP TABLE IF EXISTS logistics CASCADE;
 DROP TABLE IF EXISTS order_items CASCADE;
@@ -164,6 +165,19 @@ CREATE TABLE logistics (
     llm_raw_text TEXT,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE logistics_complaints (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    order_id VARCHAR(50) NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    reason TEXT NOT NULL,
+    status VARCHAR(50) NOT NULL,
+    resolution_note TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_logistics_complaints_order_id ON logistics_complaints(order_id);
+CREATE INDEX idx_logistics_complaints_status_updated_at ON logistics_complaints(status, updated_at DESC);
 
 CREATE TABLE geo_cache (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

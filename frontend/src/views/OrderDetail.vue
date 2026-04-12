@@ -37,6 +37,16 @@ interface AfterSalesItem {
   created_at: string
 }
 
+interface LogisticsComplaintItem {
+  id: string
+  order_id: string
+  reason: string
+  status: string
+  resolution_note?: string | null
+  created_at: string
+  updated_at: string
+}
+
 interface OrderDetail {
   id: string
   status: string
@@ -49,6 +59,7 @@ interface OrderDetail {
   items: OrderDetailItem[]
   logistics?: OrderLogistics | null
   after_sales: AfterSalesItem[]
+  logistics_complaints: LogisticsComplaintItem[]
 }
 
 type AfterSalesStage = 'pending_shipment' | 'in_transit' | 'delivered' | 'unsupported'
@@ -77,17 +88,43 @@ const afterSalesForm = reactive({
   type: 'return' as 'return' | 'exchange',
   reason: ''
 })
+const orderActionLoading = ref(false)
+const orderActionError = ref('')
+const orderActionSuccess = ref('')
+const shippingForm = reactive({
+  address: '',
+  contact_email: ''
+})
+const complaintSubmitting = ref(false)
+const complaintError = ref('')
+const complaintSuccess = ref('')
+const complaintForm = reactive({
+  reason: ''
+})
 
 const orderId = computed(() => String(route.params.id || '').trim())
 const terminalAfterSalesStatus = new Set(['merchant_rejected', 'completed', 'cancelled'])
+const terminalComplaintStatus = new Set(['resolved', 'rejected', 'cancelled'])
 
 const hasActiveAfterSales = computed(() => {
   if (!order.value) return false
   return order.value.after_sales.some((item) => !terminalAfterSalesStatus.has(item.status))
 })
 
+const hasActiveComplaint = computed(() => {
+  if (!order.value) return false
+  return order.value.logistics_complaints.some((item) => !terminalComplaintStatus.has(item.status))
+})
+
 const logisticsStatus = computed(() => {
   return (order.value?.logistics?.status || '').trim().toLowerCase()
+})
+
+const canCancelOrder = computed(() => order.value?.status === 'pending_shipment')
+const canUpdateShipping = computed(() => order.value?.status === 'pending_shipment')
+const canCreateComplaint = computed(() => {
+  if (!order.value?.logistics) return false
+  return order.value.status === 'shipped' && !hasActiveComplaint.value
 })
 
 const afterSalesStage = computed<AfterSalesStage>(() => {
@@ -294,6 +331,7 @@ const renderLogisticsMap = async () => {
 const orderStatusLabel = (status: string) => {
   if (status === 'pending_shipment') return '待发货'
   if (status === 'shipped') return '已发货'
+  if (status === 'cancelled') return '已取消'
   return status
 }
 
@@ -313,9 +351,28 @@ const afterSalesStatusLabel = (status: string) => {
   return status
 }
 
+const complaintStatusLabel = (status: string) => {
+  if (status === 'submitted') return '待处理'
+  if (status === 'processing') return '处理中'
+  if (status === 'resolved') return '已解决'
+  if (status === 'rejected') return '已驳回'
+  if (status === 'cancelled') return '已取消'
+  return status
+}
+
 const clearAfterSalesNotice = () => {
   afterSalesError.value = ''
   afterSalesSuccess.value = ''
+}
+
+const clearOrderActionNotice = () => {
+  orderActionError.value = ''
+  orderActionSuccess.value = ''
+}
+
+const clearComplaintNotice = () => {
+  complaintError.value = ''
+  complaintSuccess.value = ''
 }
 
 const parseErr = (err: any, fallback: string) => {
@@ -343,8 +400,11 @@ const loadOrder = async (id: string) => {
     const response = await api.get(`/orders/${id}`)
     order.value = {
       ...response.data,
-      after_sales: response.data.after_sales || []
+      after_sales: response.data.after_sales || [],
+      logistics_complaints: response.data.logistics_complaints || []
     }
+    shippingForm.address = String(response.data.address || '')
+    shippingForm.contact_email = String(response.data.contact_email || '')
   } catch (err: any) {
     order.value = null
     error.value = parseErr(err, '订单详情加载失败，请稍后重试')
@@ -383,6 +443,80 @@ const submitAfterSales = async () => {
   }
 }
 
+const submitCancelOrder = async () => {
+  if (!order.value || !canCancelOrder.value || orderActionLoading.value) return
+  clearOrderActionNotice()
+  if (!window.confirm(`确认取消订单 ${order.value.id} 吗？`)) return
+
+  orderActionLoading.value = true
+  try {
+    const response = await api.post(`/orders/${order.value.id}/cancel`)
+    order.value = response.data
+    shippingForm.address = String(response.data.address || '')
+    shippingForm.contact_email = String(response.data.contact_email || '')
+    orderActionSuccess.value = '订单已取消'
+  } catch (err: any) {
+    orderActionError.value = parseErr(err, '取消订单失败')
+  } finally {
+    orderActionLoading.value = false
+  }
+}
+
+const submitUpdateShipping = async () => {
+  if (!order.value || !canUpdateShipping.value || orderActionLoading.value) return
+  clearOrderActionNotice()
+
+  const address = shippingForm.address.trim()
+  const contactEmail = shippingForm.contact_email.trim()
+  if (!address) {
+    orderActionError.value = '请填写新的收货地址'
+    return
+  }
+  if (!contactEmail) {
+    orderActionError.value = '请填写联系邮箱'
+    return
+  }
+
+  orderActionLoading.value = true
+  try {
+    const response = await api.patch(`/orders/${order.value.id}/shipping`, {
+      address,
+      contact_email: contactEmail
+    })
+    order.value = response.data
+    shippingForm.address = String(response.data.address || '')
+    shippingForm.contact_email = String(response.data.contact_email || '')
+    orderActionSuccess.value = '收货信息已更新'
+  } catch (err: any) {
+    orderActionError.value = parseErr(err, '修改收货信息失败')
+  } finally {
+    orderActionLoading.value = false
+  }
+}
+
+const submitLogisticsComplaint = async () => {
+  if (!order.value || !canCreateComplaint.value || complaintSubmitting.value) return
+  clearComplaintNotice()
+
+  const reason = complaintForm.reason.trim()
+  if (!reason) {
+    complaintError.value = '请填写投诉原因'
+    return
+  }
+
+  complaintSubmitting.value = true
+  try {
+    await api.post(`/orders/${order.value.id}/logistics-complaints`, { reason })
+    complaintForm.reason = ''
+    complaintSuccess.value = '物流投诉已提交'
+    await loadOrder(order.value.id)
+  } catch (err: any) {
+    complaintError.value = parseErr(err, '提交物流投诉失败')
+  } finally {
+    complaintSubmitting.value = false
+  }
+}
+
 const goBack = () => router.push('/orders')
 
 const scheduleRealtimeRefresh = () => {
@@ -399,7 +533,7 @@ const handleRealtimeEvent = (event: RealtimeEvent) => {
   if (!order.value) {
     return
   }
-  if (event.event !== 'order_changed' && event.event !== 'after_sales_changed') {
+  if (event.event !== 'order_changed' && event.event !== 'after_sales_changed' && event.event !== 'logistics_complaint_changed') {
     return
   }
   if (String(event.data?.order_id || '') !== order.value.id) {
@@ -481,6 +615,46 @@ onBeforeUnmount(() => {
       </section>
 
       <section class="detail-layout">
+        <article class="panel">
+          <h2>订单操作</h2>
+          <p v-if="orderActionError" class="error-text">{{ orderActionError }}</p>
+          <p v-if="orderActionSuccess" class="success-text">{{ orderActionSuccess }}</p>
+
+          <div class="action-stack">
+            <button type="button" class="danger-btn" :disabled="!canCancelOrder || orderActionLoading" @click="submitCancelOrder">
+              {{ orderActionLoading && canCancelOrder ? '处理中...' : '取消订单' }}
+            </button>
+            <p class="muted-small">
+              {{ canCancelOrder ? '待发货订单可直接取消，系统会自动恢复库存。' : '当前订单状态不支持取消。' }}
+            </p>
+          </div>
+
+          <form class="after-sales-form compact-form" @submit.prevent="submitUpdateShipping">
+            <label>
+              新收货地址
+              <textarea
+                v-model="shippingForm.address"
+                rows="3"
+                maxlength="300"
+                :disabled="!canUpdateShipping || orderActionLoading"
+                placeholder="请输入新的收货地址"
+              ></textarea>
+            </label>
+            <label>
+              联系邮箱
+              <input
+                v-model="shippingForm.contact_email"
+                type="email"
+                :disabled="!canUpdateShipping || orderActionLoading"
+                placeholder="请输入联系邮箱"
+              >
+            </label>
+            <button type="submit" :disabled="!canUpdateShipping || orderActionLoading">
+              {{ orderActionLoading && canUpdateShipping ? '保存中...' : '修改收货信息' }}
+            </button>
+          </form>
+        </article>
+
         <article class="panel panel-items">
           <h2>商品清单</h2>
           <ul class="item-list">
@@ -532,6 +706,44 @@ onBeforeUnmount(() => {
             </div>
           </template>
           <p v-else class="muted-small">订单暂未发货，暂无物流轨迹</p>
+        </article>
+
+        <article class="panel">
+          <h2>物流投诉</h2>
+          <p v-if="complaintError" class="error-text">{{ complaintError }}</p>
+          <p v-if="complaintSuccess" class="success-text">{{ complaintSuccess }}</p>
+
+          <div v-if="order.logistics_complaints.length === 0" class="muted-small">当前还没有物流投诉记录</div>
+          <ul v-else class="after-sales-list">
+            <li v-for="item in order.logistics_complaints" :key="item.id" class="after-sales-item">
+              <div class="row">
+                <strong>投诉 {{ item.id }}</strong>
+                <span class="status">{{ complaintStatusLabel(item.status) }}</span>
+              </div>
+              <p class="muted-small">{{ new Date(item.updated_at || item.created_at).toLocaleString() }}</p>
+              <p class="muted-small">{{ item.reason }}</p>
+              <p v-if="item.resolution_note" class="muted-small">{{ item.resolution_note }}</p>
+            </li>
+          </ul>
+
+          <p class="muted-small">
+            {{ canCreateComplaint ? '如物流长时间未更新或配送异常，可提交物流投诉。' : '仅已发货且无进行中投诉的订单可提交物流投诉。' }}
+          </p>
+          <form class="after-sales-form compact-form" @submit.prevent="submitLogisticsComplaint">
+            <label>
+              投诉原因
+              <textarea
+                v-model="complaintForm.reason"
+                rows="3"
+                maxlength="300"
+                :disabled="!canCreateComplaint || complaintSubmitting"
+                placeholder="请说明物流问题，例如长时间未更新、派送异常等"
+              ></textarea>
+            </label>
+            <button type="submit" :disabled="!canCreateComplaint || complaintSubmitting">
+              {{ complaintSubmitting ? '提交中...' : '提交物流投诉' }}
+            </button>
+          </form>
         </article>
 
         <article class="panel">
@@ -827,6 +1039,12 @@ onBeforeUnmount(() => {
   margin-top: 10px;
 }
 
+.action-stack {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
 .after-sales-form label {
   display: grid;
   gap: 6px;
@@ -834,6 +1052,7 @@ onBeforeUnmount(() => {
   color: #5d523f;
 }
 
+.after-sales-form input,
 .after-sales-form select,
 .after-sales-form textarea,
 .after-sales-form button {
@@ -847,6 +1066,24 @@ onBeforeUnmount(() => {
   border: none;
   background: #2f2413;
   color: #fff7ea;
+}
+
+.danger-btn {
+  border: none;
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #9f1239;
+  color: #fff7ea;
+}
+
+.danger-btn:disabled,
+.after-sales-form button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.compact-form {
+  margin-top: 0;
 }
 
 .muted-small {

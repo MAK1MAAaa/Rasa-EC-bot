@@ -3,10 +3,11 @@
 后端支持用户商城、商家中心、订单物流、售后流程与客服桥接接口，并已接入 Redis 缓存。
 
 ## 1. 主要能力
-- 用户：注册登录、商品查询、购物车、下单、订单查询、申请退货/换货
+- 用户：注册登录、商品查询、购物车、下单、订单查询、取消订单、修改收货信息、申请退货/换货、提交物流投诉
 - 用户：商品详情页自动记录历史浏览，商品列表页可读取最近浏览商品
 - 商家：店铺读取、发货地址管理、商品管理、订单发货、售后处理
-- 客服：提供订单/物流/售后/个性化商品推荐内部接口，并支持“自动下单/自动退款”二次确认执行
+- 商家：提供物流投诉处理接口，可按提交中/处理中/已解决等状态流转
+- 客服：提供订单/物流/售后/个性化商品推荐内部接口，并支持“自动下单/自动退款/取消订单/修改收货信息/物流投诉”二次确认执行
 - 缓存：Redis 缓存商品筛选元数据与客服汇总数据
 
 ## 2. 运行依赖
@@ -226,15 +227,27 @@ uv run uvicorn app.main:app --reload
 - `PATCH /api/v1/cart/items/{item_id}`
 - `DELETE /api/v1/cart/items/{item_id}`
 - `POST /api/v1/orders`
+- `POST /api/v1/orders/{order_id}/cancel`
+- `PATCH /api/v1/orders/{order_id}/shipping`
 - `GET /api/v1/orders`
 - `GET /api/v1/orders/{order_id}`
 - `GET /api/v1/orders/{order_id}/after-sales`
 - `POST /api/v1/orders/{order_id}/after-sales`
+- `GET /api/v1/orders/{order_id}/logistics-complaints`
+- `POST /api/v1/orders/{order_id}/logistics-complaints`
+
+分页说明：
+- `GET /api/v1/orders` 现支持 `page`、`page_size`，返回 `items / total / page / page_size`。
 
 用户售后阶段规则：
 - 未发货（`pending_shipment`）：允许直接申请`return`。
 - 物流运输中（`logistics.status=in_transit`）：暂不允许申请退货/换货。
 - 已送达（`logistics.status=delivered`）：允许申请`return`或`exchange`。
+
+用户订单变更规则：
+- 取消订单仅允许 `pending_shipment` 状态，取消后会自动回补商品库存。
+- 修改收货信息仅允许 `pending_shipment` 状态，当前最低交付版支持修改收货地址与联系邮箱。
+- 物流投诉仅允许 `shipped` 状态且订单已有物流记录时发起，同一订单只允许存在一条进行中的物流投诉。
 
 ### 8.2 商家侧
 - `GET /api/v1/merchant/shop`
@@ -249,6 +262,14 @@ uv run uvicorn app.main:app --reload
 - `POST /api/v1/merchant/orders/{order_id}/logistics/advance`
 - `GET /api/v1/merchant/after-sales?status_filter=open|all|...`
 - `PATCH /api/v1/merchant/after-sales/{after_sales_id}`
+- `GET /api/v1/merchant/logistics-complaints?status_filter=open|all|...`
+- `PATCH /api/v1/merchant/logistics-complaints/{complaint_id}`
+
+分页说明：
+- `GET /api/v1/merchant/addresses` 支持 `page`、`page_size`，返回 `ShopAddressListResponse`。
+- `GET /api/v1/merchant/products` 已支持 `page`、`page_size`。
+- `GET /api/v1/merchant/orders` 支持 `status_filter + page + page_size`，返回 `MerchantOrderListResponse`。
+- `GET /api/v1/merchant/after-sales` 支持 `status_filter + page + page_size`，返回 `MerchantAfterSalesListResponse`。
 
 ### 8.3 客服内部接口（Rasa Action 专用）
 - `GET /api/v1/chat/internal/orders-summary`
@@ -267,8 +288,11 @@ uv run uvicorn app.main:app --reload
   - `POST /api/v1/chat/send`
   - `POST /api/v1/chat/pending-action/decision`
 - 支持动作：
-  - 自动下单（基于当前用户购物车）
-  - 自动发起退款/换货（基于订单号）
+- 自动下单（基于当前用户购物车）
+- 自动发起退款/换货（基于订单号）
+- 自动取消待发货订单（基于订单号）
+- 自动修改待发货订单收货信息（基于订单号 + 地址）
+- 自动提交物流投诉（基于订单号 + 原因）
 - 权限约束：
   - 商家账号调用 `POST /api/v1/chat/send` 将返回 `403`
 - 安全机制：
@@ -694,8 +718,10 @@ uv run --with vllm python -m vllm.entrypoints.openai.api_server \
   --served-model-name qwen3.5-2b-lora \
   --enable-lora \
   --lora-modules qwen3.5-2b-lora=/mnt/d/Github/Rasa-EC-bot/LoRA/outputs/smoke_ec_faq_only/adapter \
-  --gpu-memory-utilization 0.85 \
-  --max-model-len 32768
+  --max-model-len 4096 \
+  --max-num-seqs 2 \
+  --gpu-memory-utilization 0.55 \
+  --enforce-eager
 ```
 
 ### 15.3 启动后端
