@@ -87,7 +87,6 @@ const handleLogin = async () => {
         <div class="card-head">
           <p class="eyebrow muted">Account Access</p>
           <h2>账号登录</h2>
-          <p>输入邮箱与密码，继续当前商城浏览或进入商家工作台。</p>
         </div>
 
         <label class="field">

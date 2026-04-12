@@ -39,7 +39,6 @@ const handleRegister = async () => {
         <div class="card-head">
           <p class="eyebrow muted">Create Account</p>
           <h2>创建账号</h2>
-          <p>注册后即可保存购物车、查看历史浏览，并继续使用智能客服与订单操作。</p>
         </div>
 
         <label class="field">
