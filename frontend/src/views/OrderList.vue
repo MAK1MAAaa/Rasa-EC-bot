@@ -162,8 +162,7 @@ onBeforeUnmount(() => {
       <div v-else class="list-wrap">
         <div class="order-grid">
           <article v-for="order in orders" :key="order.id" class="order-card" @click="toOrderDetail(order.id)">
-            <div class="row">
-              <strong>{{ order.id }}</strong>
+            <div class="status-row">
               <Badge variant="info">{{ orderStatusLabel(order.status) }}</Badge>
             </div>
 
@@ -172,13 +171,11 @@ onBeforeUnmount(() => {
               <span>{{ order.item_count }} 件商品</span>
             </div>
 
-            <div class="row muted">
-              <span>{{ order.shop_name }}</span>
-              <span>{{ order.contact_email }}</span>
+            <div class="shop-row">
+              <span class="shop-name">{{ order.shop_name }}</span>
             </div>
 
-            <div class="row">
-              <span class="addr">{{ order.address }}</span>
+            <div class="row summary-row">
               <strong class="price">¥ {{ order.total_amount.toFixed(2) }}</strong>
             </div>
 
@@ -242,6 +239,11 @@ onBeforeUnmount(() => {
   transform: translateY(-1px);
 }
 
+.status-row {
+  display: flex;
+  justify-content: flex-start;
+}
+
 .row {
   display: flex;
   justify-content: space-between;
@@ -254,15 +256,32 @@ onBeforeUnmount(() => {
   font-size: 13px;
 }
 
-.addr {
+.shop-row {
+  display: flex;
+  align-items: center;
+  min-height: 22px;
+}
+
+.shop-name {
   color: #37423f;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.shop-name {
+  max-width: 100%;
+  font-weight: 700;
+  color: #214642;
+}
+
+.summary-row {
+  justify-content: flex-end;
+}
+
 .price {
   color: #143632;
+  flex-shrink: 0;
 }
 
 .card-footer {
@@ -274,10 +293,6 @@ onBeforeUnmount(() => {
 @media (max-width: 760px) {
   .row {
     flex-wrap: wrap;
-  }
-
-  .addr {
-    white-space: normal;
   }
 }
 </style>
