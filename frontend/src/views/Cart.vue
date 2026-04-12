@@ -74,6 +74,13 @@ const remove = async (itemId: string) => {
   }
 }
 
+const openProductDetail = (productId: string) => {
+  if (!productId) {
+    return
+  }
+  router.push(`/products/${productId}`)
+}
+
 const handlePageChange = (nextPage: number) => {
   page.value = nextPage
 }
@@ -147,12 +154,16 @@ onBeforeUnmount(() => {
 
         <div v-else class="item-list-wrap">
           <article v-for="item in pagedItems" :key="item.id" class="item-card">
-            <img
-              :src="item.product_image_url || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=400&q=80'"
-              :alt="item.product_name"
-            >
+            <button type="button" class="item-cover" @click="openProductDetail(item.product_id)">
+              <img
+                :src="item.product_image_url || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=400&q=80'"
+                :alt="item.product_name"
+              >
+            </button>
             <div class="item-main">
-              <h3>{{ item.product_name }}</h3>
+              <button type="button" class="item-title" @click="openProductDetail(item.product_id)">
+                <h3>{{ item.product_name }}</h3>
+              </button>
               <p>单价 ¥ {{ item.unit_price.toFixed(2) }}</p>
             </div>
             <div class="qty-box">
@@ -232,11 +243,32 @@ onBeforeUnmount(() => {
   align-items: center;
 }
 
+.item-cover {
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
 .item-card img {
   width: 108px;
   height: 88px;
   object-fit: cover;
   border-radius: 14px;
+}
+
+.item-main {
+  min-width: 0;
+}
+
+.item-title {
+  padding: 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  width: 100%;
 }
 
 .item-main h3 {
