@@ -199,6 +199,12 @@ Qwen 系列 LoRA 在 Ollama `ADAPTER` 路径上兼容性有限，推荐直接使
 
 ### 10.1 启动 vLLM（base + adapter）
 
+强调：
+
+- `vLLM` 默认按 WSL/Linux + CUDA 环境运行
+- Windows 原生 PowerShell 不作为默认推荐路径
+- 后端 LoRA 实例只调用该 OpenAI-compatible 接口，不直接承载模型推理
+
 ```bash
 cd /mnt/d/Github/Rasa-EC-bot/LoRA
 
