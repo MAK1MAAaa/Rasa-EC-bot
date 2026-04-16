@@ -165,16 +165,25 @@ AMAP_TIMEOUT_MS = int(os.getenv("AMAP_TIMEOUT_MS", "3000"))
 AMAP_QPS_LIMIT = max(1, int(os.getenv("AMAP_QPS_LIMIT", "5")))
 CHAT_ROUTER_ENABLE_AGENT = os.getenv("CHAT_ROUTER_ENABLE_AGENT", "true").strip().lower() not in {"0", "false", "no"}
 CHAT_ROUTER_RASA_CONFIDENCE_THRESHOLD = float(os.getenv("CHAT_ROUTER_RASA_CONFIDENCE_THRESHOLD", "0.72"))
-FAST_ROUTER_INTENTS = {
-    "greet",
-    "goodbye",
-    "thanks",
+CHAT_ROUTER_LLM_REVIEW_ENABLED = os.getenv("CHAT_ROUTER_LLM_REVIEW_ENABLED", "true").strip().lower() not in {
+    "0",
+    "false",
+    "no",
+}
+CHAT_ROUTER_LLM_REVIEW_THRESHOLD = float(os.getenv("CHAT_ROUTER_LLM_REVIEW_THRESHOLD", "0.90"))
+BUSINESS_RULE_INTENTS = {
     "ask_order_help",
     "ask_shipping_help",
     "ask_after_sales_help",
     "ask_product_recommendation",
+}
+LIGHT_ROUTER_INTENTS = {
+    "greet",
+    "goodbye",
+    "thanks",
     "bot_challenge",
 }
+FAST_ROUTER_INTENTS = BUSINESS_RULE_INTENTS | LIGHT_ROUTER_INTENTS
 
 REDIS_URL = os.getenv("REDIS_URL", "")
 REDIS_CACHE_TTL_SEC = int(os.getenv("REDIS_CACHE_TTL_SEC", "180"))
@@ -546,6 +555,178 @@ def safe_parse_json_object(raw_text: str) -> dict[str, Any]:
         return value if isinstance(value, dict) else {}
     except Exception:
         return {}
+
+
+@dataclass
+class RasaIntentReviewResult:
+    confidence: float
+    route: str
+    intent_match: bool
+    reason: str
+
+
+@dataclass
+class ChatRouteDecision:
+    route: str
+    source: str
+    default_route: str
+    is_complex: bool
+    llm_review_applied: bool = False
+    llm_review_failed: bool = False
+    llm_review_confidence: float | None = None
+    llm_review_route: str = ""
+    llm_review_reason: str = ""
+    strict_agent_failure: bool = False
+
+
+def normalize_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "y", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "n", "off"}:
+            return False
+    return False
+
+
+def should_review_business_intent(intent_name: str) -> bool:
+    return (intent_name or "").strip() in BUSINESS_RULE_INTENTS
+
+
+def should_keep_rule_after_review(review: RasaIntentReviewResult, *, is_complex: bool) -> bool:
+    if is_complex:
+        return False
+    return (
+        review.confidence >= CHAT_ROUTER_LLM_REVIEW_THRESHOLD
+        and review.route == "rule"
+        and review.intent_match
+    )
+
+
+def normalize_rasa_intent_review(raw: dict[str, Any]) -> RasaIntentReviewResult | None:
+    if not isinstance(raw, dict):
+        return None
+    route = str(raw.get("route") or "").strip().lower()
+    if route not in {"rule", "agent"}:
+        return None
+    reason = str(raw.get("reason") or "").strip()
+    if not reason:
+        return None
+    try:
+        confidence = float(raw.get("confidence"))
+    except Exception:
+        return None
+    confidence = max(0.0, min(confidence, 1.0))
+    return RasaIntentReviewResult(
+        confidence=confidence,
+        route=route,
+        intent_match=normalize_bool(raw.get("intent_match")),
+        reason=reason,
+    )
+
+
+def extract_openai_compat_message_text(payload: dict[str, Any]) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return ""
+    first_choice = choices[0]
+    if not isinstance(first_choice, dict):
+        return ""
+    message = first_choice.get("message")
+    if not isinstance(message, dict):
+        return ""
+    content = message.get("content")
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+            text_part = item.get("text")
+            if isinstance(text_part, str) and text_part.strip():
+                parts.append(text_part.strip())
+        return "\n".join(parts).strip()
+    return ""
+
+
+async def generate_agent_llm_text(*, system_prompt: str, user_payload: dict[str, Any], temperature: float = 0.0) -> str:
+    if AGENT_LLM_PROVIDER == "openai_compat":
+        headers = {"Content-Type": "application/json"}
+        if AGENT_LLM_API_KEY:
+            headers["Authorization"] = f"Bearer {AGENT_LLM_API_KEY}"
+        endpoint = (
+            f"{AGENT_LLM_BASE_URL}/chat/completions"
+            if AGENT_LLM_BASE_URL.endswith("/v1")
+            else f"{AGENT_LLM_BASE_URL}/v1/chat/completions"
+        )
+        body = {
+            "model": AGENT_LLM_MODEL,
+            "temperature": temperature,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
+            ],
+        }
+        async with httpx.AsyncClient(timeout=AGENT_LLM_TIMEOUT_SEC) as client:
+            response = await client.post(endpoint, json=body, headers=headers)
+        response.raise_for_status()
+        return extract_openai_compat_message_text(response.json())
+
+    payload = {
+        "model": AGENT_LLM_MODEL,
+        "stream": False,
+        "options": {"temperature": temperature},
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
+        ],
+    }
+    async with httpx.AsyncClient(timeout=AGENT_LLM_TIMEOUT_SEC) as client:
+        response = await client.post(f"{AGENT_LLM_BASE_URL.rstrip('/')}/api/chat", json=payload)
+    response.raise_for_status()
+    response_payload = response.json() if response.content else {}
+    if not isinstance(response_payload, dict):
+        return ""
+    message_payload = response_payload.get("message")
+    if not isinstance(message_payload, dict):
+        return ""
+    content = message_payload.get("content")
+    return str(content or "").strip()
+
+
+async def review_rasa_business_intent(
+    *,
+    message: str,
+    intent_name: str,
+    intent_confidence: float,
+    domains: set[str],
+    is_complex: bool,
+) -> RasaIntentReviewResult | None:
+    system_prompt = (
+        "你是电商聊天路由复核器。"
+        "请判断当前请求是否适合继续走 Rasa 规则链路，还是应该转交 LLM Agent。"
+        "只输出 JSON 对象，字段必须为 confidence,route,intent_match,reason。"
+        "confidence 范围 0 到 1，route 只能是 rule 或 agent。"
+        "当请求包含多意图、复杂条件、商品比较、政策解释、说明书或故障排查、事务型命令，"
+        "或者与给定业务 intent 不匹配时，优先输出 agent。"
+        "只有在 intent 明确匹配且适合规则查询时，才输出 rule。"
+    )
+    user_payload = {
+        "message": (message or "").strip(),
+        "rasa_intent": (intent_name or "").strip(),
+        "rasa_confidence": round(float(intent_confidence), 4),
+        "domains": sorted(domains),
+        "is_complex_query": bool(is_complex),
+    }
+    raw_text = await generate_agent_llm_text(system_prompt=system_prompt, user_payload=user_payload, temperature=0.0)
+    return normalize_rasa_intent_review(safe_parse_json_object(raw_text))
 
 
 async def generate_embedding(text_content: str) -> list[float]:
@@ -1679,18 +1860,132 @@ async def parse_rasa_intent(message: str) -> tuple[str, float]:
         return "", 0.0
 
 
-def decide_chat_route(*, message: str, intent_name: str, intent_confidence: float) -> str:
+def decide_chat_route(
+    *,
+    message: str,
+    intent_name: str,
+    intent_confidence: float,
+    is_complex: bool | None = None,
+) -> str:
+    complex_query = is_complex_query(message) if is_complex is None else bool(is_complex)
     if not CHAT_ROUTER_ENABLE_AGENT:
         return "rule"
     if intent_name == "nlu_fallback":
         return "agent"
     if intent_confidence < CHAT_ROUTER_RASA_CONFIDENCE_THRESHOLD:
         return "agent"
-    if is_complex_query(message):
+    if complex_query:
         return "agent"
     if intent_name in FAST_ROUTER_INTENTS:
         return "rule"
     return "agent"
+
+
+async def resolve_chat_route_decision(
+    *,
+    message: str,
+    intent_name: str,
+    intent_confidence: float,
+    domains: set[str],
+) -> ChatRouteDecision:
+    complex_query = is_complex_query(message)
+    default_route = decide_chat_route(
+        message=message,
+        intent_name=intent_name,
+        intent_confidence=intent_confidence,
+        is_complex=complex_query,
+    )
+    if not CHAT_ROUTER_ENABLE_AGENT:
+        return ChatRouteDecision(
+            route=default_route,
+            source="agent_disabled",
+            default_route=default_route,
+            is_complex=complex_query,
+        )
+    if default_route == "agent":
+        if intent_name == "nlu_fallback":
+            source = "nlu_fallback"
+        elif intent_confidence < CHAT_ROUTER_RASA_CONFIDENCE_THRESHOLD:
+            source = "rasa_confidence"
+        elif complex_query:
+            source = "complex_query"
+        else:
+            source = "default_agent"
+        return ChatRouteDecision(
+            route="agent",
+            source=source,
+            default_route=default_route,
+            is_complex=complex_query,
+        )
+    if not should_review_business_intent(intent_name):
+        return ChatRouteDecision(
+            route="rule",
+            source="fast_rule",
+            default_route=default_route,
+            is_complex=complex_query,
+        )
+    if not CHAT_ROUTER_LLM_REVIEW_ENABLED:
+        return ChatRouteDecision(
+            route="rule",
+            source="business_rule_review_disabled",
+            default_route=default_route,
+            is_complex=complex_query,
+        )
+    try:
+        review = await review_rasa_business_intent(
+            message=message,
+            intent_name=intent_name,
+            intent_confidence=intent_confidence,
+            domains=domains,
+            is_complex=complex_query,
+        )
+    except Exception:
+        logger.exception(
+            "llm_review_failed intent=%s confidence=%.3f domains=%s",
+            intent_name or "unknown",
+            intent_confidence,
+            ",".join(sorted(domains)),
+        )
+        return ChatRouteDecision(
+            route="rule",
+            source="business_rule_review_failed",
+            default_route=default_route,
+            is_complex=complex_query,
+            llm_review_failed=True,
+        )
+
+    if not review:
+        return ChatRouteDecision(
+            route="rule",
+            source="business_rule_review_invalid",
+            default_route=default_route,
+            is_complex=complex_query,
+            llm_review_failed=True,
+        )
+
+    if should_keep_rule_after_review(review, is_complex=complex_query):
+        return ChatRouteDecision(
+            route="rule",
+            source="llm_review_rule",
+            default_route=default_route,
+            is_complex=complex_query,
+            llm_review_applied=True,
+            llm_review_confidence=review.confidence,
+            llm_review_route=review.route,
+            llm_review_reason=review.reason,
+        )
+
+    return ChatRouteDecision(
+        route="agent",
+        source="llm_review_agent",
+        default_route=default_route,
+        is_complex=complex_query,
+        llm_review_applied=True,
+        llm_review_confidence=review.confidence,
+        llm_review_route=review.route,
+        llm_review_reason=review.reason,
+        strict_agent_failure=True,
+    )
 
 
 async def call_rasa_webhook(*, sender_id: str, message: str, metadata: dict[str, Any]) -> list[ChatReplyMessage]:
@@ -4140,26 +4435,44 @@ async def chat_send(
 
     intent_name = ""
     intent_confidence = 0.0
+    domain_set = infer_message_domains(message)
     if message:
         intent_name, intent_confidence = await parse_rasa_intent(message)
-    route = (
-        "agent"
+    route_decision = (
+        ChatRouteDecision(route="agent", source="attachments", default_route="agent", is_complex=False)
         if attachment_ids
-        else decide_chat_route(message=message, intent_name=intent_name, intent_confidence=intent_confidence)
+        else await resolve_chat_route_decision(
+            message=message,
+            intent_name=intent_name,
+            intent_confidence=intent_confidence,
+            domains=domain_set,
+        )
     )
-    domains = sorted(infer_message_domains(message))
+    route = route_decision.route
+    domains = sorted(domain_set)
+    review_confidence_text = (
+        f"{route_decision.llm_review_confidence:.3f}"
+        if route_decision.llm_review_confidence is not None
+        else "n/a"
+    )
     logger.info(
-        "chat_route trace_id=%s route=%s intent=%s confidence=%.3f domains=%s sender_id=%s attachments=%d",
+        "chat_route trace_id=%s final_route=%s route_source=%s rasa_intent=%s rasa_confidence=%.3f "
+        "llm_review_confidence=%s llm_review_route=%s review_reason=%s domains=%s sender_id=%s attachments=%d",
         trace_id,
         route,
+        route_decision.source,
         intent_name or "unknown",
         intent_confidence,
+        review_confidence_text,
+        route_decision.llm_review_route or "n/a",
+        route_decision.llm_review_reason or "n/a",
         ",".join(domains),
         sender_id,
         len(attachment_ids),
     )
 
     metadata["route"] = route
+    metadata["route_source"] = route_decision.source
     if route == "agent":
         try:
             reply, tool_call_logs = await run_nexau_agent_orchestrator(
@@ -4175,8 +4488,19 @@ async def chat_send(
             )
             return ChatSendResponse(messages=[reply])
         except Exception as exc:  # noqa: BLE001
+            if route_decision.strict_agent_failure:
+                logger.exception(
+                    "agent_route_failed trace_id=%s error=%s fallback=blocked route_source=%s",
+                    trace_id,
+                    str(exc),
+                    route_decision.source,
+                )
+                return ChatSendResponse(
+                    messages=[build_chat_message("当前请求需要进一步语义判断，但大模型服务暂时不可用，请稍后重试。")]
+                )
             logger.exception("agent_route_failed trace_id=%s error=%s fallback=rule", trace_id, str(exc))
             metadata["route"] = "rule"
+            metadata["route_source"] = "agent_failed_fallback_rule"
 
     if not message:
         raise HTTPException(status_code=400, detail="attachments request must route to agent")

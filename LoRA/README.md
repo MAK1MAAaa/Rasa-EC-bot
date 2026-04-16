@@ -1,213 +1,71 @@
-# LoRA 复现实验（仅两份数据集，无 ReAct 合成）
+# LoRA
 
-当前流程固定为四步：
+`LoRA/` 负责 Qwen3.5-2B 的 QLoRA 训练、评测、导出，以及通过 vLLM / Ollama 提供推理能力。
 
-1. 两数据集预处理
-2. 数据过滤（可选）
-3. LoRA 训练
-4. 离线评估
+## 目录说明
 
-## 1. 数据来源
+| 路径 | 作用 |
+| --- | --- |
+| `configs/` | 训练配置 |
+| `data/` | 原始或处理后的训练数据 |
+| `scripts/prepare_data.py` | 数据准备 |
+| `scripts/train_lora.py` | LoRA 训练 |
+| `scripts/eval_lora.py` | LoRA 评测 |
+| `scripts/export_ollama_model.py` | 导出 Ollama 模型 |
+| `models/` | 本地基座模型目录 |
+| `outputs/` | 训练输出、adapter、导出结果 |
 
-- ModelScope: `xuri2004/dianshang_dataset`  
-  https://www.modelscope.cn/datasets/xuri2004/dianshang_dataset
-- Kaggle: `ecommerce-dataset-for-nlpchatbot`（FAQ）  
-  https://www.kaggle.com/datasets/walterebhota/ecommerce-dataset-for-nlpchatbot
+## 环境要求
 
-说明：当前不使用旧 `data/E-commerce dataset/*.txt`。
+- Python `3.10` 到 `<3.12`
+- CUDA 环境
+- 建议在 Linux / WSL 中运行训练和 vLLM
 
-## 2. 目录基线（当前流程所需）
-
-```text
-LoRA/
-  .env
-  .env.sample
-  pyproject.toml
-  uv.lock
-  models/
-    Qwen3.5-2B/
-  configs/
-    smoke_ec_faq_only.yaml
-  data/
-    dianshang_dataset/
-      output.jsonl
-    Ecommerce_FAQ_intents.json
-    processed/                           # 运行后生成
-      train.jsonl
-      val.jsonl
-      test.jsonl
-      eval_prompts_20.jsonl
-      ec_faq_only/
-        train.jsonl
-        val.jsonl
-        test.jsonl
-        summary.json
-  scripts/
-    env_utils.py
-    prepare_data.py
-    filter_sft_sources.py
-    train_lora.py
-    eval_lora.py
-  outputs/                               # 训练后生成
-  reports/                               # 评估后生成
-```
-
-## 3. 环境准备
+## 安装依赖
 
 ```powershell
 cd LoRA
-$env:UV_CACHE_DIR='d:\Github\Rasa-EC-bot\.uv-cache'
-$env:UV_PYTHON_INSTALL_DIR='d:\Github\Rasa-EC-bot\.uv-python'
-uv python install 3.10
 uv sync
 ```
 
-`LoRA/.env` 里确认：
+## 训练流程
 
-```env
-BASE_MODEL_PATH=/mnt/d/Github/Rasa-EC-bot/LoRA/models/Qwen3.5-2B
-```
-
-## 4. 数据准备
-
-### 4.1 下载 dianshang_dataset
-
-```powershell
-cd D:\Github\Rasa-EC-bot
-uv run modelscope download --dataset xuri2004/dianshang_dataset --local_dir LoRA/data/dianshang_dataset
-```
-
-确认文件存在：`LoRA/data/dianshang_dataset/output.jsonl`
-
-### 4.2 准备 FAQ 文件
-
-将 FAQ JSON 放到：`LoRA/data/Ecommerce_FAQ_intents.json`
-
-## 5. 两数据集预处理
+### 1. 准备数据
 
 ```powershell
 cd LoRA
-uv run python scripts/prepare_data.py `
-  --faq-json data/Ecommerce_FAQ_intents.json `
-  --ec-train-jsonl data/dianshang_dataset/output.jsonl `
-  --out-dir data/processed `
-  --faq-upsample 6 `
-  --ec-upsample 1 `
-  --ec-max-samples 120000 `
-  --seed 42
+uv run python scripts\prepare_data.py
 ```
 
-输出：
-
-- `data/processed/train.jsonl`
-- `data/processed/val.jsonl`
-- `data/processed/test.jsonl`
-- `data/processed/eval_prompts_20.jsonl`
-
-## 6. 数据过滤（可选，但推荐保留）
-
-你当前输入只含两类来源：`ecommerce_dialogue_train`（对应 dianshang_dataset）和 `ecommerce_faq`。  
-该步骤通常是幂等操作（`kept_rows == total_rows`），主要用于可审计复现。
+### 2. 启动训练
 
 ```powershell
 cd LoRA
-uv run python scripts/filter_sft_sources.py `
-  --input-train data/processed/train.jsonl `
-  --input-val data/processed/val.jsonl `
-  --input-test data/processed/test.jsonl `
-  --allowed-sources ecommerce_dialogue_train,ecommerce_faq `
-  --out-dir data/processed/ec_faq_only
+uv run python scripts\train_lora.py --config configs\smoke_ec_faq_only.yaml
 ```
 
-快速核对：
+当前默认示例配置见 [configs/smoke_ec_faq_only.yaml](../LoRA/configs/smoke_ec_faq_only.yaml)。
 
-```powershell
-Get-Content data/processed/ec_faq_only/summary.json
-```
-
-## 7. LoRA 训练
-
-配置文件：`configs/smoke_ec_faq_only.yaml`
+### 3. 评测
 
 ```powershell
 cd LoRA
-uv run python scripts/train_lora.py --config configs/smoke_ec_faq_only.yaml
+uv run python scripts\eval_lora.py --config configs\smoke_ec_faq_only.yaml
 ```
 
-输出：
-
-- `outputs/smoke_ec_faq_only/adapter`
-- `outputs/smoke_ec_faq_only/run_summary.json`
-
-## 8. 离线评估
+### 4. 导出 Ollama 模型
 
 ```powershell
 cd LoRA
-uv run python scripts/eval_lora.py `
-  --model-dir outputs/smoke_ec_faq_only/adapter `
-  --test-file data/processed/eval_prompts_20.jsonl `
-  --report-file reports/smoke_ec_faq_only_eval.json
+uv run python scripts\export_ollama_model.py --config configs\smoke_ec_faq_only.yaml
 ```
 
-### 8.1 本次实验记录（2026-04-11）
+## vLLM 服务
 
-训练（`configs/smoke_ec_faq_only.yaml`）：
-
-- `trainable params`: `10,911,744 / 1,892,736,832`（`0.5765%`）
-- `train_samples`: `3139`
-- `eval_samples`: `174`
-- `train_loss`: `0.8576`
-- `eval_loss`: `0.4111`
-- `train_runtime`: `3733s`（约 `1:02:13`）
-- `train_steps`: `393`
-
-评估（`reports/smoke_ec_faq_only_eval.json`）：
-
-- `base_pass_rate`: `0.85`
-- `tuned_pass_rate`: `0.80`
-- `pass_rate_delta`: `-0.05`
-- `base_hallucinated_order_id / tuned_hallucinated_order_id`: `0 / 0`
-- `base_missing_confirmation / tuned_missing_confirmation`: `3 / 4`
-- `base_missing_required_keywords / tuned_missing_required_keywords`: `0 / 0`
-- `base_contains_forbidden_keywords / tuned_contains_forbidden_keywords`: `0 / 0`
-
-说明：本次微调后在 20 条离线约束集上未超过基座（少通过 1 条）。
-
-## 9. 兼容导出脚本（非当前主链路）
-
-当前默认链路不会把 LoRA adapter 注册到 Ollama。复杂客服 Agent 和系统形态 benchmark 默认直接使用训练产物 `adapter/` 目录，通过第 10 节的 `vLLM + PEFT Runtime` 加载。
-
-仓库中仍保留兼容脚本：`scripts/export_ollama_model.py`
-
-它只面向历史兼容或单独实验，不属于当前推荐部署。
-
-### 9.1 当前推荐用法
-
-训练完成后，直接使用：
-
-- `outputs/<run_name>/adapter`
-
-作为 vLLM 的 `--lora-modules` 输入，不需要执行 `ollama create`。
-
-### 9.2 兼容脚本说明
-
-如果你确实需要为旧链路生成 Ollama `Modelfile`，仍可以单独使用 `scripts/export_ollama_model.py`。但这不是当前 benchmark 或默认部署所依赖的步骤。
-
-## 10. LoRA 推理改为 vLLM + PEFT Runtime（替代 Ollama ADAPTER）
-
-Qwen 系列 LoRA 在 Ollama `ADAPTER` 路径上兼容性有限，推荐直接使用支持 PEFT runtime 的 vLLM。
-
-### 10.1 启动 vLLM（base + adapter）
-
-强调：
-
-- `vLLM` 默认按 WSL/Linux + CUDA 环境运行
-- Windows 原生 PowerShell 不作为默认推荐路径
-- 后端 LoRA 实例只调用该 OpenAI-compatible 接口，不直接承载模型推理
+如果后端 LoRA 实例要通过 OpenAI-compatible 接口调用 LoRA 模型，建议在 WSL 中启动 vLLM。
 
 ```bash
 cd /mnt/d/Github/Rasa-EC-bot/LoRA
-
 uv run --with vllm python -m vllm.entrypoints.openai.api_server \
   --host 0.0.0.0 \
   --port 8002 \
@@ -221,34 +79,10 @@ uv run --with vllm python -m vllm.entrypoints.openai.api_server \
   --enforce-eager
 ```
 
-WSL 路径注意：
-- 盘符挂载路径使用 `/mnt/d/...`。
-- 不要写成 `/home/mnt/d/...`，该路径不存在。
+后端如何接入这个 vLLM 实例，统一见 [../backend/README.md](../backend/README.md)。
 
-### 10.2 健康检查（OpenAI 兼容接口）
+## 与其他模块的边界
 
-```powershell
-curl http://127.0.0.1:8002/v1/models
-```
-
-若在 WSL2 或 12GB 左右显卡上仍出现显存不足：
-- 先进一步下调 `--gpu-memory-utilization`（如 `0.5`）。
-- 再下调 `--max-model-len`（如 `2048`）。
-- 调试阶段可继续收紧 `--max-num-seqs`（如 `1`）。
-- `--enforce-eager` 已用于减少 CUDA graph 额外显存占用。
-
-### 10.3 后端接入参数
-
-在 `backend/.env` 中配置：
-
-```env
-AGENT_LLM_PROVIDER=openai_compat
-AGENT_LLM_BASE_URL=http://127.0.0.1:8002/v1
-AGENT_LLM_MODEL=qwen3.5-2b-lora
-AGENT_LLM_API_KEY=EMPTY
-AGENT_LLM_TIMEOUT_SEC=45
-```
-
-说明：
-- `qwen3-vl:2b` 不挂载该 LoRA，继续独立运行。
-- 如仅做 LoRA 服务对比测试，也可保留原有 Ollama 基础模型链路用于对照。
+- LoRA 训练细节只在当前 README 维护。
+- benchmark 如何使用 LoRA 后端实例、如何记录结果，统一见 [../tests/README.md](../tests/README.md)。
+- 根目录 [../README.md](../README.md) 只保留模块入口，不重复训练步骤。

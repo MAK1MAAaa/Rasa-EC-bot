@@ -9,6 +9,12 @@ intents:
   - ask_product_recommendation
   - ask_after_sales_help
   - chitchat
+  - ask_price_protection_policy
+  - ask_manual_or_troubleshoot
+  - ask_product_comparison
+  - ask_multi_intent_complex
+  - ask_conditional_complex
+  - request_transactional_action
   - bot_challenge
   - nlu_fallback
 

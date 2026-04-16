@@ -1,0 +1,42 @@
+version: "3.1"
+
+rules:
+  - rule: greet user
+    steps:
+      - intent: greet
+      - action: utter_greet
+
+  - rule: goodbye user
+    steps:
+      - intent: goodbye
+      - action: utter_goodbye
+
+  - rule: thanks user
+    steps:
+      - intent: thanks
+      - action: utter_you_are_welcome
+
+  - rule: query my orders
+    steps:
+      - intent: ask_order_help
+      - action: action_query_my_orders
+
+  - rule: query logistics
+    steps:
+      - intent: ask_shipping_help
+      - action: action_query_order_logistics
+
+  - rule: query after sales
+    steps:
+      - intent: ask_after_sales_help
+      - action: action_query_after_sales
+
+  - rule: recommend products
+    steps:
+      - intent: ask_product_recommendation
+      - action: action_recommend_products
+
+  - rule: bot challenge
+    steps:
+      - intent: bot_challenge
+      - action: utter_iamabot

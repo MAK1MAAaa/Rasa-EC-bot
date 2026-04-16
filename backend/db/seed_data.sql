@@ -327,24 +327,96 @@ ranked AS (
         ROW_NUMBER() OVER (PARTITION BY shop_id, category ORDER BY sort_no) AS cat_item_no
     FROM product_specs
 ),
-enriched AS (
+feature_seed AS (
     SELECT
         shop_id,
-        name,
+        category,
+        name AS base_name,
+        brand,
+        model,
+        shop_code || '-' || LPAD(sort_no::text, 3, '0') AS sku_code,
+        shop_no,
+        sort_no,
+        cat_item_no,
+        1 + ((cat_item_no - 1) / 2) AS cluster_no,
+        1 + ((cat_item_no - 1) % 2) AS variant_no
+    FROM ranked
+),
+featured AS (
+    SELECT
+        shop_id,
+        category,
+        base_name,
+        brand,
+        model,
+        sku_code,
+        shop_no,
+        sort_no,
+        cat_item_no,
+        cluster_no,
+        variant_no,
         CASE category
-            WHEN '手机' THEN name || '主打影像、续航与快充平衡，适合通勤和日常娱乐。'
-            WHEN '电脑' THEN name || '兼顾性能与便携，适合办公、创作或桌面主力机位。'
-            WHEN '外设' THEN name || '围绕桌面效率和连接稳定性设计，适合高频办公与直播。'
-            WHEN '家电' THEN name || '强调静音、能效和易清洁，适合家庭高频使用。'
-            WHEN '智能家居' THEN name || '支持联动与自动化，适合打造整屋智能场景。'
-            WHEN '办公' THEN name || '突出人体工学和耐用性，适合长时间办公与协作。'
-            WHEN '显示器' THEN name || '强调屏幕素质和接口完整度，覆盖办公、电竞与创作。'
-            WHEN '音频' THEN name || '适合通勤听音、桌面监听和直播录音，强调解析与稳定。'
-            WHEN '摄影' THEN name || '面向 Vlog、直播和旅行创作，兼顾画质和携带便利。'
-            WHEN '户外' THEN name || '强调轻量、耐候与收纳效率，适合露营与徒步使用。'
-            WHEN '穿戴' THEN name || '聚焦全天佩戴舒适度与健康监测，适合持续记录。'
-            ELSE name || '兼顾材质质感与居家收纳效率，适合厨房和生活整理。'
-        END AS description,
+            WHEN '手机' THEN (ARRAY['曜石黑', '月岩白', '海盐蓝', '晨雾粉', '松针绿', '星砂金', '冰川银', '深空灰'])[1 + ((cluster_no - 1) % 8)]
+            WHEN '电脑' THEN (ARRAY['云墨黑', '星雾银', '松烟灰', '雪山白', '深海蓝', '玄铁灰', '晨曦金', '钛空银'])[1 + ((cluster_no - 1) % 8)]
+            WHEN '显示器' THEN (ARRAY['曜岩黑', '月光银', '深空灰', '雪域白', '晨曦银', '石墨黑', '星际灰', '冰川白'])[1 + ((cluster_no - 1) % 8)]
+            WHEN '家电' THEN (ARRAY['珍珠白', '松雾灰', '奶油白', '曜石黑', '云杉绿', '冰川银', '雾霾蓝', '香槟金'])[1 + ((cluster_no - 1) % 8)]
+            WHEN '智能家居' THEN (ARRAY['曜石黑', '月影白', '深海蓝', '钛雾灰', '暖沙金', '冰川银', '极夜黑', '雅瓷白'])[1 + ((cluster_no - 1) % 8)]
+            WHEN '户外' THEN (ARRAY['橄榄绿', '岩石灰', '沙地卡其', '湖水蓝', '火山黑', '雪峰白', '松针绿', '赤陶棕'])[1 + ((cluster_no - 1) % 8)]
+            WHEN '穿戴' THEN (ARRAY['曜石黑', '云雾白', '海盐蓝', '珊瑚粉', '松针绿', '钛金灰', '琥珀棕', '冰川银'])[1 + ((cluster_no - 1) % 8)]
+            WHEN '外设' THEN (ARRAY['夜幕黑', '冰川白', '石墨灰', '雾海蓝', '暖砂白', '曜石黑', '银砂灰', '晨曦白'])[1 + ((cluster_no - 1) % 8)]
+            WHEN '办公' THEN (ARRAY['胡桃木', '岩灰', '浅沙白', '商务黑', '钛银灰', '云母白', '深胡桃', '石英灰'])[1 + ((cluster_no - 1) % 8)]
+            WHEN '音频' THEN (ARRAY['曜石黑', '月光白', '深海蓝', '酒红色', '枪灰色', '银白色', '砂岩灰', '奶油白'])[1 + ((cluster_no - 1) % 8)]
+            WHEN '摄影' THEN (ARRAY['磨砂黑', '钛银色', '碳纤黑', '云雾白', '石墨灰', '香槟银', '沙岩棕', '冰川银'])[1 + ((cluster_no - 1) % 8)]
+            ELSE (ARRAY['原木色', '奶油白', '岩灰色', '雾霾蓝', '暖砂色', '冰川白', '深空灰', '可可棕'])[1 + ((cluster_no - 1) % 8)]
+        END AS color_label,
+        CASE category
+            WHEN '手机' THEN (ARRAY['6.1 英寸直屏', '6.3 英寸轻薄版', '6.67 英寸大电池', '6.78 英寸旗舰屏', '6.82 英寸影像版', '7.1 英寸折叠屏', '6.55 英寸手感版', '6.74 英寸均衡版'])[1 + ((cluster_no - 1) % 8)]
+            WHEN '电脑' THEN (ARRAY['14 英寸轻薄本', '14.5 英寸高分屏', '16 英寸创作本', '16 英寸性能本', '迷你主机', '会议一体机', '塔式工作站', '14 英寸商务本'])[1 + ((cluster_no - 1) % 8)]
+            WHEN '显示器' THEN (ARRAY['24 英寸', '27 英寸', '32 英寸', '34 英寸带鱼屏', '49 英寸双 QHD', '16 英寸便携屏', '27 英寸高刷', '29 英寸超宽屏'])[1 + ((cluster_no - 1) % 8)]
+            WHEN '家电' THEN (ARRAY['2L 小体积', '4L 桌面款', '6L 家用版', '8L 大容量', '10L 大风量', '12 套洗涤位', '600m³/h 风量', '16L 热水量'])[1 + ((cluster_no - 1) % 8)]
+            WHEN '智能家居' THEN (ARRAY['人脸+指纹', '双摄猫眼', '10.1 英寸中控', '桌面/墙装两用', '120° 人体感应', '轨道电机', '温湿双测', '四件套组合'])[1 + ((cluster_no - 1) % 8)]
+            WHEN '户外' THEN (ARRAY['双人轻量版', '零下 10℃ 适用', '35L 容量', '55L 重装版', '碳纤三节', '折叠越野轮', '420cm 天幕', '1L 保温规格'])[1 + ((cluster_no - 1) % 8)]
+            WHEN '穿戴' THEN (ARRAY['42mm', '46mm', 'S/M 码', 'M/L 码', 'Pro 版本', '轻量版', '45mm', '38mm'])[1 + ((cluster_no - 1) % 8)]
+            WHEN '外设' THEN (ARRAY['87 键布局', '75 键静音轴', '79g 轻量', '2K 直播画质', '11 合 1 扩展', '双模连接', '旋钮快捷键', '热插拔结构'])[1 + ((cluster_no - 1) % 8)]
+            WHEN '办公' THEN (ARRAY['140cm 桌板', '腰背分区支撑', 'A4 双面高速', '便携热敏打印', '12 页碎纸量', '6 麦拾音', '多档升降', '长坐舒压'])[1 + ((cluster_no - 1) % 8)]
+            WHEN '音频' THEN (ARRAY['头戴旗舰', '真无线入耳', 'USB/XLR 双接口', '5 英寸单元', '5.1 声道', '桌面解码耳放', 'LDAC', '主动降噪'])[1 + ((cluster_no - 1) % 8)]
+            WHEN '摄影' THEN (ARRAY['4K 60fps', '24-70mm 焦段', 'APS-C 微单', '碳纤维脚架', '直播补光', 'F2.8 恒定光圈', '五轴防抖', '便携手持'])[1 + ((cluster_no - 1) % 8)]
+            ELSE (ARRAY['天然原木', '抗菌防滑', '真空保鲜', '分层收纳', '珐琅涂层', '32cm 锅体', 'UV 消毒', '模块化分格'])[1 + ((cluster_no - 1) % 8)]
+        END AS primary_spec,
+        CASE category
+            WHEN '手机' THEN CASE
+                WHEN cluster_no >= 7 THEN (ARRAY['16GB+512GB', '16GB+1TB'])[variant_no]
+                ELSE (ARRAY['12GB+256GB', '12GB+512GB'])[variant_no]
+            END
+            WHEN '电脑' THEN CASE
+                WHEN cluster_no >= 3 THEN (ARRAY['32GB+1TB', '64GB+2TB'])[variant_no]
+                ELSE (ARRAY['16GB+512GB', '32GB+1TB'])[variant_no]
+            END
+            WHEN '显示器' THEN (ARRAY['2K 120Hz', '4K 144Hz'])[variant_no]
+            WHEN '家电' THEN (ARRAY['低噪运行', '一级能效'])[variant_no]
+            WHEN '智能家居' THEN (ARRAY['Wi-Fi / Matter 联动', '蓝牙 Mesh / Zigbee 联动'])[variant_no]
+            WHEN '户外' THEN (ARRAY['防泼水耐候', '轻量可压缩'])[variant_no]
+            WHEN '穿戴' THEN (ARRAY['7 天续航', '14 天续航'])[variant_no]
+            WHEN '外设' THEN (ARRAY['蓝牙 + 2.4G 双模', '多设备切换'])[variant_no]
+            WHEN '办公' THEN (ARRAY['企业会议场景', '长时间久坐友好'])[variant_no]
+            WHEN '音频' THEN (ARRAY['蓝牙 5.4', '低延迟模式'])[variant_no]
+            WHEN '摄影' THEN (ARRAY['创作套装友好', '旅行便携'])[variant_no]
+            ELSE (ARRAY['耐磨耐用', '易清洁收纳'])[variant_no]
+        END AS secondary_spec,
+        CASE category
+            WHEN '手机' THEN (ARRAY['通勤影像', '长续航出差', '手游旗舰', '轻薄自拍', '夜景人像', '大屏阅读', '折叠商务', '耐摔备用'])[1 + ((cluster_no - 1) % 8)]
+            WHEN '电脑' THEN (ARRAY['日常办公', '视频会议', '内容创作', '高性能剪辑', '桌面扩展', '会议室协作', '静音渲染', '移动差旅'])[1 + ((cluster_no - 1) % 8)]
+            WHEN '显示器' THEN (ARRAY['办公护眼', '电竞高刷', '内容创作', '多窗口协作', '沉浸式游戏', '移动副屏', '图像调色', '直播监看'])[1 + ((cluster_no - 1) % 8)]
+            WHEN '家电' THEN (ARRAY['卧室静音', '母婴房净化', '厨房高频', '租房小户型', '全家共享', '重油污清洁', '夏季循环送风', '冬季取暖'])[1 + ((cluster_no - 1) % 8)]
+            WHEN '智能家居' THEN (ARRAY['入户安防', '玄关联动', '客厅中控', '夜间照明', '人体感应', '窗帘自动化', '环境监测', '老人看护'])[1 + ((cluster_no - 1) % 8)]
+            WHEN '户外' THEN (ARRAY['周末露营', '高海拔徒步', '长线穿越', '自驾营地', '越野跑步', '重装运输', '亲子露营', '全天保温'])[1 + ((cluster_no - 1) % 8)]
+            WHEN '穿戴' THEN (ARRAY['睡眠监测', '运动记录', '长辈看护', '血氧提醒', '心率追踪', '居家康复', '久坐办公', '减压放松'])[1 + ((cluster_no - 1) % 8)]
+            WHEN '外设' THEN (ARRAY['桌面升级', '宿舍游戏', '远程会议', '直播开会', '多屏办公', '移动办公', '效率键位', '热插拔折腾'])[1 + ((cluster_no - 1) % 8)]
+            WHEN '办公' THEN (ARRAY['久坐办公', '居家书房', '企业会议', '移动差旅', '纸质归档', '开放办公区', '会议拾音', '桌面整理'])[1 + ((cluster_no - 1) % 8)]
+            WHEN '音频' THEN (ARRAY['通勤听歌', '桌面监听', '直播录音', '家庭影院', '宿舍追剧', '游戏语音', '播客录制', '夜间沉浸'])[1 + ((cluster_no - 1) % 8)]
+            WHEN '摄影' THEN (ARRAY['Vlog 创作', '直播补光', '旅行拍摄', '人像拍摄', '桌面开箱', '运动记录', '轻量外拍', '内容工作室'])[1 + ((cluster_no - 1) % 8)]
+            ELSE (ARRAY['厨房整理', '高频烹饪', '餐具收纳', '备菜分区', '家庭聚餐', '橱柜扩容', '保鲜备餐', '台面整洁'])[1 + ((cluster_no - 1) % 8)]
+        END AS scenario_label,
         CASE category
             WHEN '手机' THEN 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?auto=format&fit=crop&w=800&q=80'
             WHEN '电脑' THEN 'https://images.unsplash.com/photo-1517336714739-489689fd1ca8?auto=format&fit=crop&w=800&q=80'
@@ -359,105 +431,145 @@ enriched AS (
             WHEN '穿戴' THEN 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=800&q=80'
             ELSE 'https://images.unsplash.com/photo-1505693416388-ac5ce068fe85?auto=format&fit=crop&w=800&q=80'
         END AS image_url,
-        category,
-        brand,
-        model,
-        shop_code || '-' || LPAD(sort_no::text, 3, '0') AS sku_code,
         ROUND((
             CASE category
-                WHEN '手机' THEN 3299
-                WHEN '电脑' THEN 4999
-                WHEN '外设' THEN 229
-                WHEN '家电' THEN 499
-                WHEN '智能家居' THEN 259
-                WHEN '办公' THEN 359
-                WHEN '显示器' THEN 1399
-                WHEN '音频' THEN 399
-                WHEN '摄影' THEN 899
-                WHEN '户外' THEN 229
-                WHEN '穿戴' THEN 299
-                ELSE 99
+                WHEN '手机' THEN 2299 + cluster_no * 420 + variant_no * 180
+                WHEN '电脑' THEN 4599 + cluster_no * 900 + variant_no * 450
+                WHEN '外设' THEN 159 + cluster_no * 120 + variant_no * 55
+                WHEN '家电' THEN 299 + cluster_no * 240 + variant_no * 120
+                WHEN '智能家居' THEN 199 + cluster_no * 220 + variant_no * 95
+                WHEN '办公' THEN 259 + cluster_no * 180 + variant_no * 80
+                WHEN '显示器' THEN 1199 + cluster_no * 650 + variant_no * 260
+                WHEN '音频' THEN 299 + cluster_no * 170 + variant_no * 90
+                WHEN '摄影' THEN 799 + cluster_no * 550 + variant_no * 230
+                WHEN '户外' THEN 189 + cluster_no * 160 + variant_no * 75
+                WHEN '穿戴' THEN 269 + cluster_no * 190 + variant_no * 85
+                ELSE 129 + cluster_no * 85 + variant_no * 35
             END
-            + sort_no * 88
-            + cat_item_no * 35
-            + shop_no * 12
-            + CASE category
-                WHEN '电脑' THEN 900
-                WHEN '显示器' THEN 600
-                WHEN '摄影' THEN 450
-                WHEN '家电' THEN 350
+            + CASE
+                WHEN base_name LIKE '%Ultra%' THEN 680
+                WHEN base_name LIKE '%Fold%' THEN 1480
+                WHEN base_name LIKE '%工作站%' THEN 1650
+                WHEN base_name LIKE '%MiniLED%' THEN 720
+                WHEN base_name LIKE '%带鱼屏%' THEN 540
+                WHEN base_name LIKE '%相机%' THEN 620
+                WHEN base_name LIKE '%镜头%' THEN 980
+                WHEN base_name LIKE '%门锁%' THEN 660
+                WHEN base_name LIKE '%洗碗机%' THEN 880
+                WHEN base_name LIKE '%帐篷%' THEN 420
+                WHEN base_name LIKE '%睡袋%' THEN 280
+                WHEN base_name LIKE '%手表%' THEN 260
+                WHEN base_name LIKE '%套装%' THEN 340
                 ELSE 0
             END
+            + shop_no * 21
         )::numeric, 2) AS price,
         ROUND((
             CASE category
-                WHEN '手机' THEN 3299
-                WHEN '电脑' THEN 4999
-                WHEN '外设' THEN 229
-                WHEN '家电' THEN 499
-                WHEN '智能家居' THEN 259
-                WHEN '办公' THEN 359
-                WHEN '显示器' THEN 1399
-                WHEN '音频' THEN 399
-                WHEN '摄影' THEN 899
-                WHEN '户外' THEN 229
-                WHEN '穿戴' THEN 299
-                ELSE 99
+                WHEN '手机' THEN 420 + cluster_no * 40 + variant_no * 50
+                WHEN '电脑' THEN 680 + cluster_no * 90 + variant_no * 70
+                WHEN '显示器' THEN 360 + cluster_no * 60 + variant_no * 45
+                WHEN '家电' THEN 260 + cluster_no * 35 + variant_no * 25
+                WHEN '智能家居' THEN 220 + cluster_no * 30 + variant_no * 20
+                WHEN '摄影' THEN 480 + cluster_no * 80 + variant_no * 55
+                WHEN '户外' THEN 180 + cluster_no * 22 + variant_no * 18
+                WHEN '穿戴' THEN 210 + cluster_no * 25 + variant_no * 18
+                ELSE 140 + cluster_no * 18 + variant_no * 12
             END
-            + sort_no * 88
-            + cat_item_no * 35
-            + shop_no * 12
-            + CASE category
-                WHEN '电脑' THEN 900
-                WHEN '显示器' THEN 600
-                WHEN '摄影' THEN 450
-                WHEN '家电' THEN 350
-                ELSE 0
-            END
-            + CASE
-                WHEN category IN ('外设', '家居') THEN 120
-                ELSE 260
-            END
-        )::numeric, 2) AS original_price,
-        ROUND(LEAST(4.9::numeric, 4.1::numeric + (((sort_no + cat_item_no + shop_no) % 8) * 0.1)::numeric), 1) AS rating,
-        120 + sort_no * 37 + cat_item_no * 13 + shop_no * 11 AS review_count,
-        90 + sort_no * 61 + cat_item_no * 27 + shop_no * 15 AS monthly_sales,
-        (ARRAY[6, 12, 24, 36, 48])[1 + ((sort_no + shop_no) % 5)] AS ship_in_hours,
+        )::numeric, 2) AS price_gap,
+        ROUND(LEAST(4.9::numeric, 4.2::numeric + (((cluster_no + variant_no + shop_no) % 6) * 0.1)::numeric), 1) AS rating,
+        180 + cluster_no * 59 + variant_no * 41 + shop_no * 19 + sort_no * 7 AS review_count,
+        120 + cluster_no * 88 + variant_no * 46 + shop_no * 21 + cat_item_no * 15 AS monthly_sales,
+        (ARRAY[6, 12, 24, 36, 48])[1 + ((cluster_no + shop_no + variant_no) % 5)] AS ship_in_hours,
         CASE
             WHEN category IN ('手机', '电脑', '显示器', '家电', '智能家居', '摄影') THEN 365
+            WHEN category IN ('穿戴', '户外') THEN 240
             ELSE 180
-        END AS warranty_days,
+        END AS warranty_days
+    FROM feature_seed
+),
+named AS (
+    SELECT
+        shop_id,
+        category,
+        base_name,
+        brand,
+        model,
+        sku_code,
+        color_label,
+        primary_spec,
+        secondary_spec,
+        scenario_label,
+        image_url,
+        price,
+        price_gap,
+        rating,
+        review_count,
+        monthly_sales,
+        ship_in_hours,
+        warranty_days,
+        shop_no,
+        cluster_no,
+        variant_no,
+        sort_no,
+        CASE
+            WHEN category = '手机' THEN base_name || ' ' || color_label || ' ' || primary_spec
+            WHEN category = '电脑' THEN base_name || ' ' || color_label || ' ' || secondary_spec
+            WHEN category = '显示器' THEN base_name || ' ' || color_label || ' ' || primary_spec
+            WHEN category IN ('家电', '智能家居', '穿戴', '摄影') THEN base_name || ' ' || color_label || ' ' || secondary_spec
+            ELSE base_name || ' ' || color_label
+        END AS display_name
+    FROM featured
+),
+enriched AS (
+    SELECT
+        shop_id,
+        display_name AS name,
         CASE category
-            WHEN '手机' THEN jsonb_build_array(brand, '高刷屏', '快充')
-            WHEN '电脑' THEN jsonb_build_array(brand, '高性能', '长续航')
-            WHEN '外设' THEN jsonb_build_array(brand, '桌面升级', '多设备切换')
-            WHEN '家电' THEN jsonb_build_array(brand, '节能运行', '低噪使用')
-            WHEN '智能家居' THEN jsonb_build_array(brand, '场景联动', '远程控制')
-            WHEN '办公' THEN jsonb_build_array(brand, '人体工学', '高效协作')
-            WHEN '显示器' THEN jsonb_build_array(brand, '高分辨率', '多接口')
-            WHEN '音频' THEN jsonb_build_array(brand, '高解析', '低延迟')
-            WHEN '摄影' THEN jsonb_build_array(brand, '创作友好', '轻量便携')
-            WHEN '户外' THEN jsonb_build_array(brand, '轻量化', '耐候材质')
-            WHEN '穿戴' THEN jsonb_build_array(brand, '全天佩戴', '健康监测')
-            ELSE jsonb_build_array(brand, '耐用材质', '易清洁')
+            WHEN '手机' THEN display_name || ' 提供 ' || color_label || ' 配色，规格为 ' || primary_spec || '，搭配 ' || secondary_spec || '，主打 ' || scenario_label || '。'
+            WHEN '电脑' THEN display_name || ' 采用 ' || color_label || ' 机身，提供 ' || primary_spec || ' 与 ' || secondary_spec || '，定位 ' || scenario_label || '。'
+            WHEN '显示器' THEN display_name || ' 提供 ' || color_label || ' 外观与 ' || primary_spec || '，配合 ' || secondary_spec || '，适合 ' || scenario_label || '。'
+            WHEN '家电' THEN display_name || ' 采用 ' || color_label || ' 配色，核心规格为 ' || primary_spec || '，支持 ' || secondary_spec || '，适合 ' || scenario_label || '。'
+            WHEN '智能家居' THEN display_name || ' 提供 ' || color_label || ' 版本，支持 ' || primary_spec || ' 与 ' || secondary_spec || '，适合 ' || scenario_label || '。'
+            WHEN '户外' THEN display_name || ' 采用 ' || color_label || ' 面料，规格为 ' || primary_spec || '，强调 ' || secondary_spec || '，适合 ' || scenario_label || '。'
+            WHEN '穿戴' THEN display_name || ' 提供 ' || color_label || ' 版本，规格为 ' || primary_spec || '，支持 ' || secondary_spec || '，适合 ' || scenario_label || '。'
+            ELSE display_name || ' 提供 ' || color_label || ' 配色，规格为 ' || primary_spec || '，支持 ' || secondary_spec || '，适合 ' || scenario_label || '。'
+        END AS description,
+        image_url,
+        category,
+        brand,
+        model,
+        sku_code,
+        price,
+        ROUND((price + price_gap)::numeric, 2) AS original_price,
+        rating,
+        review_count,
+        monthly_sales,
+        ship_in_hours,
+        warranty_days,
+        CASE category
+            WHEN '手机' THEN jsonb_build_array(brand, color_label, primary_spec, secondary_spec, scenario_label, '快充', '近似价位机型')
+            WHEN '电脑' THEN jsonb_build_array(brand, color_label, primary_spec, secondary_spec, scenario_label, '高性能', '近似价位机型')
+            WHEN '显示器' THEN jsonb_build_array(brand, color_label, primary_spec, secondary_spec, scenario_label, '多接口', '近似价位机型')
+            WHEN '家电' THEN jsonb_build_array(brand, color_label, primary_spec, secondary_spec, scenario_label, '低噪使用', '近似价位机型')
+            WHEN '智能家居' THEN jsonb_build_array(brand, color_label, primary_spec, secondary_spec, scenario_label, '场景联动', '近似价位机型')
+            WHEN '户外' THEN jsonb_build_array(brand, color_label, primary_spec, secondary_spec, scenario_label, '耐候材质', '近似价位机型')
+            WHEN '穿戴' THEN jsonb_build_array(brand, color_label, primary_spec, secondary_spec, scenario_label, '健康监测', '近似价位机型')
+            ELSE jsonb_build_array(brand, color_label, primary_spec, secondary_spec, scenario_label, '近似价位机型')
         END AS tags,
         CASE category
-            WHEN '手机' THEN jsonb_build_array('型号 ' || model, '高亮直屏', '5000mAh 级续航')
-            WHEN '电脑' THEN jsonb_build_array('型号 ' || model, '高色域屏幕', '高速固态')
-            WHEN '外设' THEN jsonb_build_array('型号 ' || model, '低延迟连接', '兼容主流系统')
-            WHEN '家电' THEN jsonb_build_array('型号 ' || model, '操作简单', '易清洁结构')
-            WHEN '智能家居' THEN jsonb_build_array('型号 ' || model, 'App 联动', '状态通知')
-            WHEN '办公' THEN jsonb_build_array('型号 ' || model, '商务风格', '长时间使用舒适')
-            WHEN '显示器' THEN jsonb_build_array('型号 ' || model, '色彩准确', '支架调节灵活')
-            WHEN '音频' THEN jsonb_build_array('型号 ' || model, '多设备兼容', '声音层次清晰')
-            WHEN '摄影' THEN jsonb_build_array('型号 ' || model, '快速上手', '户外拍摄友好')
-            WHEN '户外' THEN jsonb_build_array('型号 ' || model, '收纳体积友好', '适配多变天气')
-            WHEN '穿戴' THEN jsonb_build_array('型号 ' || model, '佩戴舒适', '数据同步便捷')
-            ELSE jsonb_build_array('型号 ' || model, '占用空间小', '细节打磨好')
+            WHEN '手机' THEN jsonb_build_array('型号 ' || model, color_label, primary_spec, secondary_spec, scenario_label)
+            WHEN '电脑' THEN jsonb_build_array('型号 ' || model, color_label, primary_spec, secondary_spec, scenario_label)
+            WHEN '显示器' THEN jsonb_build_array('型号 ' || model, color_label, primary_spec, secondary_spec, scenario_label)
+            WHEN '家电' THEN jsonb_build_array('型号 ' || model, color_label, primary_spec, secondary_spec, scenario_label)
+            WHEN '智能家居' THEN jsonb_build_array('型号 ' || model, color_label, primary_spec, secondary_spec, scenario_label)
+            WHEN '户外' THEN jsonb_build_array('型号 ' || model, color_label, primary_spec, secondary_spec, scenario_label)
+            WHEN '穿戴' THEN jsonb_build_array('型号 ' || model, color_label, primary_spec, secondary_spec, scenario_label)
+            ELSE jsonb_build_array('型号 ' || model, color_label, primary_spec, secondary_spec, scenario_label)
         END AS spec_highlights,
-        18 + ((sort_no * 9 + cat_item_no * 7 + shop_no * 5) % 80) AS stock,
+        12 + ((cluster_no * 11 + variant_no * 9 + shop_no * 7 + sort_no) % 68) AS stock,
         TRUE AS is_active
-    FROM ranked
+    FROM named
 )
 INSERT INTO products (
     shop_id,
