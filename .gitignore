@@ -51,6 +51,7 @@ frontend/temp.html
 rasa/models/
 rasa/.rasa/
 backend/.env
+backend/data/chat_memory/
 rasa/.env
 LoRA/.env
 

@@ -35,6 +35,7 @@ benchmark 相关说明不再放在这里，统一见 [../tests/README.md](../tes
 - 可从 `backend/.env.sample` 复制一份再修改。
 - 常见变量包括数据库连接、Redis 地址、Rasa 地址、Ollama 地址、Agent 模型配置、地图服务配置等。
 - 聊天路由新增了 `CHAT_ROUTER_LLM_REVIEW_ENABLED` 与 `CHAT_ROUTER_LLM_REVIEW_THRESHOLD`，用于控制规则型业务意图在 Rasa 命中后的 LLM 二次复核。
+- 聊天记忆新增了 `CHAT_MEMORY_COMPACT_MESSAGE_THRESHOLD`、`CHAT_MEMORY_COMPACT_CHAR_THRESHOLD`、`CHAT_MEMORY_RECENT_WINDOW_MESSAGES`、`CHAT_MEMORY_AGENT_RECENT_MESSAGES` 与 `CHAT_MEMORY_LOCK_TTL_SEC`，用于控制服务端会话压缩、Agent 上下文窗口和 Redis 锁时长。
 
 ## 本地启动
 
@@ -97,6 +98,7 @@ vLLM 的启动方式只在 [../LoRA/README.md](../LoRA/README.md) 维护，这�
 - 订单查询、物流推进、售后申请、物流投诉。
 - 聊天消息路由：事务型命令前置拦截、Rasa 规则链路、以及 LLM Agent / LoRA Agent 的组合编排。
 - 规则型业务意图支持 Rasa 命中后的 LLM 复核；复核置信度低于阈值时转交 Agent 处理。
+- 登录用户聊天支持服务端记忆：原始消息、待确认动作、会话级上下文快照和用户级全局记忆统一落在 PostgreSQL，并派生 `backend/data/chat_memory/` 下的 Markdown 文件。
 - 知识库文本切分、向量化、索引与检索。
 - 图片上传与多模态辅助问答。
 

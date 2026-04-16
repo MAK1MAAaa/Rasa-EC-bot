@@ -40,6 +40,22 @@ from .auth import (
     verify_password,
 )
 from .cache import RedisCache
+from .chat_memory import (
+    ChatMemoryConfig,
+    DEFAULT_CHAT_SESSION_ID,
+    attach_pending_action_context,
+    clear_pending_chat_action as clear_pending_chat_action_store,
+    ensure_chat_memory_schema,
+    extract_session_ref_from_pending_payload,
+    get_pending_chat_action as get_pending_chat_action_store,
+    invalidate_memory_bundle_cache,
+    load_agent_memory_bundle,
+    persist_chat_message,
+    refresh_chat_memory_artifacts,
+    resolve_chat_session_ref,
+    set_pending_chat_action as set_pending_chat_action_store,
+    update_chat_message_route_metadata,
+)
 from .database import engine, get_session
 from .models import (
     ChatAfterSalesSummaryItem,
@@ -159,6 +175,11 @@ CHAT_UPLOAD_DIR = os.getenv("CHAT_UPLOAD_DIR", "data/chat_uploads")
 CHAT_UPLOAD_MAX_MB = int(os.getenv("CHAT_UPLOAD_MAX_MB", "8"))
 CHAT_UPLOAD_MAX_BYTES = CHAT_UPLOAD_MAX_MB * 1024 * 1024
 CHAT_UPLOAD_ALLOWED_MIME = {"image/jpeg", "image/png", "image/webp"}
+CHAT_MEMORY_COMPACT_MESSAGE_THRESHOLD = int(os.getenv("CHAT_MEMORY_COMPACT_MESSAGE_THRESHOLD", "12"))
+CHAT_MEMORY_COMPACT_CHAR_THRESHOLD = int(os.getenv("CHAT_MEMORY_COMPACT_CHAR_THRESHOLD", "4000"))
+CHAT_MEMORY_RECENT_WINDOW_MESSAGES = int(os.getenv("CHAT_MEMORY_RECENT_WINDOW_MESSAGES", "8"))
+CHAT_MEMORY_AGENT_RECENT_MESSAGES = int(os.getenv("CHAT_MEMORY_AGENT_RECENT_MESSAGES", "6"))
+CHAT_MEMORY_LOCK_TTL_SEC = int(os.getenv("CHAT_MEMORY_LOCK_TTL_SEC", "30"))
 AMAP_WEB_KEY = os.getenv("AMAP_WEB_KEY", "").strip()
 AMAP_WEB_SIG = os.getenv("AMAP_WEB_SIG", "").strip()
 AMAP_TIMEOUT_MS = int(os.getenv("AMAP_TIMEOUT_MS", "3000"))
@@ -244,6 +265,14 @@ app.add_middleware(
 )
 
 cache = RedisCache(redis_url=REDIS_URL, default_ttl_sec=REDIS_CACHE_TTL_SEC)
+CHAT_MEMORY_CONFIG = ChatMemoryConfig(
+    compact_message_threshold=CHAT_MEMORY_COMPACT_MESSAGE_THRESHOLD,
+    compact_char_threshold=CHAT_MEMORY_COMPACT_CHAR_THRESHOLD,
+    recent_window_messages=CHAT_MEMORY_RECENT_WINDOW_MESSAGES,
+    bundle_recent_messages=CHAT_MEMORY_AGENT_RECENT_MESSAGES,
+    cache_ttl_sec=REDIS_CACHE_TTL_SEC,
+    lock_ttl_sec=CHAT_MEMORY_LOCK_TTL_SEC,
+)
 
 PRODUCT_FILTER_CACHE_KEY = "products:filters:v2"
 CHAT_ACTION_TTL_SEC = int(os.getenv("CHAT_ACTION_TTL_SEC", "300"))
@@ -472,10 +501,12 @@ async def on_startup() -> None:
             "AMAP_WEB_KEY is empty. Shipping route geocode will fall back to text-only logistics until backend/.env is configured."
         )
     UPLOAD_ROOT_DIR.mkdir(parents=True, exist_ok=True)
+    CHAT_MEMORY_CONFIG.root_dir.mkdir(parents=True, exist_ok=True)
     await ensure_logistics_geo_schema()
     await ensure_catalog_schema()
     await ensure_product_view_history_schema()
     await ensure_order_service_schema()
+    await ensure_chat_memory_schema(engine)
     await cache.connect()
 
 
@@ -999,44 +1030,50 @@ def now_unix_ts() -> int:
     return int(datetime.utcnow().timestamp())
 
 
-async def get_pending_chat_action(user_id: UUID) -> dict[str, Any] | None:
-    key = chat_pending_action_cache_key(user_id)
+async def get_pending_chat_action(user_id: UUID, session: AsyncSession | None = None) -> dict[str, Any] | None:
     payload: dict[str, Any] | None = None
+    if session is not None:
+        payload = await get_pending_chat_action_store(session=session, cache=cache, user_id=user_id)
+    if payload:
+        return payload
 
-    if cache.enabled:
-        raw = await cache.get_json(key)
-        if isinstance(raw, dict):
-            payload = raw
-    else:
-        raw = PENDING_CHAT_ACTION_MEMORY.get(key)
-        if isinstance(raw, dict):
-            payload = raw
-
+    key = chat_pending_action_cache_key(user_id)
+    raw = PENDING_CHAT_ACTION_MEMORY.get(key)
+    payload = raw if isinstance(raw, dict) else None
     if not payload:
         return None
 
     expires_at = int(payload.get("expires_at_ts") or 0)
     if expires_at > 0 and expires_at <= now_unix_ts():
-        await clear_pending_chat_action(user_id)
+        await clear_pending_chat_action(user_id, session=session)
         return None
-
     return payload
 
 
-async def set_pending_chat_action(user_id: UUID, payload: dict[str, Any]) -> None:
-    key = chat_pending_action_cache_key(user_id)
-    if cache.enabled:
-        await cache.set_json(key, payload, ttl_sec=CHAT_ACTION_TTL_SEC)
-    else:
-        PENDING_CHAT_ACTION_MEMORY[key] = payload
+async def set_pending_chat_action(
+    user_id: UUID,
+    payload: dict[str, Any],
+    *,
+    session: AsyncSession | None = None,
+) -> dict[str, Any]:
+    stored = dict(payload or {})
+    if session is not None:
+        stored = await set_pending_chat_action_store(
+            session=session,
+            cache=cache,
+            user_id=user_id,
+            payload=stored,
+            ttl_sec=CHAT_ACTION_TTL_SEC,
+        )
+
+    PENDING_CHAT_ACTION_MEMORY[chat_pending_action_cache_key(user_id)] = stored
+    return stored
 
 
-async def clear_pending_chat_action(user_id: UUID) -> None:
-    key = chat_pending_action_cache_key(user_id)
-    if cache.enabled:
-        await cache.delete_keys(key)
-    else:
-        PENDING_CHAT_ACTION_MEMORY.pop(key, None)
+async def clear_pending_chat_action(user_id: UUID, session: AsyncSession | None = None) -> None:
+    if session is not None:
+        await clear_pending_chat_action_store(session=session, cache=cache, user_id=user_id)
+    PENDING_CHAT_ACTION_MEMORY.pop(chat_pending_action_cache_key(user_id), None)
 
 
 def normalize_chat_cards(raw_cards: Any) -> list[ChatCard]:
@@ -1302,7 +1339,13 @@ async def has_active_logistics_complaint(session: AsyncSession, order_id: str) -
     return result.scalar_one_or_none() is not None
 
 
-async def prepare_checkout_chat_action(message: str, current_user: User, session: AsyncSession) -> ChatReplyMessage:
+async def prepare_checkout_chat_action(
+    message: str,
+    current_user: User,
+    session: AsyncSession,
+    *,
+    chat_session_ref: Any = None,
+) -> ChatReplyMessage:
     rows = await fetch_cart_rows(session, current_user.id)
     if not rows:
         return build_chat_message("购物车是空的，先去加购商品后我再帮你下单。")
@@ -1354,7 +1397,11 @@ async def prepare_checkout_chat_action(message: str, current_user: User, session
             ],
         },
     }
-    await set_pending_chat_action(current_user.id, pending_payload)
+    pending_payload = await set_pending_chat_action(
+        current_user.id,
+        attach_pending_action_context(pending_payload, chat_session_ref),
+        session=session,
+    )
 
     return build_chat_message(
         "已生成下单草案，请在下方卡片中确认或取消（5分钟内有效）。",
@@ -1363,7 +1410,13 @@ async def prepare_checkout_chat_action(message: str, current_user: User, session
     )
 
 
-async def prepare_after_sales_chat_action(message: str, current_user: User, session: AsyncSession) -> ChatReplyMessage:
+async def prepare_after_sales_chat_action(
+    message: str,
+    current_user: User,
+    session: AsyncSession,
+    *,
+    chat_session_ref: Any = None,
+) -> ChatReplyMessage:
     order_id = extract_order_id_from_message(message)
     if not order_id:
         return build_chat_message("请提供订单号后我才能帮你发起退款/换货，例如：申请退款 ORD202604010001 原因: 尺寸不合适。")
@@ -1406,7 +1459,11 @@ async def prepare_after_sales_chat_action(message: str, current_user: User, sess
             ],
         },
     }
-    await set_pending_chat_action(current_user.id, pending_payload)
+    pending_payload = await set_pending_chat_action(
+        current_user.id,
+        attach_pending_action_context(pending_payload, chat_session_ref),
+        session=session,
+    )
 
     return build_chat_message(
         "已生成售后申请草案，请在下方卡片中确认或取消（5分钟内有效）。",
@@ -1415,7 +1472,13 @@ async def prepare_after_sales_chat_action(message: str, current_user: User, sess
     )
 
 
-async def prepare_cancel_order_chat_action(message: str, current_user: User, session: AsyncSession) -> ChatReplyMessage:
+async def prepare_cancel_order_chat_action(
+    message: str,
+    current_user: User,
+    session: AsyncSession,
+    *,
+    chat_session_ref: Any = None,
+) -> ChatReplyMessage:
     order_id = extract_order_id_from_message(message)
     if not order_id:
         return build_chat_message("请提供订单号后我才能帮你取消订单，例如：取消订单 ORD202604010001。")
@@ -1447,7 +1510,11 @@ async def prepare_cancel_order_chat_action(message: str, current_user: User, ses
             ],
         },
     }
-    await set_pending_chat_action(current_user.id, pending_payload)
+    pending_payload = await set_pending_chat_action(
+        current_user.id,
+        attach_pending_action_context(pending_payload, chat_session_ref),
+        session=session,
+    )
     return build_chat_message(
         "已生成取消订单草案，请在下方卡片中确认或取消（5分钟内有效）。",
         cards=[{"type": "pending_action", "data": build_pending_action_card(pending_payload)}],
@@ -1455,7 +1522,13 @@ async def prepare_cancel_order_chat_action(message: str, current_user: User, ses
     )
 
 
-async def prepare_update_shipping_chat_action(message: str, current_user: User, session: AsyncSession) -> ChatReplyMessage:
+async def prepare_update_shipping_chat_action(
+    message: str,
+    current_user: User,
+    session: AsyncSession,
+    *,
+    chat_session_ref: Any = None,
+) -> ChatReplyMessage:
     order_id = extract_order_id_from_message(message)
     if not order_id:
         return build_chat_message(
@@ -1494,7 +1567,11 @@ async def prepare_update_shipping_chat_action(message: str, current_user: User, 
             ],
         },
     }
-    await set_pending_chat_action(current_user.id, pending_payload)
+    pending_payload = await set_pending_chat_action(
+        current_user.id,
+        attach_pending_action_context(pending_payload, chat_session_ref),
+        session=session,
+    )
     return build_chat_message(
         "已生成收货信息修改草案，请在下方卡片中确认或取消（5分钟内有效）。",
         cards=[{"type": "pending_action", "data": build_pending_action_card(pending_payload)}],
@@ -1502,7 +1579,13 @@ async def prepare_update_shipping_chat_action(message: str, current_user: User, 
     )
 
 
-async def prepare_logistics_complaint_chat_action(message: str, current_user: User, session: AsyncSession) -> ChatReplyMessage:
+async def prepare_logistics_complaint_chat_action(
+    message: str,
+    current_user: User,
+    session: AsyncSession,
+    *,
+    chat_session_ref: Any = None,
+) -> ChatReplyMessage:
     order_id = extract_order_id_from_message(message)
     if not order_id:
         return build_chat_message("请提供订单号后我才能帮你发起物流投诉，例如：投诉物流 ORD202604010001 原因: 包裹长时间未更新。")
@@ -1538,7 +1621,11 @@ async def prepare_logistics_complaint_chat_action(message: str, current_user: Us
             ],
         },
     }
-    await set_pending_chat_action(current_user.id, pending_payload)
+    pending_payload = await set_pending_chat_action(
+        current_user.id,
+        attach_pending_action_context(pending_payload, chat_session_ref),
+        session=session,
+    )
     return build_chat_message(
         "已生成物流投诉草案，请在下方卡片中确认或取消（5分钟内有效）。",
         cards=[{"type": "pending_action", "data": build_pending_action_card(pending_payload)}],
@@ -1742,12 +1829,12 @@ async def decide_pending_chat_action(
     if normalized_decision not in {"confirm", "cancel"}:
         raise HTTPException(status_code=400, detail="decision must be confirm or cancel")
 
-    pending = await get_pending_chat_action(current_user.id)
+    pending = await get_pending_chat_action(current_user.id, session=session)
     if not pending:
         return build_chat_message("当前没有待确认的自动操作。")
 
     if normalized_decision == "cancel":
-        await clear_pending_chat_action(current_user.id)
+        await clear_pending_chat_action(current_user.id, session=session)
         return build_chat_message("已取消本次自动操作。")
 
     action_type = str(pending.get("type") or "").strip()
@@ -1767,21 +1854,27 @@ async def decide_pending_chat_action(
         else:
             raise HTTPException(status_code=400, detail="Unsupported pending action type")
     except HTTPException as exc:
-        await clear_pending_chat_action(current_user.id)
+        await clear_pending_chat_action(current_user.id, session=session)
         return build_chat_message(f"自动执行失败：{exc.detail}。本次待确认操作已清除，请重新发起。")
     except Exception:
-        await clear_pending_chat_action(current_user.id)
+        await clear_pending_chat_action(current_user.id, session=session)
         return build_chat_message("自动执行失败：服务出现异常。本次待确认操作已清除，请稍后重试。")
 
-    await clear_pending_chat_action(current_user.id)
+    await clear_pending_chat_action(current_user.id, session=session)
     return result_message
 
 
-async def handle_chat_transaction_action(message: str, current_user: User, session: AsyncSession) -> ChatReplyMessage | None:
+async def handle_chat_transaction_action(
+    message: str,
+    current_user: User,
+    session: AsyncSession,
+    *,
+    chat_session_ref: Any = None,
+) -> ChatReplyMessage | None:
     if normalize_role(current_user.role) != "customer":
         return None
 
-    pending = await get_pending_chat_action(current_user.id)
+    pending = await get_pending_chat_action(current_user.id, session=session)
     command = parse_confirmation_command(message)
 
     if command:
@@ -1801,19 +1894,24 @@ async def handle_chat_transaction_action(message: str, current_user: User, sessi
         )
 
     if is_checkout_request(message):
-        return await prepare_checkout_chat_action(message, current_user, session)
+        return await prepare_checkout_chat_action(message, current_user, session, chat_session_ref=chat_session_ref)
 
     if is_after_sales_request(message):
-        return await prepare_after_sales_chat_action(message, current_user, session)
+        return await prepare_after_sales_chat_action(message, current_user, session, chat_session_ref=chat_session_ref)
 
     if is_cancel_order_request(message):
-        return await prepare_cancel_order_chat_action(message, current_user, session)
+        return await prepare_cancel_order_chat_action(message, current_user, session, chat_session_ref=chat_session_ref)
 
     if is_update_shipping_request(message):
-        return await prepare_update_shipping_chat_action(message, current_user, session)
+        return await prepare_update_shipping_chat_action(message, current_user, session, chat_session_ref=chat_session_ref)
 
     if is_logistics_complaint_request(message):
-        return await prepare_logistics_complaint_chat_action(message, current_user, session)
+        return await prepare_logistics_complaint_chat_action(
+            message,
+            current_user,
+            session,
+            chat_session_ref=chat_session_ref,
+        )
 
     return None
 
@@ -2101,11 +2199,76 @@ def serialize_chat_actions(actions: list[ChatAction]) -> list[dict[str, Any]]:
     return serialized
 
 
+def build_chat_history_route_metadata(
+    *,
+    trace_id: str,
+    sender_id: str,
+    route: str,
+    route_source: str,
+    domains: list[str],
+    attachments: list[str],
+    intent_name: str = "",
+    intent_confidence: float = 0.0,
+    llm_review_confidence: float | None = None,
+    llm_review_route: str = "",
+    llm_review_reason: str = "",
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "trace_id": trace_id,
+        "sender_id": sender_id,
+        "route": route,
+        "route_source": route_source,
+        "domains": list(domains),
+        "attachments": list(attachments),
+    }
+    if intent_name:
+        metadata["rasa_intent"] = intent_name
+        metadata["rasa_confidence"] = round(float(intent_confidence), 4)
+    if llm_review_confidence is not None:
+        metadata["llm_review_confidence"] = round(float(llm_review_confidence), 4)
+    if llm_review_route:
+        metadata["llm_review_route"] = llm_review_route
+    if llm_review_reason:
+        metadata["review_reason"] = llm_review_reason
+    if extra:
+        metadata.update(extra)
+    return metadata
+
+
+async def persist_chat_reply_messages(
+    *,
+    session: AsyncSession,
+    chat_session_ref: Any,
+    messages: list[ChatReplyMessage],
+    route_metadata: dict[str, Any],
+) -> None:
+    if not chat_session_ref:
+        return
+    for reply in messages:
+        await persist_chat_message(
+            session=session,
+            ref=chat_session_ref,
+            role="assistant",
+            text_value=reply.text,
+            route_metadata=route_metadata,
+            cards=serialize_chat_cards(reply.cards),
+            actions=serialize_chat_actions(reply.actions),
+        )
+    await refresh_chat_memory_artifacts(
+        session=session,
+        cache=cache,
+        ref=chat_session_ref,
+        config=CHAT_MEMORY_CONFIG,
+    )
+
+
 async def run_nexau_agent_orchestrator(
     *,
     message: str,
     current_user: User | None,
     session: AsyncSession,
+    chat_session_ref: Any = None,
     attachments: list[str] | None = None,
 ) -> tuple[ChatReplyMessage, list[dict[str, Any]]]:
     orchestrator = NexAUAgentOrchestrator(
@@ -2115,6 +2278,12 @@ async def run_nexau_agent_orchestrator(
         llm_timeout_sec=AGENT_LLM_TIMEOUT_SEC,
         llm_api_key=AGENT_LLM_API_KEY,
         frontend_base_url=FRONTEND_BASE_URL,
+    )
+    memory_bundle = await load_agent_memory_bundle(
+        session=session,
+        cache=cache,
+        ref=chat_session_ref,
+        config=CHAT_MEMORY_CONFIG,
     )
 
     async def tool_query_orders_summary(user_id: str, limit: int = 5) -> dict[str, Any]:
@@ -2286,7 +2455,12 @@ async def run_nexau_agent_orchestrator(
             raise HTTPException(status_code=401, detail="Unauthenticated user cannot create draft action")
         action_text = "换货" if request_type == AFTER_SALES_TYPE_EXCHANGE else "退款"
         synthetic_message = f"申请{action_text} {order_id} 原因: {reason}"
-        reply = await prepare_after_sales_chat_action(synthetic_message, current_user, session)
+        reply = await prepare_after_sales_chat_action(
+            synthetic_message,
+            current_user,
+            session,
+            chat_session_ref=chat_session_ref,
+        )
         return {
             "observation": {
                 "draft_text": reply.text,
@@ -2356,6 +2530,7 @@ async def run_nexau_agent_orchestrator(
         message=message,
         user_id=str(current_user.id) if current_user else "",
         is_authenticated=bool(current_user),
+        memory_context=memory_bundle,
         attachments=attachments or [],
     )
     reply = build_chat_message(result.text, cards=result.cards, actions=result.actions)
@@ -4395,7 +4570,46 @@ async def chat_pending_action_decision(
     if normalize_role(current_user.role) != "customer":
         raise HTTPException(status_code=403, detail="Only customer accounts can decide pending chat actions")
 
+    trace_id = uuid4().hex
+    pending_before = await get_pending_chat_action(current_user.id, session=session)
+    chat_session_ref = (
+        extract_session_ref_from_pending_payload(
+            user_id=current_user.id,
+            payload=pending_before,
+            config=CHAT_MEMORY_CONFIG,
+        )
+        if pending_before
+        else resolve_chat_session_ref(
+            user_id=current_user.id,
+            sender_id=f"{current_user.id}:{DEFAULT_CHAT_SESSION_ID}",
+            config=CHAT_MEMORY_CONFIG,
+        )
+    )
+    decision_text = "确认执行" if (payload.decision or "").strip().lower() == "confirm" else "取消操作"
+    route_metadata = build_chat_history_route_metadata(
+        trace_id=trace_id,
+        sender_id=chat_session_ref.sender_id if chat_session_ref else f"{current_user.id}:{DEFAULT_CHAT_SESSION_ID}",
+        route="pending_action_decision",
+        route_source="pending_action_decision",
+        domains=["transaction"],
+        attachments=[],
+        extra={"decision": payload.decision},
+    )
+    await invalidate_memory_bundle_cache(cache=cache, ref=chat_session_ref)
+    await persist_chat_message(
+        session=session,
+        ref=chat_session_ref,
+        role="user",
+        text_value=decision_text,
+        route_metadata=route_metadata,
+    )
     reply = await decide_pending_chat_action(payload.decision, current_user, session)
+    await persist_chat_reply_messages(
+        session=session,
+        chat_session_ref=chat_session_ref,
+        messages=[reply],
+        route_metadata=route_metadata,
+    )
     return ChatSendResponse(messages=[reply])
 
 
@@ -4416,13 +4630,63 @@ async def chat_send(
 
     await validate_chat_attachments(session=session, attachment_ids=attachment_ids, current_user=current_user)
 
-    if current_user and message and not attachment_ids:
-        transaction_reply = await handle_chat_transaction_action(message, current_user, session)
-        if transaction_reply:
-            return ChatSendResponse(messages=[transaction_reply])
-
     trace_id = uuid4().hex
     sender_id = (payload.sender_id or "").strip() or (f"user-{current_user.id}" if current_user else "web_user")
+    chat_session_ref = resolve_chat_session_ref(
+        user_id=current_user.id if current_user else None,
+        sender_id=sender_id,
+        config=CHAT_MEMORY_CONFIG,
+    )
+    domain_set = infer_message_domains(message)
+    domains = sorted(domain_set)
+    initial_route_metadata = build_chat_history_route_metadata(
+        trace_id=trace_id,
+        sender_id=sender_id,
+        route="pending",
+        route_source="received",
+        domains=domains,
+        attachments=attachment_ids,
+    )
+    await invalidate_memory_bundle_cache(cache=cache, ref=chat_session_ref)
+    persisted_user_message = await persist_chat_message(
+        session=session,
+        ref=chat_session_ref,
+        role="user",
+        text_value=message,
+        attachments=attachment_ids,
+        route_metadata=initial_route_metadata,
+    )
+
+    if current_user and message and not attachment_ids:
+        transaction_reply = await handle_chat_transaction_action(
+            message,
+            current_user,
+            session,
+            chat_session_ref=chat_session_ref,
+        )
+        if transaction_reply:
+            transaction_metadata = build_chat_history_route_metadata(
+                trace_id=trace_id,
+                sender_id=sender_id,
+                route="transaction",
+                route_source="transaction_precheck",
+                domains=domains or ["transaction"],
+                attachments=attachment_ids,
+            )
+            if persisted_user_message:
+                await update_chat_message_route_metadata(
+                    session=session,
+                    message_id=persisted_user_message.message_id,
+                    route_metadata=transaction_metadata,
+                )
+            await persist_chat_reply_messages(
+                session=session,
+                chat_session_ref=chat_session_ref,
+                messages=[transaction_reply],
+                route_metadata=transaction_metadata,
+            )
+            return ChatSendResponse(messages=[transaction_reply])
+
     metadata = {
         "is_authenticated": bool(current_user),
         "user_id": str(current_user.id) if current_user else "",
@@ -4435,11 +4699,16 @@ async def chat_send(
 
     intent_name = ""
     intent_confidence = 0.0
-    domain_set = infer_message_domains(message)
     if message:
         intent_name, intent_confidence = await parse_rasa_intent(message)
     route_decision = (
-        ChatRouteDecision(route="agent", source="attachments", default_route="agent", is_complex=False)
+        ChatRouteDecision(
+            route="agent",
+            source="attachments",
+            default_route="agent",
+            is_complex=False,
+            strict_agent_failure=True,
+        )
         if attachment_ids
         else await resolve_chat_route_decision(
             message=message,
@@ -4449,7 +4718,6 @@ async def chat_send(
         )
     )
     route = route_decision.route
-    domains = sorted(domain_set)
     review_confidence_text = (
         f"{route_decision.llm_review_confidence:.3f}"
         if route_decision.llm_review_confidence is not None
@@ -4473,18 +4741,44 @@ async def chat_send(
 
     metadata["route"] = route
     metadata["route_source"] = route_decision.source
+    route_history_metadata = build_chat_history_route_metadata(
+        trace_id=trace_id,
+        sender_id=sender_id,
+        route=route,
+        route_source=route_decision.source,
+        domains=domains,
+        attachments=attachment_ids,
+        intent_name=intent_name,
+        intent_confidence=intent_confidence,
+        llm_review_confidence=route_decision.llm_review_confidence,
+        llm_review_route=route_decision.llm_review_route,
+        llm_review_reason=route_decision.llm_review_reason,
+    )
+    if persisted_user_message:
+        await update_chat_message_route_metadata(
+            session=session,
+            message_id=persisted_user_message.message_id,
+            route_metadata=route_history_metadata,
+        )
     if route == "agent":
         try:
             reply, tool_call_logs = await run_nexau_agent_orchestrator(
                 message=message,
                 current_user=current_user,
                 session=session,
+                chat_session_ref=chat_session_ref,
                 attachments=attachment_ids,
             )
             logger.info(
                 "agent_route trace_id=%s tool_calls=%s",
                 trace_id,
                 json.dumps(tool_call_logs, ensure_ascii=False, default=str),
+            )
+            await persist_chat_reply_messages(
+                session=session,
+                chat_session_ref=chat_session_ref,
+                messages=[reply],
+                route_metadata=route_history_metadata,
             )
             return ChatSendResponse(messages=[reply])
         except Exception as exc:  # noqa: BLE001
@@ -4495,17 +4789,68 @@ async def chat_send(
                     str(exc),
                     route_decision.source,
                 )
-                return ChatSendResponse(
-                    messages=[build_chat_message("当前请求需要进一步语义判断，但大模型服务暂时不可用，请稍后重试。")]
+                blocked_reply = build_chat_message("当前请求需要进一步语义判断，但大模型服务暂时不可用，请稍后重试。")
+                blocked_metadata = build_chat_history_route_metadata(
+                    trace_id=trace_id,
+                    sender_id=sender_id,
+                    route="agent",
+                    route_source="agent_failed_blocked",
+                    domains=domains,
+                    attachments=attachment_ids,
+                    intent_name=intent_name,
+                    intent_confidence=intent_confidence,
+                    llm_review_confidence=route_decision.llm_review_confidence,
+                    llm_review_route=route_decision.llm_review_route,
+                    llm_review_reason=route_decision.llm_review_reason,
+                    extra={"error": str(exc)},
                 )
+                if persisted_user_message:
+                    await update_chat_message_route_metadata(
+                        session=session,
+                        message_id=persisted_user_message.message_id,
+                        route_metadata=blocked_metadata,
+                    )
+                await persist_chat_reply_messages(
+                    session=session,
+                    chat_session_ref=chat_session_ref,
+                    messages=[blocked_reply],
+                    route_metadata=blocked_metadata,
+                )
+                return ChatSendResponse(messages=[blocked_reply])
             logger.exception("agent_route_failed trace_id=%s error=%s fallback=rule", trace_id, str(exc))
             metadata["route"] = "rule"
             metadata["route_source"] = "agent_failed_fallback_rule"
+            route_history_metadata = build_chat_history_route_metadata(
+                trace_id=trace_id,
+                sender_id=sender_id,
+                route="rule",
+                route_source="agent_failed_fallback_rule",
+                domains=domains,
+                attachments=attachment_ids,
+                intent_name=intent_name,
+                intent_confidence=intent_confidence,
+                llm_review_confidence=route_decision.llm_review_confidence,
+                llm_review_route=route_decision.llm_review_route,
+                llm_review_reason=route_decision.llm_review_reason,
+                extra={"agent_error": str(exc)},
+            )
+            if persisted_user_message:
+                await update_chat_message_route_metadata(
+                    session=session,
+                    message_id=persisted_user_message.message_id,
+                    route_metadata=route_history_metadata,
+                )
 
     if not message:
         raise HTTPException(status_code=400, detail="attachments request must route to agent")
 
     messages = await call_rasa_webhook(sender_id=sender_id, message=message, metadata=metadata)
+    await persist_chat_reply_messages(
+        session=session,
+        chat_session_ref=chat_session_ref,
+        messages=messages,
+        route_metadata=route_history_metadata,
+    )
     return ChatSendResponse(messages=messages)
 
 

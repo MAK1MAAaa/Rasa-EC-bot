@@ -12,6 +12,7 @@ benchmark 相关说明只保留在这里，其他 README 只做跳转，不重�
 | 路径 | 作用 |
 | --- | --- |
 | `test_chat_router_logic.py` | 聊天路由、LLM 复核与事务前置拦截测试 |
+| `test_chat_memory_logic.py` | 会话记忆解析、偏好提取与压缩触发规则测试 |
 | `test_product_recommendation_logic.py` | 商品推荐逻辑测试 |
 | `test_system_benchmark.py` | benchmark 相关测试 |
 | `benchmark_data/` | 实验输入快照归档 |

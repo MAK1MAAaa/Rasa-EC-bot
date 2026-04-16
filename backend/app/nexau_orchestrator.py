@@ -150,6 +150,7 @@ class NexAUAgentOrchestrator:
         message: str,
         user_id: str,
         is_authenticated: bool,
+        memory_context: dict[str, Any] | None = None,
         attachments: list[str] | None = None,
     ) -> AgentExecutionResult:
         normalized_attachments = [item for item in (attachments or []) if isinstance(item, str) and item.strip()]
@@ -206,7 +207,11 @@ class NexAUAgentOrchestrator:
                     ToolCallRecord(name=tool_name, mode=tool.mode, args=args, success=False, error=str(exc))
                 )
 
-        text = await self._generate_final_answer(message=message, observations=observations)
+        text = await self._generate_final_answer(
+            message=message,
+            observations=observations,
+            memory_context=memory_context or {},
+        )
         if not text:
             text = self._fallback_answer(message=message, observations=observations, domains=domains)
         return AgentExecutionResult(text=text, cards=cards, actions=actions, tool_calls=tool_calls)
@@ -282,14 +287,22 @@ class NexAUAgentOrchestrator:
 
         return plan
 
-    async def _generate_final_answer(self, *, message: str, observations: list[dict[str, Any]]) -> str:
+    async def _generate_final_answer(
+        self,
+        *,
+        message: str,
+        observations: list[dict[str, Any]],
+        memory_context: dict[str, Any],
+    ) -> str:
         system_prompt = (
             "你是电商客服复杂问题处理 Agent。"
             "请基于工具观测结果给出简洁中文结论，不要编造订单、物流、售后、政策或图片识别结果。"
             "当观测不足时，请明确说出缺少的信息。"
+            "如果提供了会话记忆与全局记忆，请优先把它们当作用户长期偏好与上下文线索，但不要把记忆当成已经执行完成的事实。"
         )
         user_payload = {
             "user_message": message,
+            "memory_context": memory_context,
             "tool_observations": observations,
         }
         if self._llm_provider == "openai_compat":

@@ -4,6 +4,11 @@ CREATE EXTENSION IF NOT EXISTS vector;
 
 DROP TABLE IF EXISTS kb_chunks CASCADE;
 DROP TABLE IF EXISTS kb_documents CASCADE;
+DROP TABLE IF EXISTS chat_context_snapshots CASCADE;
+DROP TABLE IF EXISTS chat_messages CASCADE;
+DROP TABLE IF EXISTS chat_sessions CASCADE;
+DROP TABLE IF EXISTS chat_user_global_memory CASCADE;
+DROP TABLE IF EXISTS chat_pending_actions CASCADE;
 DROP TABLE IF EXISTS chat_attachments CASCADE;
 DROP TABLE IF EXISTS geo_cache CASCADE;
 DROP TABLE IF EXISTS logistics_complaints CASCADE;
@@ -230,6 +235,81 @@ CREATE TABLE kb_chunks (
 CREATE INDEX idx_kb_chunks_document_order ON kb_chunks(document_id, chunk_order);
 CREATE INDEX idx_kb_chunks_embedding_ivfflat ON kb_chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
 CREATE INDEX idx_kb_chunks_text_fts ON kb_chunks USING GIN (to_tsvector('simple', chunk_text));
+
+CREATE TABLE chat_sessions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    session_id VARCHAR(128) NOT NULL,
+    sender_id VARCHAR(255) NOT NULL,
+    title VARCHAR(255) NOT NULL DEFAULT '新会话',
+    message_count INT NOT NULL DEFAULT 0 CHECK (message_count >= 0),
+    current_snapshot_version INT NOT NULL DEFAULT 0 CHECK (current_snapshot_version >= 0),
+    current_context_file_path TEXT,
+    last_message_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, session_id)
+);
+
+CREATE INDEX idx_chat_sessions_user_last_message ON chat_sessions(user_id, last_message_at DESC);
+
+CREATE TABLE chat_messages (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    chat_session_id UUID NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    session_id VARCHAR(128) NOT NULL,
+    sender_role VARCHAR(20) NOT NULL CHECK (sender_role IN ('user', 'assistant', 'system')),
+    sequence_no INT NOT NULL CHECK (sequence_no > 0),
+    message_text TEXT NOT NULL DEFAULT '',
+    attachment_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+    route_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    cards JSONB NOT NULL DEFAULT '[]'::jsonb,
+    actions JSONB NOT NULL DEFAULT '[]'::jsonb,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(chat_session_id, sequence_no)
+);
+
+CREATE INDEX idx_chat_messages_session_sequence ON chat_messages(chat_session_id, sequence_no DESC);
+CREATE INDEX idx_chat_messages_user_created_at ON chat_messages(user_id, created_at DESC);
+
+CREATE TABLE chat_context_snapshots (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    chat_session_id UUID NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    session_id VARCHAR(128) NOT NULL,
+    snapshot_version INT NOT NULL CHECK (snapshot_version > 0),
+    start_sequence_no INT NOT NULL CHECK (start_sequence_no > 0),
+    end_sequence_no INT NOT NULL CHECK (end_sequence_no >= start_sequence_no),
+    summary_markdown TEXT NOT NULL,
+    memory_facts JSONB NOT NULL DEFAULT '{}'::jsonb,
+    recent_window JSONB NOT NULL DEFAULT '[]'::jsonb,
+    context_file_path TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(chat_session_id, snapshot_version)
+);
+
+CREATE INDEX idx_chat_context_snapshots_session_version ON chat_context_snapshots(chat_session_id, snapshot_version DESC);
+
+CREATE TABLE chat_user_global_memory (
+    user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    memory_markdown TEXT NOT NULL,
+    memory_facts JSONB NOT NULL DEFAULT '{}'::jsonb,
+    recent_topics JSONB NOT NULL DEFAULT '[]'::jsonb,
+    context_file_path TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE chat_pending_actions (
+    user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_chat_pending_actions_expires_at ON chat_pending_actions(expires_at);
 
 CREATE TABLE chat_attachments (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

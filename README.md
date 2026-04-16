@@ -40,3 +40,4 @@
 - 模块 README 只覆盖本模块职责、依赖和命令，不重复其他模块的实现细节。
 - benchmark 结果目录与实验数据目录都放在 `tests/` 下统一管理。
 - 主线 Rasa 训练数据与 benchmark 基线数据已拆分维护：主线走 `rasa/data/main/`，benchmark 继续复用 `rasa/data/nlu.yml` 快照。
+- 登录用户的聊天服务端记忆已统一落在 PostgreSQL，并在 `backend/data/chat_memory/` 下派生会话级与用户级 Markdown 快照；匿名用户仍只保留前端本地会话。

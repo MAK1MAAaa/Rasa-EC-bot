@@ -110,3 +110,29 @@ class RedisCache:
                     break
         except Exception:
             return
+
+    async def acquire_lock(self, key: str, *, token: str, ttl_sec: int) -> bool:
+        if not self.enabled:
+            return False
+        try:
+            return bool(
+                await self._client.set(
+                    self._full_key(key),
+                    token,
+                    ex=max(1, int(ttl_sec)),
+                    nx=True,
+                )
+            )
+        except Exception:
+            return False
+
+    async def release_lock(self, key: str, *, token: str) -> None:
+        if not self.enabled:
+            return
+        full_key = self._full_key(key)
+        try:
+            current = await self._client.get(full_key)
+            if current == token:
+                await self._client.delete(full_key)
+        except Exception:
+            return
