@@ -1,0 +1,52 @@
+{
+  "seed": 20260412,
+  "outputs": {
+    "core": {
+      "after_sales_query": "D:\\Github\\Rasa-EC-bot\\benchmark\\datasets\\core\\after_sales_query.jsonl",
+      "knowledge_and_multimodal": "D:\\Github\\Rasa-EC-bot\\benchmark\\datasets\\core\\knowledge_and_multimodal.jsonl",
+      "logistics_query": "D:\\Github\\Rasa-EC-bot\\benchmark\\datasets\\core\\logistics_query.jsonl",
+      "order_query": "D:\\Github\\Rasa-EC-bot\\benchmark\\datasets\\core\\order_query.jsonl",
+      "recommendation": "D:\\Github\\Rasa-EC-bot\\benchmark\\datasets\\core\\recommendation.jsonl",
+      "transactional_action": "D:\\Github\\Rasa-EC-bot\\benchmark\\datasets\\core\\transactional_action.jsonl"
+    },
+    "extended": {
+      "after_sales_query": "D:\\Github\\Rasa-EC-bot\\benchmark\\datasets\\extended\\after_sales_query.jsonl",
+      "knowledge_and_multimodal": "D:\\Github\\Rasa-EC-bot\\benchmark\\datasets\\extended\\knowledge_and_multimodal.jsonl",
+      "logistics_query": "D:\\Github\\Rasa-EC-bot\\benchmark\\datasets\\extended\\logistics_query.jsonl",
+      "order_query": "D:\\Github\\Rasa-EC-bot\\benchmark\\datasets\\extended\\order_query.jsonl",
+      "recommendation": "D:\\Github\\Rasa-EC-bot\\benchmark\\datasets\\extended\\recommendation.jsonl",
+      "transactional_action": "D:\\Github\\Rasa-EC-bot\\benchmark\\datasets\\extended\\transactional_action.jsonl"
+    }
+  },
+  "sources": {
+    "source_dir": "D:\\Github\\Rasa-EC-bot\\benchmark\\datasets",
+    "rasa_nlu": "D:\\Github\\Rasa-EC-bot\\rasa\\data\\nlu.yml",
+    "lora_jsonl": [
+      "D:\\Github\\Rasa-EC-bot\\LoRA\\data\\processed\\eval_prompts_20.jsonl"
+    ]
+  },
+  "stats": {
+    "core": {
+      "total_count": 15,
+      "family_counts": {
+        "after_sales_query": 2,
+        "knowledge_and_multimodal": 2,
+        "logistics_query": 3,
+        "order_query": 3,
+        "recommendation": 3,
+        "transactional_action": 2
+      }
+    },
+    "extended": {
+      "total_count": 32,
+      "family_counts": {
+        "after_sales_query": 2,
+        "knowledge_and_multimodal": 4,
+        "logistics_query": 3,
+        "order_query": 3,
+        "recommendation": 15,
+        "transactional_action": 5
+      }
+    }
+  }
+}

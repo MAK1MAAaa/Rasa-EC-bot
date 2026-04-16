@@ -75,6 +75,12 @@ LoRA/*.log
 # Temp files
 temp.txt
 
-# Local benchmark outputs under tests/
+# Local benchmark outputs
+benchmark/results/*
+!benchmark/results/.gitkeep
+benchmark/data/*
+!benchmark/data/.gitkeep
+
+# Historical benchmark archive under tests/
 tests/benchmark_results/*
 !tests/benchmark_results/.gitkeep
