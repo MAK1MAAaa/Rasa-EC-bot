@@ -7,7 +7,37 @@ from typing import Any, Awaitable, Callable
 
 import httpx
 
+from .prompts import load_prompt_text
+
 ToolHandler = Callable[..., Awaitable[dict[str, Any]]]
+POLICY_KEYWORDS = [
+    "政策",
+    "规则",
+    "条款",
+    "补差价",
+    "保价",
+    "价保",
+    "活动后降价",
+    "签收",
+    "退货规则",
+    "换货规则",
+    "售后政策",
+    "退货",
+]
+MANUAL_KEYWORDS = [
+    "说明书",
+    "恢复出厂设置",
+    "重置",
+    "恢复",
+    "教程",
+    "步骤",
+    "操作",
+    "配对",
+    "使用",
+    "报错",
+    "故障",
+]
+COMPARISON_KEYWORDS = ["比较", "对比", "区别", "哪个更好", "哪个更适合"]
 
 
 @dataclass
@@ -62,11 +92,11 @@ def infer_message_domains(message: str) -> set[str]:
         k in lowered for k in ["shipment", "logistics", "tracking"]
     ):
         domains.add("logistics")
-    if any(k in text for k in ["售后", "退款", "退货", "换货"]) or any(
+    if any(k in text for k in ["售后", "退款", "退货", "换货", "签收"]) or any(
         k in lowered for k in ["refund", "return", "exchange", "after-sales"]
     ):
         domains.add("after_sales")
-    if any(k in text for k in ["商品", "推荐", "颜色", "尺码", "说明书", "报错"]) or any(
+    if any(k in text for k in ["商品", "推荐", "颜色", "尺码", "说明书", "报错", "恢复出厂设置", "重置", "教程", "步骤", "配对", "比较"]) or any(
         k in lowered for k in ["product", "recommend", "color", "size", "manual"]
     ):
         domains.add("product")
@@ -87,6 +117,9 @@ def is_complex_query(message: str) -> bool:
     if len(domains) >= 2:
         return True
 
+    if any(marker in text for marker in POLICY_KEYWORDS + MANUAL_KEYWORDS + COMPARISON_KEYWORDS):
+        return True
+
     lowered = text.lower()
     multi_intent_markers = ["或者", "还是", "并且", "同时", "另外", "顺便", "or ", " and "]
     if any(marker in lowered for marker in multi_intent_markers):
@@ -104,6 +137,16 @@ def is_product_recommendation_query(message: str) -> bool:
     return any(keyword in text for keyword in ["推荐", "适合", "买什么", "选哪个", "看什么"]) or any(
         keyword in lowered for keyword in ["recommend", "best for", "which one", "buy"]
     )
+
+
+def has_policy_intent(message: str, domains: set[str]) -> bool:
+    text = (message or "").strip()
+    return any(keyword in text for keyword in POLICY_KEYWORDS) or "price_protection" in domains
+
+
+def has_manual_intent(message: str) -> bool:
+    text = (message or "").strip()
+    return any(keyword in text for keyword in MANUAL_KEYWORDS)
 
 
 class NexAUAgentOrchestrator:
@@ -167,7 +210,14 @@ class NexAUAgentOrchestrator:
         observations: list[dict[str, Any]] = []
         tool_calls: list[ToolCallRecord] = []
 
-        if not is_authenticated and domains.intersection({"order", "logistics", "after_sales", "price_protection"}):
+        has_policy_keywords = has_policy_intent(message, domains)
+        has_manual_keywords = has_manual_intent(message)
+        requires_login = (
+            "order" in domains
+            or "logistics" in domains
+            or ("after_sales" in domains and not (has_policy_keywords or has_manual_keywords or normalized_attachments))
+        )
+        if not is_authenticated and requires_login:
             text = (
                 "这类问题需要先登录后才能查询你的订单与售后数据。\n"
                 f"请先登录：{self._frontend_base_url}/login"
@@ -235,10 +285,8 @@ class NexAUAgentOrchestrator:
             seen_keys.add(key)
             plan.append({"name": name, "args": args})
 
-        has_policy_keywords = any(k in message for k in ["政策", "规则", "条款", "补差价", "保价", "退货"]) or (
-            "price_protection" in domains
-        )
-        has_manual_keywords = any(k in message for k in ["说明书", "报错", "故障", "安装", "使用"])
+        has_policy_keywords = has_policy_intent(message, domains)
+        has_manual_keywords = has_manual_intent(message)
         has_recommendation_keywords = is_product_recommendation_query(message)
 
         if has_policy_keywords or "after_sales" in domains:
@@ -265,7 +313,7 @@ class NexAUAgentOrchestrator:
         if "logistics" in domains and is_authenticated:
             order_id = extract_order_id(message)
             add_step("query_logistics_summary", {"user_id": user_id, "order_id": order_id, "limit": 5})
-        if "after_sales" in domains and is_authenticated:
+        if "after_sales" in domains and is_authenticated and not has_policy_keywords:
             add_step("query_after_sales_summary", {"user_id": user_id, "limit": 5})
         if "price_protection" in domains and is_authenticated:
             add_step("query_price_protection", {"user_id": user_id})
@@ -294,12 +342,7 @@ class NexAUAgentOrchestrator:
         observations: list[dict[str, Any]],
         memory_context: dict[str, Any],
     ) -> str:
-        system_prompt = (
-            "你是电商客服复杂问题处理 Agent。"
-            "请基于工具观测结果给出简洁中文结论，不要编造订单、物流、售后、政策或图片识别结果。"
-            "当观测不足时，请明确说出缺少的信息。"
-            "如果提供了会话记忆与全局记忆，请优先把它们当作用户长期偏好与上下文线索，但不要把记忆当成已经执行完成的事实。"
-        )
+        system_prompt = load_prompt_text("agent_final_answer")
         user_payload = {
             "user_message": message,
             "memory_context": memory_context,
@@ -387,11 +430,32 @@ class NexAUAgentOrchestrator:
         if not observations:
             return "我已切入复杂问题处理模式，但当前缺少可执行信息。请补充订单号、具体诉求或上传图片后再试。"
 
+        for item in observations:
+            tool_name = str(item.get("tool") or "")
+            output = item.get("output") if isinstance(item.get("output"), dict) else {}
+            if tool_name in {"retrieve_policy_knowledge", "retrieve_manual_knowledge"}:
+                matches = output.get("matches") if isinstance(output.get("matches"), list) else []
+                if matches:
+                    top = matches[0] if isinstance(matches[0], dict) else {}
+                    chunk_text = str(top.get("chunk_text") or "").strip()
+                    if chunk_text:
+                        return f"根据知识库内容，{chunk_text}"
+
         if "price_protection" in domains and "after_sales" in domains:
             return "我已查询相关信息。如需继续处理补差价或退换货，我可以先生成待确认草案，确认后再执行。"
 
-        if any(item.get("tool") == "analyze_uploaded_image_vlm" for item in observations):
-            return "我已完成图片分析并给出建议，可继续为你生成售后待确认草案。"
+        for item in observations:
+            if item.get("tool") == "analyze_uploaded_image_vlm":
+                output = item.get("output") if isinstance(item.get("output"), dict) else {}
+                analysis = output.get("analysis") if isinstance(output.get("analysis"), dict) else {}
+                evidence = str(analysis.get("evidence") or "").strip()
+                suggested_action = str(analysis.get("suggested_action") or "").strip()
+                parts = ["我已完成图片分析。"]
+                if evidence:
+                    parts.append(f"可见情况：{evidence}。")
+                if suggested_action:
+                    parts.append(f"建议：{suggested_action}。")
+                return "".join(parts)
         if any(item.get("tool") == "query_product_recommendations" for item in observations):
             return "我已结合你的诉求整理出商品推荐，请查看上方商品卡片；如果你想继续缩小范围，可以告诉我预算、品牌或使用场景。"
 

@@ -29,6 +29,7 @@ knowledge_seed:
 profiles:
   quick:
     dataset_tier: core
+    selection_mode: sampled
     scenarios:
       - recommendation
       - order_query
@@ -41,6 +42,7 @@ profiles:
     repeats: 1
   standard:
     dataset_tier: extended
+    selection_mode: all_unique
     scenarios:
       - recommendation
       - order_query
@@ -48,11 +50,12 @@ profiles:
       - after_sales_query
       - knowledge_and_multimodal
       - transactional_action
-    concurrency: [1, 2, 4]
+    concurrency: [1]
     requests_per_level: 6
     repeats: 1
   paper:
     dataset_tier: extended
+    selection_mode: all_unique
     scenarios:
       - recommendation
       - order_query
@@ -60,7 +63,7 @@ profiles:
       - after_sales_query
       - knowledge_and_multimodal
       - transactional_action
-    concurrency: [1, 2, 4]
+    concurrency: [1]
     requests_per_level: 6
     repeats: 2
 

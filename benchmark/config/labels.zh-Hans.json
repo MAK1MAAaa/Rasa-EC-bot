@@ -4,48 +4,31 @@
     "rasa_plus_llm": "Rasa + LLM",
     "rasa_plus_lora_llm": "Rasa + LoRA LLM"
   },
+  "suites": {
+    "shared_core": "共享核心能力",
+    "agent_extension": "Agent 扩展能力"
+  },
   "scenarios": {
-    "recommendation": "商品推荐",
+    "recommendation": "推荐",
     "order_query": "订单查询",
     "logistics_query": "物流查询",
-    "after_sales_query": "售后咨询",
+    "after_sales_query": "售后查询",
     "knowledge_and_multimodal": "知识与多模态",
-    "transactional_action": "事务操作"
+    "transactional_action": "事务性动作"
   },
   "failures": {
-    "missing_required_keywords": "缺少必需关键词",
-    "contains_forbidden_keywords": "出现禁用关键词",
+    "unsupported": "能力不支持",
+    "technical_failure": "技术失败 / HTTP 错误",
+    "image_flow_failure": "图片流程失败",
+    "pending_decision_failure": "待确认动作失败",
+    "hallucinated_order_id": "幻觉订单号",
+    "missing_order_id": "缺少订单号",
     "missing_required_cards": "缺少必需卡片",
     "missing_required_actions": "缺少必需动作",
     "missing_confirmation_buttons": "缺少确认按钮",
-    "missing_order_id": "缺少订单号",
-    "hallucinated_order_id": "幻觉订单号",
-    "login_block_failures": "登录阻断失败",
-    "image_flow_failures": "图片流程失败",
-    "pending_decision_failures": "待决策流程失败"
-  },
-  "charts": {
-    "overall_pass_rate_title": "整体通过率",
-    "business_boundary_title": "业务层与边界安全通过率",
-    "quality_latency_title": "质量与时延取舍",
-    "scenario_heatmap_title": "各系统分场景通过率",
-    "scenario_heatmap_xlabel": "场景",
-    "scenario_heatmap_ylabel": "系统",
-    "failure_stacked_title": "失败类型分布",
-    "latency_concurrency_title": "并发与时延",
-    "pass_rate_ylabel": "通过率",
-    "failure_count_ylabel": "失败次数",
-    "latency_ylabel": "平均 P95 时延（ms）",
-    "business_series_label": "业务层",
-    "boundary_series_label": "边界安全"
-  },
-  "report": {
-    "title": "Benchmark 分析报告",
-    "overall_heading": "整体指标",
-    "leaders_heading": "分场景最优系统",
-    "failures_heading": "失败类型统计",
-    "latency_heading": "并发与时延",
-    "figures_heading": "图表",
-    "conclusions_heading": "实验结论"
+    "login_block_failure": "登录拦截失败",
+    "contains_forbidden_keywords": "包含禁用关键词",
+    "missing_required_keywords": "缺少必需关键词",
+    "format_error": "格式不达标"
   }
 }

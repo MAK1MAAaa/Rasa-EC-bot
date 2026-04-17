@@ -24,6 +24,7 @@ ROLE_USER = "user"
 ROLE_ASSISTANT = "assistant"
 ROLE_SYSTEM = "system"
 CHAT_MEMORY_DIR = BACKEND_ROOT_DIR / "data" / "chat_memory"
+BENCHMARK_SESSION_PREFIX = "benchmark_"
 
 _ORDER_ID_PATTERN = re.compile(r"\b(ORD\d{10,})\b", flags=re.IGNORECASE)
 _BUDGET_PATTERN = re.compile(
@@ -149,6 +150,14 @@ def sanitize_path_segment(value: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", (value or "").strip())
     cleaned = cleaned.strip("._")
     return cleaned or DEFAULT_CHAT_SESSION_ID
+
+
+def is_benchmark_session_id(session_id: str) -> bool:
+    return sanitize_path_segment(session_id).startswith(BENCHMARK_SESSION_PREFIX)
+
+
+def is_benchmark_chat_session(ref: ChatSessionRef | None) -> bool:
+    return bool(ref and is_benchmark_session_id(ref.session_id))
 
 
 def json_dumps(value: Any) -> str:

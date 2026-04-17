@@ -6,24 +6,134 @@
 
 | 路径 | 说明 |
 | --- | --- |
-| `app/main.py` | FastAPI 主入口 |
-| `app/auth.py` | 认证逻辑 |
-| `app/database.py` | 数据库连接与会话 |
+| `app/main.py` | FastAPI 入口 |
+| `app/database.py` | PostgreSQL 连接与会话 |
 | `app/cache.py` | Redis 访问 |
 | `app/models.py` | SQLModel / Pydantic 模型 |
-| `db/` | 初始化 SQL 与数据库脚本 |
-| `scripts/` | Postgres、Redis 等初始化脚本 |
-| `data/chat_memory/` | 运行时 Markdown 记忆派生文件 |
+| `app/prompts.py` | 外置 prompt 加载 |
+| `db/init_db.sql` | 建表脚本 |
+| `db/seed_data.sql` | 基础种子数据 |
+| `scripts/init_postgres.*` | PostgreSQL 初始化脚本 |
+| `scripts/start_redis.*` | Redis Docker 启动脚本 |
+| `scripts/init_redis.*` | Redis 初始化脚本 |
+| `prompts/` | agent prompt 文件 |
 
-## 启动
+## 前置依赖
+
+- Python 3.10
+- `uv`
+- Docker
+- 可选：本地 PostgreSQL / Redis。如果不使用 Docker，只要 `.env` 指向正确实例即可。
+
+## 环境变量
+
+首次使用建议先复制模板：
+
+```powershell
+cd backend
+Copy-Item .env.sample .env
+```
+
+至少确认这些变量：
+
+- `DATABASE_URL`
+- `REDIS_URL`
+- `RASA_SERVER_URL`
+- `OLLAMA_BASE_URL`
+- `AGENT_LLM_PROVIDER`
+- `AGENT_LLM_BASE_URL`
+- `AGENT_LLM_MODEL`
+
+## 安装依赖
 
 ```powershell
 cd backend
 uv sync
+```
+
+## PostgreSQL
+
+### 启动
+
+仓库里没有单独的 PostgreSQL 启动脚本，推荐直接用 Docker：
+
+```powershell
+docker run --name rasa-postgres `
+  -e POSTGRES_PASSWORD=postgres `
+  -e POSTGRES_USER=postgres `
+  -e POSTGRES_DB=postgres `
+  -p 5432:5432 `
+  -d postgres:16
+```
+
+已存在容器时：
+
+```powershell
+docker start rasa-postgres
+```
+
+### 初始化
+
+Windows：
+
+```powershell
+cd backend
+.\scripts\init_postgres.ps1
+```
+
+Linux / macOS：
+
+```bash
+cd backend
+./scripts/init_postgres.sh
+```
+
+脚本会根据 `DATABASE_URL` 创建数据库、执行 [`init_db.sql`](/D:/Github/Rasa-EC-bot/backend/db/init_db.sql) 和 [`seed_data.sql`](/D:/Github/Rasa-EC-bot/backend/db/seed_data.sql)。
+
+## Redis
+
+### 启动
+
+Windows：
+
+```powershell
+cd backend
+.\scripts\start_redis.ps1
+```
+
+Linux / macOS：
+
+```bash
+cd backend
+./scripts/start_redis.sh
+```
+
+### 初始化
+
+Windows：
+
+```powershell
+cd backend
+.\scripts\init_redis.ps1
+```
+
+Linux / macOS：
+
+```bash
+cd backend
+./scripts/init_redis.sh
+```
+
+## 启动服务
+
+### 基础版
+
+```powershell
+cd backend
 uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-LoRA 版本通常运行在 `8001`：
+### LoRA 版
 
 ```powershell
 cd backend
@@ -34,17 +144,16 @@ $env:AGENT_LLM_MODEL = "qwen3.5-2b-lora"
 uv run uvicorn app.main:app --host 127.0.0.1 --port 8001
 ```
 
-## 关键环境变量
+## 建议顺序
 
-- `CHAT_ROUTER_LLM_REVIEW_ENABLED`
-- `CHAT_ROUTER_LLM_REVIEW_THRESHOLD`
-- `CHAT_MEMORY_COMPACT_MESSAGE_THRESHOLD`
-- `CHAT_MEMORY_COMPACT_CHAR_THRESHOLD`
-- `CHAT_MEMORY_RECENT_WINDOW_MESSAGES`
-- `CHAT_MEMORY_AGENT_RECENT_MESSAGES`
-- `CHAT_MEMORY_LOCK_TTL_SEC`
+1. 配置 [`backend/.env`](/D:/Github/Rasa-EC-bot/backend/.env)。
+2. 启动 PostgreSQL。
+3. 执行 `init_postgres.*`。
+4. 启动 Redis。
+5. 执行 `init_redis.*`。
+6. 启动后端基础版或 LoRA 版。
 
 ## 说明
 
-- benchmark 已经迁到根目录 `benchmark/`，相关命令与结果分析统一见 [../benchmark/README.md](../benchmark/README.md)。
-- 后端仍然是 benchmark 中 `rasa_plus_llm` 与 `rasa_plus_lora_llm` 两套系统的承载服务。
+- `backend/prompts/*.md` 是当前后端使用的正式 prompt 来源。
+- Benchmark 的完整启动顺序、基线重置和运行方法只在 [`benchmark/README.md`](/D:/Github/Rasa-EC-bot/benchmark/README.md) 中维护。

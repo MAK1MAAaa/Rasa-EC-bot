@@ -49,6 +49,7 @@ from .chat_memory import (
     extract_session_ref_from_pending_payload,
     get_pending_chat_action as get_pending_chat_action_store,
     invalidate_memory_bundle_cache,
+    is_benchmark_chat_session,
     load_agent_memory_bundle,
     persist_chat_message,
     refresh_chat_memory_artifacts,
@@ -132,6 +133,7 @@ from .models import (
     UserRead,
 )
 from .nexau_orchestrator import NexAUAgentOrchestrator, infer_message_domains, is_complex_query
+from .prompts import load_prompt_text
 
 app = FastAPI(title="Rasa-EC-bot Backend", version="0.3.0")
 logger = logging.getLogger("rasa_ec_bot.chat_router")
@@ -740,15 +742,7 @@ async def review_rasa_business_intent(
     domains: set[str],
     is_complex: bool,
 ) -> RasaIntentReviewResult | None:
-    system_prompt = (
-        "你是电商聊天路由复核器。"
-        "请判断当前请求是否适合继续走 Rasa 规则链路，还是应该转交 LLM Agent。"
-        "只输出 JSON 对象，字段必须为 confidence,route,intent_match,reason。"
-        "confidence 范围 0 到 1，route 只能是 rule 或 agent。"
-        "当请求包含多意图、复杂条件、商品比较、政策解释、说明书或故障排查、事务型命令，"
-        "或者与给定业务 intent 不匹配时，优先输出 agent。"
-        "只有在 intent 明确匹配且适合规则查询时，才输出 rule。"
-    )
+    system_prompt = load_prompt_text("rasa_review")
     user_payload = {
         "message": (message or "").strip(),
         "rasa_intent": (intent_name or "").strip(),
@@ -939,11 +933,7 @@ async def analyze_uploaded_image_vlm(
 
     image_bytes = local_path.read_bytes()
     encoded_image = base64.b64encode(image_bytes).decode("ascii")
-    system_prompt = (
-        "你是电商售后图像分析助手。"
-        "请只输出 JSON 对象，字段必须为：issue_type,severity,evidence,suggested_action,confidence。"
-        "confidence 范围 0 到 1。"
-    )
+    system_prompt = load_prompt_text("image_analysis")
     user_prompt = "请识别图像中的售后问题，并给出结构化分析结果。"
     payload = {
         "model": OLLAMA_VLM_MODEL,
@@ -2242,6 +2232,7 @@ async def persist_chat_reply_messages(
     chat_session_ref: Any,
     messages: list[ChatReplyMessage],
     route_metadata: dict[str, Any],
+    skip_memory_refresh: bool = False,
 ) -> None:
     if not chat_session_ref:
         return
@@ -2255,12 +2246,18 @@ async def persist_chat_reply_messages(
             cards=serialize_chat_cards(reply.cards),
             actions=serialize_chat_actions(reply.actions),
         )
+    if skip_memory_refresh:
+        return
     await refresh_chat_memory_artifacts(
         session=session,
         cache=cache,
         ref=chat_session_ref,
         config=CHAT_MEMORY_CONFIG,
     )
+
+
+def should_skip_chat_memory(chat_session_ref: Any) -> bool:
+    return bool(chat_session_ref and is_benchmark_chat_session(chat_session_ref))
 
 
 async def run_nexau_agent_orchestrator(
@@ -2279,11 +2276,20 @@ async def run_nexau_agent_orchestrator(
         llm_api_key=AGENT_LLM_API_KEY,
         frontend_base_url=FRONTEND_BASE_URL,
     )
-    memory_bundle = await load_agent_memory_bundle(
-        session=session,
-        cache=cache,
-        ref=chat_session_ref,
-        config=CHAT_MEMORY_CONFIG,
+    memory_bundle = (
+        {
+            "session_id": "",
+            "recent_messages": [],
+            "session_memory_markdown": "",
+            "global_memory_markdown": "",
+        }
+        if should_skip_chat_memory(chat_session_ref)
+        else await load_agent_memory_bundle(
+            session=session,
+            cache=cache,
+            ref=chat_session_ref,
+            config=CHAT_MEMORY_CONFIG,
+        )
     )
 
     async def tool_query_orders_summary(user_id: str, limit: int = 5) -> dict[str, Any]:
@@ -4595,7 +4601,9 @@ async def chat_pending_action_decision(
         attachments=[],
         extra={"decision": payload.decision},
     )
-    await invalidate_memory_bundle_cache(cache=cache, ref=chat_session_ref)
+    skip_chat_memory = should_skip_chat_memory(chat_session_ref)
+    if not skip_chat_memory:
+        await invalidate_memory_bundle_cache(cache=cache, ref=chat_session_ref)
     await persist_chat_message(
         session=session,
         ref=chat_session_ref,
@@ -4609,6 +4617,7 @@ async def chat_pending_action_decision(
         chat_session_ref=chat_session_ref,
         messages=[reply],
         route_metadata=route_metadata,
+        skip_memory_refresh=skip_chat_memory,
     )
     return ChatSendResponse(messages=[reply])
 
@@ -4637,6 +4646,7 @@ async def chat_send(
         sender_id=sender_id,
         config=CHAT_MEMORY_CONFIG,
     )
+    skip_chat_memory = should_skip_chat_memory(chat_session_ref)
     domain_set = infer_message_domains(message)
     domains = sorted(domain_set)
     initial_route_metadata = build_chat_history_route_metadata(
@@ -4647,7 +4657,8 @@ async def chat_send(
         domains=domains,
         attachments=attachment_ids,
     )
-    await invalidate_memory_bundle_cache(cache=cache, ref=chat_session_ref)
+    if not skip_chat_memory:
+        await invalidate_memory_bundle_cache(cache=cache, ref=chat_session_ref)
     persisted_user_message = await persist_chat_message(
         session=session,
         ref=chat_session_ref,
@@ -4684,6 +4695,7 @@ async def chat_send(
                 chat_session_ref=chat_session_ref,
                 messages=[transaction_reply],
                 route_metadata=transaction_metadata,
+                skip_memory_refresh=skip_chat_memory,
             )
             return ChatSendResponse(messages=[transaction_reply])
 
@@ -4695,6 +4707,7 @@ async def chat_send(
         "frontend_base_url": FRONTEND_BASE_URL,
         "trace_id": trace_id,
         "attachments": attachment_ids,
+        "benchmark_mode": skip_chat_memory,
     }
 
     intent_name = ""
@@ -4779,6 +4792,7 @@ async def chat_send(
                 chat_session_ref=chat_session_ref,
                 messages=[reply],
                 route_metadata=route_history_metadata,
+                skip_memory_refresh=skip_chat_memory,
             )
             return ChatSendResponse(messages=[reply])
         except Exception as exc:  # noqa: BLE001
@@ -4815,6 +4829,7 @@ async def chat_send(
                     chat_session_ref=chat_session_ref,
                     messages=[blocked_reply],
                     route_metadata=blocked_metadata,
+                    skip_memory_refresh=skip_chat_memory,
                 )
                 return ChatSendResponse(messages=[blocked_reply])
             logger.exception("agent_route_failed trace_id=%s error=%s fallback=rule", trace_id, str(exc))
@@ -4850,6 +4865,7 @@ async def chat_send(
         chat_session_ref=chat_session_ref,
         messages=messages,
         route_metadata=route_history_metadata,
+        skip_memory_refresh=skip_chat_memory,
     )
     return ChatSendResponse(messages=messages)
 

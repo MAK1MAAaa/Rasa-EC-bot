@@ -1,4 +1,0 @@
-[console_scripts]
-benchmark-analyze = benchmark.reporting:main
-benchmark-build = benchmark.dataset:main
-benchmark-run = benchmark.runner:main

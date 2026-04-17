@@ -1,105 +1,124 @@
 # Benchmark
 
-`benchmark/` 是当前仓库 benchmark 的唯一正式入口，独立负责配置、数据集、执行器、结果归档、结果分析与 benchmark 相关测试。
+`benchmark/` 是系统 benchmark 的唯一正式入口。环境准备、数据集、执行、结果分析和测试都以本 README 为准。
 
-## 目录结构
+## 当前规则
 
-- `config/experiment.yaml`：benchmark 主配置，定义 profile、系统矩阵、知识库种子与默认结果目录。
-- `config/labels.zh-Hans.json`：图表标题、系统名、场景名、失败标签与报告文案。
-- `datasets/core/`、`datasets/extended/`：benchmark 数据集。
-- `scripts/build_dataset.py`：重建数据集目录并生成 `manifest.json`。
-- `scripts/run_benchmark.py`：执行 benchmark。
-- `scripts/analyze_results.py`：分析一次 benchmark 结果，生成 CSV、PNG、Markdown 和 JSON 结论。
-- `src/benchmark/`：benchmark 核心实现。
-- `tests/`：benchmark 工程自己的测试。
-- `results/<run_id>/`：每次运行的原始结果与分析产物。
+- 正式结论只输出 `shared_core` 和 `agent_extension` 双榜。
+- 正式排序使用去重后的样本级指标，不再直接按原始会话行数排名。
+- `quick` 默认使用 `sampled` 抽样模式，只用于 smoke。
+- `standard` 和 `paper` 默认使用 `all_unique`，目标是覆盖全部唯一样本。
+- `paper_only` 样本只会在 `--profile paper` 中执行。
+- `repeatable: false` 样本只在 `repeat = 1` 时执行一次。
+- `analysis/failure_breakdown.csv` 使用互斥的 `primary_failure_reason`。
+- `analysis/failure_flags.csv` 保留多标签诊断统计。
 
-## 环境初始化
+## 目录
+
+| 路径 | 说明 |
+| --- | --- |
+| `config/experiment.yaml` | benchmark 主配置 |
+| `config/labels.zh-Hans.json` | 报告标签与图表文案 |
+| `datasets/core/` | `quick` 默认数据集 |
+| `datasets/extended/` | `standard` / `paper` 默认数据集 |
+| `datasets/manifest.json` | 数据集输出与统计 |
+| `kb_seed/` | 写入后端知识库的种子文档 |
+| `sql/reset_benchmark_state.sql` | 基线状态重置 SQL |
+| `scripts/build_dataset.py` | 重建数据集与 manifest |
+| `scripts/run_benchmark.py` | 执行 benchmark |
+| `scripts/analyze_results.py` | 分析一次运行结果 |
+| `src/benchmark/` | benchmark 核心实现 |
+| `tests/` | benchmark 单测 |
+
+## 从零开始跑一轮 Benchmark
+
+### 1. 准备环境变量
+
+先确认以下文件已经按本机环境配置完成：
+
+- [`backend/.env`](/D:/Github/Rasa-EC-bot/backend/.env)
+- [`rasa/.env`](/D:/Github/Rasa-EC-bot/rasa/.env)
+
+至少检查：
+
+- `backend/.env` 中的 `DATABASE_URL`
+- `backend/.env` 中的 `REDIS_URL`
+- `backend/.env` 中的 `RASA_SERVER_URL`
+- `backend/.env` 中的 `OLLAMA_BASE_URL` / `AGENT_LLM_BASE_URL`
+- `rasa/.env` 中的 `OLLAMA_BASE_URL`
+
+### 2. 安装依赖
 
 ```powershell
 cd benchmark
 uv sync
 ```
 
-## Benchmark 对比对象
+同时安装主服务依赖：
 
-当前默认比较三套系统：
+```powershell
+cd backend
+uv sync
 
-- `rasa_only`
-- `rasa_plus_llm`
-- `rasa_plus_lora_llm`
+cd ..\rasa
+uv sync
+```
 
-## 需要启动的服务
+### 3. 启动 PostgreSQL 和 Redis
 
-如果三套系统一起跑，至少需要以下服务全部可用：
+PostgreSQL：
 
-| 服务 | 端口 | 用途 |
-| --- | --- | --- |
-| PostgreSQL | `5432` | 后端业务数据、聊天与记忆数据 |
-| Redis | `6379` | 缓存、锁与辅助状态 |
-| Ollama | `11434` | `rasa_plus_llm` 使用的基础 LLM |
-| vLLM / OpenAI-compatible | `8002` | `rasa_plus_lora_llm` 使用的 LoRA 推理服务 |
-| Rasa Action Server | `5055` | 主线 Rasa action |
-| 主线 Rasa Server | `5005` | 后端 `rasa_plus_llm` / `rasa_plus_lora_llm` 共用 |
-| Benchmark Rasa Server | `5006` | `rasa_only` 基线 |
-| 后端基础版 | `8000` | `rasa_plus_llm` |
-| 后端 LoRA 版 | `8001` | `rasa_plus_lora_llm` |
+```powershell
+docker run --name rasa-postgres `
+  -e POSTGRES_PASSWORD=postgres `
+  -e POSTGRES_USER=postgres `
+  -e POSTGRES_DB=postgres `
+  -p 5432:5432 `
+  -d postgres:16
+```
 
-如果只跑部分系统，可以按需缩减：
+已存在容器时：
 
-- 只跑 `rasa_only`：需要 `5006`。
-- 只跑 `rasa_plus_llm`：需要 `5432`、`6379`、`11434`、`5005`、`5055`、`8000`。
-- 只跑 `rasa_plus_lora_llm`：需要 `5432`、`6379`、`8002`、`5005`、`5055`、`8001`。
+```powershell
+docker start rasa-postgres
+```
 
-运行 `rasa_plus_llm` 或 `rasa_plus_lora_llm` 时，benchmark 会使用商家账号自动调用后端 `/api/v1/kb/index` 写入 `config/experiment.yaml` 中配置的知识库种子文档。
-
-## 推荐启动顺序
-
-1. 启动 PostgreSQL 和 Redis。
-2. 启动 Ollama 与 LoRA 推理服务。
-3. 训练并启动主线 Rasa、benchmark Rasa、Action Server。
-4. 启动后端基础版和后端 LoRA 版。
-5. 回到 `benchmark/` 目录执行 benchmark。
-
-## 启动命令
-
-### 1. 初始化 PostgreSQL / Redis
-
-Windows：
+初始化 PostgreSQL：
 
 ```powershell
 cd backend
 .\scripts\init_postgres.ps1
+```
+
+启动 Redis：
+
+```powershell
+cd backend
+.\scripts\start_redis.ps1
+```
+
+初始化 Redis：
+
+```powershell
+cd backend
 .\scripts\init_redis.ps1
 ```
 
-Linux / macOS：
+### 4. 启动模型服务
 
-```bash
-cd backend
-./scripts/init_postgres.sh
-./scripts/init_redis.sh
-```
-
-如果数据库已经初始化完成，确保 PostgreSQL 和 Redis 服务处于运行状态即可。
-
-### 2. 启动 Ollama
-
-先启动 Ollama 服务：
+如果要跑 `rasa_plus_llm`，先启动 Ollama：
 
 ```powershell
 ollama serve
 ```
 
-首次运行需要拉取基础模型：
+首次使用拉取模型：
 
 ```powershell
 ollama pull qwen3.5:2b
 ```
 
-### 3. 启动 LoRA 推理服务
-
-在 Linux / WSL 中启动 vLLM OpenAI-compatible 服务：
+如果要跑 `rasa_plus_lora_llm`，还需要启动兼容 OpenAI 的 LoRA 推理服务，例如：
 
 ```bash
 cd /mnt/d/Github/Rasa-EC-bot/LoRA
@@ -117,13 +136,12 @@ uv run --with vllm python -m vllm.entrypoints.openai.api_server \
   --enforce-eager
 ```
 
-### 4. 训练并启动主线 Rasa
+### 5. 启动主线 Rasa 服务
 
 训练主线模型：
 
 ```powershell
 cd rasa
-uv sync
 uv run rasa train --config config.yml --domain domain.yml --data data/main
 ```
 
@@ -141,9 +159,9 @@ cd rasa
 uv run rasa run actions --actions actions --port 5055
 ```
 
-### 5. 训练并启动 benchmark `rasa_only`
+### 6. 启动 benchmark 基线 `rasa_only`
 
-训练 benchmark 基线：
+训练基线模型：
 
 ```powershell
 cd rasa
@@ -154,7 +172,7 @@ uv run rasa train `
   --out models/benchmark_rasa_only
 ```
 
-启动 benchmark 基线服务：
+启动 5006 基线服务：
 
 ```powershell
 cd rasa
@@ -167,18 +185,16 @@ uv run rasa run `
   --port 5006
 ```
 
-### 6. 启动后端基础版 `rasa_plus_llm`
+### 7. 启动后端服务
+
+基础版：
 
 ```powershell
 cd backend
-$env:AGENT_LLM_PROVIDER = "ollama"
-$env:OLLAMA_BASE_URL = "http://127.0.0.1:11434"
-$env:OLLAMA_MODEL = "qwen3.5:2b"
-uv sync
 uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-### 7. 启动后端 LoRA 版 `rasa_plus_lora_llm`
+LoRA 版：
 
 ```powershell
 cd backend
@@ -186,89 +202,124 @@ $env:AGENT_LLM_PROVIDER = "openai_compat"
 $env:AGENT_LLM_BASE_URL = "http://127.0.0.1:8002/v1"
 $env:AGENT_LLM_API_KEY = "EMPTY"
 $env:AGENT_LLM_MODEL = "qwen3.5-2b-lora"
-uv sync
 uv run uvicorn app.main:app --host 127.0.0.1 --port 8001
 ```
 
-## 数据集构建
+### 8. 重置 benchmark 基线状态
 
-默认会读取 `benchmark/datasets/` 中的分层 JSONL，重新输出到目标目录并生成 `manifest.json`。
+正式跑 benchmark 前，先恢复业务数据和聊天状态：
+
+如果本机已有 `psql`：
+
+```powershell
+psql -h 127.0.0.1 -U postgres -d rasa_ec_bot -f benchmark/sql/reset_benchmark_state.sql
+```
+
+如果没有本机 `psql`，推荐直接用 Docker 容器内的 `psql`，并避免 PowerShell 管道转码：
+
+```powershell
+docker cp benchmark/sql/reset_benchmark_state.sql rasa-postgres:/tmp/reset_benchmark_state.sql
+docker exec rasa-postgres psql -U postgres -d rasa_ec_bot -f /tmp/reset_benchmark_state.sql
+```
+
+### 9. 重建数据集
 
 ```powershell
 cd benchmark
 uv run python scripts/build_dataset.py
 ```
 
-可选指定输出目录：
-
-```powershell
-cd benchmark
-uv run python scripts/build_dataset.py --output-dir data/generated_datasets
-```
-
-## 运行 Benchmark
-
-快速跑一轮：
-
-```powershell
-cd benchmark
-uv run python scripts/run_benchmark.py --profile quick --verbose
-```
-
-标准 profile：
-
-```powershell
-cd benchmark
-uv run python scripts/run_benchmark.py --profile standard
-```
-
-论文风格 profile：
-
-```powershell
-cd benchmark
-uv run python scripts/run_benchmark.py --profile paper
-```
-
-常用覆盖参数：
-
-- `--systems rasa_only,rasa_plus_llm`
-- `--scenarios recommendation,order_query,transactional_action`
-- `--results-root results`
-- `--dataset-tier core`
-- `--concurrency 1,2,4`
-
-结果会默认写入 `benchmark/results/<run_id>/`。
-
-## 分析结果
-
-分析脚本读取一次 run 的结果目录，输出到对应 run 的 `analysis/` 子目录。
-
-```powershell
-cd benchmark
-uv run python scripts/analyze_results.py --result-dir results/<run_id>
-```
-
-固定输出包括：
-
-- `analysis/overall_metrics.csv`
-- `analysis/scenario_leaders.csv`
-- `analysis/failure_breakdown.csv`
-- `analysis/latency_by_concurrency.csv`
-- `analysis/business_vs_boundary.csv`
-- `analysis/hallucination_breakdown.csv`
-- `analysis/plots/*.png`
-- `analysis/report.md`
-- `analysis/conclusions.json`
-
-## 运行测试
+### 10. 先跑单测
 
 ```powershell
 cd benchmark
 uv run python -m unittest discover -s tests -p "test_*.py"
 ```
 
-## 相关说明
+### 11. 执行 Benchmark
 
-- benchmark 不再依赖 `backend/pyproject.toml`，必须从 `benchmark/` 目录单独初始化 uv 环境。
-- benchmark 结果默认不再写入根目录 `tests/benchmark_results/`。
-- 历史 `tests/benchmark_results/` 仅作为旧实验归档，不属于当前流程。
+Smoke：
+
+```powershell
+cd benchmark
+uv run python scripts/run_benchmark.py --profile quick --verbose
+```
+
+标准档：
+
+```powershell
+cd benchmark
+uv run python scripts/run_benchmark.py --profile standard
+```
+
+论文档：
+
+```powershell
+cd benchmark
+uv run python scripts/run_benchmark.py --profile paper
+```
+
+### 12. 分析结果
+
+```powershell
+cd benchmark
+uv run python scripts/analyze_results.py --result-dir results/<run_id>
+```
+
+## 常用参数
+
+- `--systems rasa_only,rasa_plus_llm`
+- `--scenarios recommendation,order_query,transactional_action`
+- `--results-root results`
+- `--dataset-tier core`
+- `--concurrency 1`
+
+## 结果结构
+
+原始运行目录 `results/<run_id>/` 常见文件：
+
+- `summary.csv`
+- `scenario_quality.csv`
+- `conversation_summary.csv`
+- `capability_coverage.csv`
+- `system_matrix.csv`
+- `paper_tables.md`
+- `prompt_versions.json`
+- `run_metadata.json`
+- `report.md`
+
+分析目录 `results/<run_id>/analysis/` 常见文件：
+
+- `suite_metrics.csv`
+- `family_metrics.csv`
+- `sample_coverage.csv`
+- `suite_scenario_leaders.csv`
+- `failure_breakdown.csv`
+- `failure_flags.csv`
+- `charts/shared_core_ranking.svg`
+- `charts/agent_extension_ranking.svg`
+- `charts/exclusive_failure_pie.svg`
+- `charts/failure_flags_bar.svg`
+- `report.md`
+
+## 正式排名口径
+
+`analysis/report.md` 使用以下顺序排名：
+
+1. `suite_family_macro_pass_rate`
+2. `suite_unique_micro_pass_rate`
+3. `suite_family_macro_success_rate`
+4. `eligibility_rate`
+
+补充说明：
+
+- `suite_pass_rate` 只保留为 raw attempt 调试字段。
+- `sample_coverage.csv` 会展示 expected / executed unique sample id 和缺失样本。
+- `suite_unique_micro_pass_rate` 会输出 Wilson 95% CI。
+- `leader_status = no_pass` 表示该 family 没有系统取得正的 `family_pass_rate`。
+
+## 说明
+
+- `backend/prompts/*.md` 的路径和 SHA-256 会写入每次运行的 `prompt_versions.json`。
+- `selection_mode` 会写入 `run_metadata.json`。
+- benchmark 会话使用 `benchmark_<...>` session id，后端会跳过记忆加载与刷新，避免污染基线。

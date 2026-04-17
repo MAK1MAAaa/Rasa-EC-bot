@@ -28,11 +28,11 @@ class DatasetBuilderTests(unittest.TestCase):
                 "id": "core-1",
                 "scenario_family": "recommendation",
                 "scenario": "basic",
-                "turns": [{"id": "t1", "kind": "chat_send", "message": "推荐一台白色手机"}],
+                "turns": [{"id": "t1", "kind": "chat_send", "message": "Recommend a white phone."}],
                 "account": "anonymous",
                 "required_capabilities": [],
                 "preconditions": {},
-                "expected_outcomes": {"required_any_text_keywords": ["推荐"], "min_response_chars": 8},
+                "expected_outcomes": {"required_any_text_keywords": ["recommend"], "min_response_chars": 8},
                 "tags": ["core"],
             }
             extended_record = {
@@ -43,7 +43,7 @@ class DatasetBuilderTests(unittest.TestCase):
                 "account": "customer",
                 "required_capabilities": ["supports_pending_decision"],
                 "preconditions": {},
-                "expected_outcomes": {"required_any_text_keywords": ["确认"], "min_response_chars": 8},
+                "expected_outcomes": {"required_any_text_keywords": ["confirm"], "min_response_chars": 8},
                 "tags": ["extended"],
             }
 
@@ -69,9 +69,17 @@ class DatasetBuilderTests(unittest.TestCase):
             self.assertTrue((output_dir / "extended" / "transactional_action.jsonl").exists())
             manifest_path = output_dir / "manifest.json"
             self.assertTrue(manifest_path.exists())
+
+            core_written = json.loads((output_dir / "core" / "recommendation.jsonl").read_text(encoding="utf-8").strip())
+            extended_written = json.loads((output_dir / "extended" / "transactional_action.jsonl").read_text(encoding="utf-8").strip())
+            self.assertEqual(core_written["benchmark_suite"], "shared_core")
+            self.assertEqual(extended_written["benchmark_suite"], "agent_extension")
+
             written = json.loads(manifest_path.read_text(encoding="utf-8"))
             self.assertEqual(written["stats"]["core"]["total_count"], 1)
             self.assertEqual(written["stats"]["extended"]["total_count"], 1)
+            self.assertEqual(written["stats"]["core"]["suite_counts"], {"shared_core": 1})
+            self.assertEqual(written["stats"]["extended"]["suite_counts"], {"agent_extension": 1})
 
 
 if __name__ == "__main__":

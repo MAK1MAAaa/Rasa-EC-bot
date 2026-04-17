@@ -27,25 +27,33 @@
   },
   "stats": {
     "core": {
-      "total_count": 15,
+      "total_count": 18,
       "family_counts": {
-        "after_sales_query": 2,
+        "after_sales_query": 4,
         "knowledge_and_multimodal": 2,
         "logistics_query": 3,
         "order_query": 3,
-        "recommendation": 3,
+        "recommendation": 4,
         "transactional_action": 2
+      },
+      "suite_counts": {
+        "agent_extension": 7,
+        "shared_core": 11
       }
     },
     "extended": {
-      "total_count": 32,
+      "total_count": 28,
       "family_counts": {
-        "after_sales_query": 2,
+        "after_sales_query": 6,
         "knowledge_and_multimodal": 4,
         "logistics_query": 3,
         "order_query": 3,
-        "recommendation": 15,
+        "recommendation": 7,
         "transactional_action": 5
+      },
+      "suite_counts": {
+        "agent_extension": 15,
+        "shared_core": 13
       }
     }
   }

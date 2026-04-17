@@ -39,5 +39,9 @@
 ## 说明
 
 - benchmark 相关命令、数据集、结果与分析已经统一迁到 [benchmark/README.md](benchmark/README.md)。
+- 当前 benchmark 正式结论改为 `shared_core` / `agent_extension` 双榜，不再输出单一综合冠军。
+- benchmark 默认并发固定为 `1`，时延与并发数据只保留在原始结果中，不参与正式排序。
+- benchmark 运行前需要先恢复事务基线数据，恢复脚本位于 `benchmark/sql/reset_benchmark_state.sql`。
+- 后端 agent prompt 已外置到 `backend/prompts/*.md`，benchmark 运行结果会记录 prompt 文件路径与 hash。
 - 主线 Rasa 训练数据位于 `rasa/data/main/`，benchmark 基线继续使用 `rasa/data/nlu.yml` 快照，二者隔离维护。
 - 登录用户的服务端记忆以 PostgreSQL 为主存储，Markdown 文件落在 `backend/data/chat_memory/`，仅作为派生产物。

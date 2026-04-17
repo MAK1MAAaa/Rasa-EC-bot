@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import math
 import random
@@ -17,7 +18,7 @@ from typing import Any
 import httpx
 
 from .dataset import infer_layer_score_profile
-from .io_utils import CONFIG_DIR, DATASET_DIR, ROOT_DIR, load_structured_file, render_markdown_table, write_csv, write_jsonl
+from .io_utils import CONFIG_DIR, DATASET_DIR, ROOT_DIR, load_structured_file, render_markdown_table, write_csv, write_json, write_jsonl
 
 
 DEFAULT_CONFIG_PATH = CONFIG_DIR / "experiment.yaml"
@@ -30,6 +31,32 @@ DEFAULT_SCENARIO_FAMILIES = (
     "knowledge_and_multimodal",
     "transactional_action",
 )
+SUPPORTED_BENCHMARK_SUITES = ("shared_core", "agent_extension")
+SELECTION_MODE_DEFAULTS = {
+    "quick": "sampled",
+    "standard": "all_unique",
+    "paper": "all_unique",
+}
+PRIMARY_FAILURE_PRIORITY = (
+    "unsupported",
+    "technical_failure",
+    "image_flow_failure",
+    "pending_decision_failure",
+    "hallucinated_order_id",
+    "missing_order_id",
+    "missing_required_cards",
+    "missing_required_actions",
+    "missing_confirmation_buttons",
+    "login_block_failure",
+    "contains_forbidden_keywords",
+    "missing_required_keywords",
+    "format_error",
+)
+PROMPT_VERSION_FILES = {
+    "agent_final_answer": (ROOT_DIR / "backend" / "prompts" / "agent_final_answer.md").resolve(),
+    "rasa_review": (ROOT_DIR / "backend" / "prompts" / "rasa_review.md").resolve(),
+    "image_analysis": (ROOT_DIR / "backend" / "prompts" / "image_analysis.md").resolve(),
+}
 CAPABILITY_KEYS = (
     "supports_auth_queries",
     "supports_kb_policy",
@@ -41,9 +68,18 @@ CAPABILITY_KEYS = (
     "supports_cards",
 )
 ORDER_ID_RE = re.compile(r"\bORD\d{6,}\b", flags=re.IGNORECASE)
-LOGIN_REQUIRED_PATTERNS = ["请先登录", "登录后查看", "登录后再试", "需要先登录"]
-EXPIRY_PATTERNS = ["已过期", "操作已过期", "确认已超时", "待确认已失效"]
-
+LOGIN_REQUIRED_PATTERNS = [
+    "please log in",
+    "login first",
+    "sign in first",
+    "authentication required",
+]
+EXPIRY_PATTERNS = [
+    "expired",
+    "request expired",
+    "timed out",
+    "no pending action",
+]
 
 @dataclass(frozen=True)
 class TurnStep:
@@ -59,6 +95,8 @@ class TurnStep:
 @dataclass(frozen=True)
 class ExpectedOutcomes:
     required_any_text_keywords: list[str]
+    required_all_text_keywords: list[str]
+    required_keyword_groups: list[list[str]]
     forbidden_text_keywords: list[str]
     required_card_types: list[str]
     required_action_types: list[str]
@@ -74,6 +112,7 @@ class ExpectedOutcomes:
 @dataclass(frozen=True)
 class ConversationSample:
     sample_id: str
+    benchmark_suite: str
     scenario_family: str
     scenario: str
     turns: list[TurnStep]
@@ -156,6 +195,7 @@ class TurnEvent:
     scenario_family: str
     scenario: str
     sample_id: str
+    benchmark_suite: str
     tier: str
     repeat: int
     concurrency: int
@@ -190,6 +230,7 @@ class ConversationEvent:
     scenario_family: str
     scenario: str
     sample_id: str
+    benchmark_suite: str
     tier: str
     repeat: int
     concurrency: int
@@ -217,8 +258,8 @@ def now_iso() -> str:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="运行 benchmark 主流程。")
-    parser.add_argument("--systems", default="", help="逗号分隔的系统名称列表，默认读取配置中的全部系统。")
+    parser = argparse.ArgumentParser(description="���� benchmark �����̡�")
+    parser.add_argument("--systems", default="", help="���ŷָ��ϵͳ�����б��Ĭ�϶�ȡ�����е�ȫ��ϵͳ��")
     parser.add_argument("--scenarios", default=",".join(DEFAULT_SCENARIO_FAMILIES))
     parser.add_argument("--profile", default="quick")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
@@ -248,14 +289,28 @@ def parse_concurrency_override(raw: str) -> list[int] | None:
         return None
     parsed = [int(item) for item in values]
     if any(item <= 0 for item in parsed):
-        raise ValueError("并发值必须大于 0。")
+        raise ValueError("����ֵ������� 0��")
     return parsed
+
+
+def resolve_selection_mode(profile: str, profile_cfg: dict[str, Any]) -> str:
+    raw_mode = str(profile_cfg.get("selection_mode") or "").strip().lower()
+    if raw_mode in {"sampled", "all_unique"}:
+        return raw_mode
+    return SELECTION_MODE_DEFAULTS.get(profile, "all_unique")
+
+
+def select_primary_failure_reason(flags: dict[str, Any]) -> str:
+    for reason in PRIMARY_FAILURE_PRIORITY:
+        if bool(flags.get(reason)):
+            return reason
+    return ""
 
 
 def load_config(path: Path) -> dict[str, Any]:
     payload = load_structured_file(path)
     if not isinstance(payload, dict):
-        raise RuntimeError(f"Benchmark 配置必须是对象：{path}")
+        raise RuntimeError(f"Benchmark ���ñ����Ƕ���{path}")
     return payload
 
 
@@ -267,13 +322,13 @@ def require_string(mapping: dict[str, Any], key: str, *, default: str = "") -> s
 def resolve_auth_config(config: dict[str, Any]) -> AuthConfig:
     auth_cfg = config.get("auth")
     if not isinstance(auth_cfg, dict):
-        raise RuntimeError("缺少 auth 配置。")
+        raise RuntimeError("ȱ�� auth ���á�")
     customer = auth_cfg.get("customer")
     merchant = auth_cfg.get("merchant")
     if not isinstance(customer, dict):
-        raise RuntimeError("缺少 auth.customer 配置。")
+        raise RuntimeError("ȱ�� auth.customer ���á�")
     if not isinstance(merchant, dict):
-        raise RuntimeError("缺少 auth.merchant 配置。")
+        raise RuntimeError("ȱ�� auth.merchant ���á�")
     return AuthConfig(
         login_url=require_string(auth_cfg, "login_url"),
         me_url=require_string(auth_cfg, "me_url"),
@@ -298,13 +353,13 @@ def normalize_capabilities(item: dict[str, Any]) -> dict[str, bool]:
 def resolve_system_targets(config: dict[str, Any], requested_systems: list[str]) -> dict[str, SystemTarget]:
     systems_cfg = config.get("systems")
     if not isinstance(systems_cfg, dict):
-        raise RuntimeError("缺少 systems 配置。")
+        raise RuntimeError("ȱ�� systems ���á�")
     selected_names = requested_systems or list(systems_cfg.keys())
     targets: dict[str, SystemTarget] = {}
     for name in selected_names:
         item = systems_cfg.get(name)
         if not isinstance(item, dict):
-            raise RuntimeError(f"未找到系统配置：{name}")
+            raise RuntimeError(f"δ�ҵ�ϵͳ���ã�{name}")
         target = SystemTarget(
             name=name,
             kind=require_string(item, "kind"),
@@ -320,7 +375,7 @@ def resolve_system_targets(config: dict[str, Any], requested_systems: list[str])
             capabilities=normalize_capabilities(item),
         )
         if not target.kind or not target.base_url or not target.path:
-            raise RuntimeError(f"系统配置不完整：{name}")
+            raise RuntimeError(f"ϵͳ���ò�������{name}")
         targets[name] = target
     return targets
 
@@ -370,6 +425,12 @@ def parse_expected_outcomes(payload: dict[str, Any]) -> ExpectedOutcomes:
         raw = dict(payload.get("checks") or {})
     return ExpectedOutcomes(
         required_any_text_keywords=[str(item).strip() for item in raw.get("required_any_text_keywords", raw.get("required_any_keywords", [])) if str(item).strip()],
+        required_all_text_keywords=[str(item).strip() for item in raw.get("required_all_text_keywords", []) if str(item).strip()],
+        required_keyword_groups=[
+            [str(keyword).strip() for keyword in group if str(keyword).strip()]
+            for group in raw.get("required_keyword_groups", [])
+            if isinstance(group, list)
+        ],
         forbidden_text_keywords=[str(item).strip() for item in raw.get("forbidden_text_keywords", raw.get("forbidden_keywords", [])) if str(item).strip()],
         required_card_types=[str(item).strip() for item in raw.get("required_card_types", []) if str(item).strip()],
         required_action_types=[str(item).strip() for item in raw.get("required_action_types", []) if str(item).strip()],
@@ -406,6 +467,7 @@ def load_dataset_file(path: Path) -> list[ConversationSample]:
             records.append(
                 ConversationSample(
                     sample_id=str(payload.get("id") or f"{path.stem}-{line_no}"),
+                    benchmark_suite=str(payload.get("benchmark_suite") or "shared_core").strip(),
                     scenario_family=scenario_family,
                     scenario=str(payload.get("scenario") or path.stem).strip(),
                     turns=turns,
@@ -421,7 +483,7 @@ def load_dataset_file(path: Path) -> list[ConversationSample]:
                 )
             )
     if not records:
-        raise RuntimeError(f"数据集为空：{path}")
+        raise RuntimeError(f"���ݼ�Ϊ�գ�{path}")
     return records
 
 
@@ -436,7 +498,7 @@ def resolve_dataset_files(dataset_arg: Path | None, dataset_tier: str, scenario_
         return {family: (base_dir / f"{family}.jsonl").resolve() for family in scenario_families}
     if resolved.is_file() and len(scenario_families) == 1:
         return {scenario_families[0]: resolved}
-    raise RuntimeError("--dataset 为文件时只能配合单场景族使用；多场景族请传目录。")
+    raise RuntimeError("--dataset can point to a file only when exactly one scenario family is selected.")
 
 
 def compute_percentile(values: list[float], percentile: float) -> float:
@@ -459,9 +521,37 @@ def contains_any(text: str, keywords: list[str]) -> bool:
     return any(keyword.lower() in lowered for keyword in keywords if keyword)
 
 
+def contains_all(text: str, keywords: list[str]) -> bool:
+    lowered = text.lower()
+    return all(keyword.lower() in lowered for keyword in keywords if keyword)
+
+
+def matches_keyword_groups(text: str, keyword_groups: list[list[str]]) -> bool:
+    lowered = text.lower()
+    for group in keyword_groups:
+        normalized_group = [keyword.lower() for keyword in group if keyword]
+        if normalized_group and not any(keyword in lowered for keyword in normalized_group):
+            return False
+    return True
+
+
 def extract_order_ids(value: Any) -> list[str]:
     text = json.dumps(value, ensure_ascii=False) if not isinstance(value, str) else value
     return sorted(set(match.group(0).upper() for match in ORDER_ID_RE.finditer(text)))
+
+
+def collect_prompt_versions() -> list[dict[str, str]]:
+    versions: list[dict[str, str]] = []
+    for name, path in PROMPT_VERSION_FILES.items():
+        content = path.read_text(encoding="utf-8-sig")
+        versions.append(
+            {
+                "name": name,
+                "path": str(path),
+                "sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+            }
+        )
+    return versions
 
 
 async def login_for_auth_context(
@@ -477,12 +567,12 @@ async def login_for_auth_context(
     login_payload = login_response.json()
     token = str(login_payload.get("access_token") or "").strip() if isinstance(login_payload, dict) else ""
     if not token:
-        raise RuntimeError("登录成功但未返回 access_token。")
+        raise RuntimeError("��¼�ɹ���δ���� access_token��")
     me_response = await client.get(me_url, headers={"Authorization": f"Bearer {token}"})
     me_response.raise_for_status()
     me_payload = me_response.json()
     if not isinstance(me_payload, dict):
-        raise RuntimeError("auth/me 返回格式无效。")
+        raise RuntimeError("auth/me ���ظ�ʽ��Ч��")
     return AuthContext(
         token=token,
         user_id=str(me_payload.get("id") or "").strip(),
@@ -495,7 +585,7 @@ def get_or_create_login_urls(auth_cfg: AuthConfig, system: SystemTarget) -> tupl
     login_url = system.login_url or auth_cfg.login_url
     me_url = system.me_url or auth_cfg.me_url
     if not login_url or not me_url:
-        raise RuntimeError(f"系统缺少登录配置：{system.name}")
+        raise RuntimeError(f"ϵͳȱ�ٵ�¼���ã�{system.name}")
     return login_url, me_url
 
 
@@ -629,11 +719,14 @@ def normalize_ollama_message(payload: Any) -> NormalizedReply:
 
 
 def build_ollama_messages(sample: ConversationSample, message: str) -> list[dict[str, str]]:
-    system_prompt = "你正在参与客服 benchmark。只回答用户问题，不要伪造订单号、物流单号、卡片、按钮或后台状态。"
+    system_prompt = (
+        "You are participating in a benchmark. Answer the user request directly and do not invent order ids, "
+        "logistics numbers, cards, buttons, or backend state."
+    )
     if sample.account == "customer":
-        system_prompt += " 当前用户已登录。"
+        system_prompt += " The current user is already authenticated."
     else:
-        system_prompt += " 当前用户未登录。"
+        system_prompt += " The current user is anonymous."
     return [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": message},
@@ -646,8 +739,27 @@ def infer_input_order_ids(sample: ConversationSample) -> list[str]:
     return sorted(set(from_turns + from_preconditions))
 
 
-def make_conversation_sender_id(system: SystemTarget, sample: ConversationSample, repeat: int, concurrency: int, conversation_index: int) -> str:
-    return f"{system.sender_id}:{sample.sample_id}:{repeat}:{concurrency}:{conversation_index}"
+def build_conversation_session_id(run_id: str, sample: ConversationSample, repeat: int, concurrency: int, conversation_index: int) -> str:
+    return (
+        f"benchmark_{run_id}_sample_{sample.sample_id}_repeat_{repeat}_"
+        f"concurrency_{concurrency}_conversation_{conversation_index}"
+    )
+
+
+def make_conversation_sender_id(
+    *,
+    system: SystemTarget,
+    sample: ConversationSample,
+    repeat: int,
+    concurrency: int,
+    conversation_index: int,
+    run_id: str,
+    auth_context: AuthContext | None = None,
+) -> str:
+    session_id = build_conversation_session_id(run_id, sample, repeat, concurrency, conversation_index)
+    if system.kind == "backend_chat" and sample.account == "customer" and auth_context and auth_context.user_id:
+        return f"{auth_context.user_id}:{session_id}"
+    return f"{system.sender_id}:{session_id}"
 
 
 def score_conversation(
@@ -659,6 +771,9 @@ def score_conversation(
     if unsupported:
         flags = {
             "supported": False,
+            "unsupported": True,
+            "technical_failure": False,
+            "format_error": False,
             "missing_required_keywords": False,
             "contains_forbidden_keywords": False,
             "missing_required_cards": False,
@@ -671,6 +786,7 @@ def score_conversation(
             "pending_decision_failure": False,
             "expired_pending_action": False,
         }
+        flags["primary_failure_reason"] = select_primary_failure_reason(flags)
         return "na", False, False, flags
 
     combined_text = "\n".join(event.response_text for event in turn_events if event.response_text).strip()
@@ -678,9 +794,12 @@ def score_conversation(
     action_types = {action_type for event in turn_events for action_type in event.response_action_types}
     output_order_ids = {order_id for event in turn_events for order_id in event.response_order_ids}
     allowed_order_ids = set(sample.expected_outcomes.allowed_order_ids or infer_input_order_ids(sample))
-    missing_required_keywords = bool(sample.expected_outcomes.required_any_text_keywords) and not contains_any(
-        combined_text,
-        sample.expected_outcomes.required_any_text_keywords,
+    technical_success = all(event.success for event in turn_events if event.executed)
+    technical_failure = not technical_success
+    missing_required_keywords = (
+        (bool(sample.expected_outcomes.required_any_text_keywords) and not contains_any(combined_text, sample.expected_outcomes.required_any_text_keywords))
+        or (bool(sample.expected_outcomes.required_all_text_keywords) and not contains_all(combined_text, sample.expected_outcomes.required_all_text_keywords))
+        or (bool(sample.expected_outcomes.required_keyword_groups) and not matches_keyword_groups(combined_text, sample.expected_outcomes.required_keyword_groups))
     )
     contains_forbidden_keywords = contains_any(combined_text, sample.expected_outcomes.forbidden_text_keywords)
     missing_required_cards = any(card_type not in card_types for card_type in sample.expected_outcomes.required_card_types)
@@ -704,36 +823,33 @@ def score_conversation(
     format_error = len(combined_text) < max(sample.expected_outcomes.min_response_chars, 1)
     if sample.expected_outcomes.required_card_types or sample.expected_outcomes.required_action_types:
         format_error = False
-    technical_success = all(event.success for event in turn_events if event.executed)
-    passed = technical_success and not any(
-        [
-            missing_required_keywords,
-            contains_forbidden_keywords,
-            missing_required_cards,
-            missing_required_actions,
-            missing_confirmation_buttons,
-            missing_order_id,
-            hallucinated_order_id,
-            login_block_failure,
-            image_flow_failure,
-            pending_decision_failure,
-            format_error,
-        ]
-    )
-    flags = {
-        "supported": True,
-        "missing_required_keywords": missing_required_keywords,
-        "contains_forbidden_keywords": contains_forbidden_keywords,
+
+    failure_flags = {
+        "unsupported": False,
+        "technical_failure": technical_failure,
+        "image_flow_failure": image_flow_failure,
+        "pending_decision_failure": pending_decision_failure,
+        "hallucinated_order_id": hallucinated_order_id,
+        "missing_order_id": missing_order_id,
         "missing_required_cards": missing_required_cards,
         "missing_required_actions": missing_required_actions,
         "missing_confirmation_buttons": missing_confirmation_buttons,
-        "missing_order_id": missing_order_id,
-        "hallucinated_order_id": hallucinated_order_id,
         "login_block_failure": login_block_failure,
-        "image_flow_failure": image_flow_failure,
-        "pending_decision_failure": pending_decision_failure,
+        "contains_forbidden_keywords": contains_forbidden_keywords,
+        "missing_required_keywords": missing_required_keywords,
+        "format_error": format_error,
+    }
+    passed = not any(failure_flags.values())
+    flags = {
+        "supported": True,
+        **failure_flags,
         "expired_pending_action": expired_pending_action,
     }
+    primary_failure_reason = "" if passed else select_primary_failure_reason(flags)
+    if not passed and not primary_failure_reason:
+        flags["format_error"] = True
+        primary_failure_reason = "format_error"
+    flags["primary_failure_reason"] = primary_failure_reason
     return ("pass" if passed else "fail"), technical_success, passed, flags
 
 
@@ -790,12 +906,12 @@ async def execute_turn(
             success = True
         elif turn.kind == "upload_image":
             if not system.capabilities.get("supports_attachments", False) or not system.upload_path:
-                raise RuntimeError("当前系统不支持图片上传。")
+                raise RuntimeError("��ǰϵͳ��֧��ͼƬ�ϴ���")
             image_assets_dir = require_string(config, "image_assets_dir")
             image_case_map = config.get("image_case_map") if isinstance(config.get("image_case_map"), dict) else {}
             filename = str(image_case_map.get(turn.image_case) or "").strip()
             if not image_assets_dir or not filename:
-                raise RuntimeError(f"缺少图片素材配置：{turn.image_case}")
+                raise RuntimeError(f"ȱ��ͼƬ�ز����ã�{turn.image_case}")
             image_path = (ROOT_DIR / image_assets_dir / filename).resolve()
             upload_url = f"{system.base_url.rstrip('/')}/{system.upload_path.lstrip('/')}"
             headers = current_auth.bearer_headers if sample.account == "customer" else {}
@@ -809,7 +925,7 @@ async def execute_turn(
             payload = response.json()
             attachment_id = str(payload.get("attachment_id") or "").strip() if isinstance(payload, dict) else ""
             if not attachment_id:
-                raise RuntimeError("图片上传成功但未返回 attachment_id。")
+                raise RuntimeError("ͼƬ�ϴ��ɹ���δ���� attachment_id��")
             current_attachments.append(attachment_id)
             success = True
         elif turn.kind == "chat_send":
@@ -853,7 +969,7 @@ async def execute_turn(
                 reply = normalize_ollama_message(response.json())
                 success = True
             else:
-                raise RuntimeError(f"不支持的 system.kind：{system.kind}")
+                raise RuntimeError(f"��֧�ֵ� system.kind��{system.kind}")
         elif turn.kind == "pending_decision":
             response = await client.post(
                 f"{system.base_url.rstrip('/')}/{system.pending_action_path.lstrip('/')}",
@@ -865,7 +981,7 @@ async def execute_turn(
             reply = normalize_backend_messages(response.json())
             success = True
         else:
-            raise RuntimeError(f"不支持的 turn.kind：{turn.kind}")
+            raise RuntimeError(f"��֧�ֵ� turn.kind��{turn.kind}")
     except httpx.TimeoutException:
         error_type = "timeout"
         error_message = "request timeout"
@@ -885,6 +1001,7 @@ async def execute_turn(
         scenario_family=sample.scenario_family,
         scenario=sample.scenario,
         sample_id=sample.sample_id,
+        benchmark_suite=sample.benchmark_suite,
         tier=sample.tier,
         repeat=repeat,
         concurrency=concurrency,
@@ -972,14 +1089,23 @@ async def warmup_system(
     auth_cfg: AuthConfig,
     config: dict[str, Any],
     warmup_requests: int,
+    run_id: str,
 ) -> None:
     if warmup_requests <= 0:
         return
     for index in range(1, warmup_requests + 1):
         auth_context = AuthContext()
         attachments: list[str] = []
-        sender_id = make_conversation_sender_id(system, sample, repeat=0, concurrency=1, conversation_index=index)
         for turn_index, turn in enumerate(sample.turns[:1], start=1):
+            sender_id = make_conversation_sender_id(
+                system=system,
+                sample=sample,
+                repeat=0,
+                concurrency=1,
+                conversation_index=index,
+                run_id=run_id,
+                auth_context=auth_context,
+            )
             _, auth_context, attachments = await execute_turn(
                 client=client,
                 system=system,
@@ -997,22 +1123,81 @@ async def warmup_system(
             )
 
 
-def pick_samples(samples: list[ConversationSample], count: int, seed: int) -> list[ConversationSample]:
+def pick_samples(
+    samples: list[ConversationSample],
+    count: int,
+    seed: int,
+    *,
+    selection_mode: str,
+    repeat: int,
+) -> list[ConversationSample]:
+    if not samples:
+        return []
+
+    repeatable = [sample for sample in samples if sample.repeatable]
+    fixed = [sample for sample in samples if not sample.repeatable and repeat == 1]
+    rng = random.Random(seed)
+
+    if selection_mode == "all_unique":
+        planned = list(repeatable) + list(fixed)
+        rng.shuffle(planned)
+        return planned
+
     if count <= 0:
         return []
-    repeatable = [sample for sample in samples if sample.repeatable]
-    fixed = [sample for sample in samples if not sample.repeatable]
-    rng = random.Random(seed)
-    if len(repeatable) >= count:
-        selected = rng.sample(repeatable, count)
-    else:
-        selected = list(repeatable)
-        while repeatable and len(selected) < count:
-            selected.append(repeatable[(len(selected) - len(repeatable)) % len(repeatable)])
-    for sample in fixed:
-        if sample not in selected:
-            selected.append(sample)
-    return selected[: max(count, len(fixed))]
+
+    population = list(repeatable) + list(fixed)
+    rng.shuffle(population)
+    selected = population[: min(count, len(population))]
+    if len(selected) >= count or not repeatable:
+        return selected
+
+    repeatable_pool = list(repeatable)
+    rng.shuffle(repeatable_pool)
+    cursor = 0
+    while len(selected) < count:
+        selected.append(repeatable_pool[cursor % len(repeatable_pool)])
+        cursor += 1
+    return selected
+
+
+def sample_allowed_for_profile(sample: ConversationSample, profile: str) -> bool:
+    tags = {tag.strip().lower() for tag in sample.tags if tag.strip()}
+    return not ("paper_only" in tags and profile != "paper")
+
+
+def build_sample_metadata_row(sample: ConversationSample) -> dict[str, Any]:
+    return {
+        "sample_id": sample.sample_id,
+        "benchmark_suite": sample.benchmark_suite,
+        "scenario_family": sample.scenario_family,
+        "scenario": sample.scenario,
+        "tier": sample.tier,
+        "repeatable": sample.repeatable,
+        "layer": sample.layer,
+        "score_profile": sample.score_profile,
+        "tags": list(sample.tags),
+    }
+
+
+def build_expected_sample_row(
+    *,
+    system: str,
+    sample: ConversationSample,
+    repeat: int,
+    concurrency: int,
+    selection_mode: str,
+) -> dict[str, Any]:
+    row = build_sample_metadata_row(sample)
+    row.update(
+        {
+            "system": system,
+            "repeat": repeat,
+            "concurrency": concurrency,
+            "selection_mode": selection_mode,
+        }
+    )
+    return row
 
 
 async def execute_conversation(
@@ -1025,6 +1210,7 @@ async def execute_conversation(
     repeat: int,
     concurrency: int,
     conversation_index: int,
+    run_id: str,
 ) -> tuple[ConversationEvent, list[TurnEvent]]:
     timestamp = now_iso()
     started_at = time.time()
@@ -1035,6 +1221,7 @@ async def execute_conversation(
             scenario_family=sample.scenario_family,
             scenario=sample.scenario,
             sample_id=sample.sample_id,
+            benchmark_suite=sample.benchmark_suite,
             tier=sample.tier,
             repeat=repeat,
             concurrency=concurrency,
@@ -1054,15 +1241,29 @@ async def execute_conversation(
             quality_status="na",
             conversation_success=False,
             passed=False,
-            quality_flags={"supported": False},
+            quality_flags={
+                "supported": False,
+                "unsupported": True,
+                "technical_failure": False,
+                "format_error": False,
+                "primary_failure_reason": "unsupported",
+            },
         )
         return event, []
 
-    sender_id = make_conversation_sender_id(system, sample, repeat, concurrency, conversation_index)
     auth_context = AuthContext()
     attachments: list[str] = []
     turn_events: list[TurnEvent] = []
     for turn_index, turn in enumerate(sample.turns, start=1):
+        sender_id = make_conversation_sender_id(
+            system=system,
+            sample=sample,
+            repeat=repeat,
+            concurrency=concurrency,
+            conversation_index=conversation_index,
+            run_id=run_id,
+            auth_context=auth_context,
+        )
         turn_event, auth_context, attachments = await execute_turn(
             client=client,
             system=system,
@@ -1088,6 +1289,7 @@ async def execute_conversation(
         scenario_family=sample.scenario_family,
         scenario=sample.scenario,
         sample_id=sample.sample_id,
+        benchmark_suite=sample.benchmark_suite,
         tier=sample.tier,
         repeat=repeat,
         concurrency=concurrency,
@@ -1121,6 +1323,7 @@ async def execute_batch(
     config: dict[str, Any],
     repeat: int,
     concurrency: int,
+    run_id: str,
 ) -> tuple[list[ConversationEvent], list[TurnEvent]]:
     semaphore = asyncio.Semaphore(concurrency)
 
@@ -1136,6 +1339,7 @@ async def execute_batch(
                 repeat=repeat,
                 concurrency=concurrency,
                 conversation_index=conversation_index,
+                run_id=run_id,
             )
 
     results = await asyncio.gather(*(guarded(item) for item in enumerate(samples, start=1)))
@@ -1145,12 +1349,12 @@ async def execute_batch(
 
 
 def build_summary_rows(conversations: list[ConversationEvent]) -> list[dict[str, Any]]:
-    groups: dict[tuple[str, str, int, int], list[ConversationEvent]] = {}
+    groups: dict[tuple[str, str, str, int, int], list[ConversationEvent]] = {}
     for event in conversations:
-        groups.setdefault((event.system, event.scenario_family, event.concurrency, event.repeat), []).append(event)
+        groups.setdefault((event.system, event.benchmark_suite, event.scenario_family, event.concurrency, event.repeat), []).append(event)
     rows: list[dict[str, Any]] = []
     for key in sorted(groups.keys()):
-        system, scenario_family, concurrency, repeat = key
+        system, benchmark_suite, scenario_family, concurrency, repeat = key
         batch = groups[key]
         eligible = [event for event in batch if not event.unsupported]
         duration_sec = max(0.001, max(event.finished_at for event in batch) - min(event.started_at for event in batch))
@@ -1161,6 +1365,7 @@ def build_summary_rows(conversations: list[ConversationEvent]) -> list[dict[str,
         rows.append(
             {
                 "system": system,
+                "benchmark_suite": benchmark_suite,
                 "scenario_family": scenario_family,
                 "layer": layer,
                 "score_profile": score_profile,
@@ -1190,12 +1395,12 @@ def build_summary_rows(conversations: list[ConversationEvent]) -> list[dict[str,
 
 
 def build_quality_rows(conversations: list[ConversationEvent]) -> list[dict[str, Any]]:
-    groups: dict[tuple[str, str], list[ConversationEvent]] = {}
+    groups: dict[tuple[str, str, str], list[ConversationEvent]] = {}
     for event in conversations:
-        groups.setdefault((event.system, event.scenario_family), []).append(event)
+        groups.setdefault((event.system, event.benchmark_suite, event.scenario_family), []).append(event)
     rows: list[dict[str, Any]] = []
     for key in sorted(groups.keys()):
-        system, scenario_family = key
+        system, benchmark_suite, scenario_family = key
         batch = groups[key]
         eligible = [event for event in batch if not event.unsupported]
         layer = batch[0].layer if batch else ""
@@ -1203,6 +1408,7 @@ def build_quality_rows(conversations: list[ConversationEvent]) -> list[dict[str,
         rows.append(
             {
                 "system": system,
+                "benchmark_suite": benchmark_suite,
                 "scenario_family": scenario_family,
                 "layer": layer,
                 "score_profile": score_profile,
@@ -1218,6 +1424,8 @@ def build_quality_rows(conversations: list[ConversationEvent]) -> list[dict[str,
                 "missing_confirmation_buttons": sum(1 for event in eligible if bool(event.quality_flags.get("missing_confirmation_buttons"))),
                 "missing_order_id": sum(1 for event in eligible if bool(event.quality_flags.get("missing_order_id"))),
                 "hallucinated_order_id": sum(1 for event in eligible if bool(event.quality_flags.get("hallucinated_order_id"))),
+                "technical_failures": sum(1 for event in eligible if bool(event.quality_flags.get("technical_failure"))),
+                "format_errors": sum(1 for event in eligible if bool(event.quality_flags.get("format_error"))),
                 "login_block_failures": sum(1 for event in eligible if bool(event.quality_flags.get("login_block_failure"))),
                 "image_flow_failures": sum(1 for event in eligible if bool(event.quality_flags.get("image_flow_failure"))),
                 "pending_decision_failures": sum(1 for event in eligible if bool(event.quality_flags.get("pending_decision_failure"))),
@@ -1240,26 +1448,30 @@ def build_conversation_summary_rows(conversations: list[ConversationEvent]) -> l
         row["missing_confirmation_buttons"] = bool(flags.get("missing_confirmation_buttons"))
         row["missing_order_id"] = bool(flags.get("missing_order_id"))
         row["hallucinated_order_id"] = bool(flags.get("hallucinated_order_id"))
+        row["technical_failure"] = bool(flags.get("technical_failure"))
+        row["format_error"] = bool(flags.get("format_error"))
         row["login_block_failure"] = bool(flags.get("login_block_failure"))
         row["image_flow_failure"] = bool(flags.get("image_flow_failure"))
         row["pending_decision_failure"] = bool(flags.get("pending_decision_failure"))
+        row["primary_failure_reason"] = str(flags.get("primary_failure_reason") or "")
         rows.append(row)
     return rows
 
 
 def build_capability_coverage_rows(conversations: list[ConversationEvent]) -> list[dict[str, Any]]:
-    groups: dict[tuple[str, str], list[ConversationEvent]] = {}
+    groups: dict[tuple[str, str, str], list[ConversationEvent]] = {}
     for event in conversations:
         for capability in event.required_capabilities:
-            groups.setdefault((event.system, capability), []).append(event)
+            groups.setdefault((event.system, event.benchmark_suite, capability), []).append(event)
     rows: list[dict[str, Any]] = []
     for key in sorted(groups.keys()):
-        system, capability = key
+        system, benchmark_suite, capability = key
         batch = groups[key]
         eligible = [event for event in batch if not event.unsupported]
         rows.append(
             {
                 "system": system,
+                "benchmark_suite": benchmark_suite,
                 "capability": capability,
                 "required_conversations": len(batch),
                 "supported_conversations": len(eligible),
@@ -1299,21 +1511,77 @@ def build_system_matrix(conversations: list[ConversationEvent], scenario_familie
 
 def build_paper_tables(*, matrix_rows: list[dict[str, Any]], capability_rows: list[dict[str, Any]], summary_rows: list[dict[str, Any]]) -> str:
     lines = [
-        "# 论文附表",
+        "# Raw Appendix Tables",
         "",
-        "## 系统矩阵",
+        "## System Matrix (Non-Ranking)",
         render_markdown_table(matrix_rows),
         "",
-        "## 能力覆盖",
+        "## Capability Coverage",
         render_markdown_table(capability_rows),
         "",
-        "## 批次摘要",
+        "## Summary",
         render_markdown_table(summary_rows),
         "",
-        "## 指标说明",
-        "- `unsupported_rate` 表示系统当前不具备该任务所需能力，而不是回答内容错误。",
-        "- `conversation_success_rate` 反映整轮流程是否执行完成。",
-        "- `quality_pass_rate` 同时受内容、结构和流程规则约束。",
+        "## Metric Notes",
+        "- Use `analysis/report.md` for the formal `shared_core` and `agent_extension` rankings.",
+        "- `unsupported_rate` means the system lacks a required capability for the task, not that the answer content was wrong.",
+        "- `conversation_success_rate` measures whether the end-to-end flow completed successfully.",
+        "- `quality_pass_rate` additionally enforces content, structure, and workflow requirements.",
+    ]
+    return "\n".join(lines)
+
+
+def _build_report_legacy_unused(
+    *,
+    output_dir: Path,
+    config_path: Path,
+    dataset_files: dict[str, Path],
+    systems: list[str],
+    scenario_families: list[str],
+    profile: str,
+    dataset_tier: str,
+    selection_mode: str,
+    auth_cfg: AuthConfig,
+    summary_rows: list[dict[str, Any]],
+    quality_rows: list[dict[str, Any]],
+    matrix_rows: list[dict[str, Any]],
+    capability_rows: list[dict[str, Any]],
+    prompt_versions: list[dict[str, str]],
+    expected_sample_rows: list[dict[str, Any]],
+) -> str:
+    lines = [
+        "# �ͷ���· Benchmark ����",
+        "",
+        f"- ����ʱ�䣺{now_iso()}",
+        f"- Profile��{profile}",
+        f"- ���ݼ��㼶��{dataset_tier}",
+        f"- �����ļ���`{config_path}`",
+        f"- ���Ŀ¼��`{output_dir}`",
+        f"- Python��{sys.version.split()[0]}",
+        f"- ϵͳ���ϣ�{', '.join(systems)}",
+        f"- �������ϣ�{', '.join(scenario_families)}",
+        f"- �ͻ��˺ţ�`{auth_cfg.customer_email}`",
+        f"- �̼��˺ţ�`{auth_cfg.merchant_email}`",
+        "- �ٷ�Ĭ�ϲ�����`1`",
+        "- ��ʽ����ֻ��˫������ָ�꣬��ʹ��ʱ�ӺͲ�����Ϊ����������",
+        "",
+        "## ���ݼ��ļ�",
+        render_markdown_table([{"scenario_family": family, "path": str(path)} for family, path in dataset_files.items()]),
+        "",
+        "## Prompt �汾",
+        render_markdown_table(prompt_versions),
+        "",
+        "## ԭʼϵͳ���󣨷���ʽ���У�",
+        render_markdown_table(matrix_rows),
+        "",
+        "## ����ժҪ",
+        render_markdown_table(summary_rows),
+        "",
+        "## ��������",
+        render_markdown_table(quality_rows),
+        "",
+        "## ��������",
+        render_markdown_table(capability_rows),
     ]
     return "\n".join(lines)
 
@@ -1327,39 +1595,65 @@ def build_report(
     scenario_families: list[str],
     profile: str,
     dataset_tier: str,
+    selection_mode: str,
     auth_cfg: AuthConfig,
     summary_rows: list[dict[str, Any]],
     quality_rows: list[dict[str, Any]],
     matrix_rows: list[dict[str, Any]],
     capability_rows: list[dict[str, Any]],
+    prompt_versions: list[dict[str, str]],
+    expected_sample_rows: list[dict[str, Any]],
 ) -> str:
+    expected_unique_rows: list[dict[str, Any]] = []
+    seen_expected: set[tuple[str, str]] = set()
+    for row in expected_sample_rows:
+        key = (str(row.get("benchmark_suite") or ""), str(row.get("sample_id") or ""))
+        if key in seen_expected:
+            continue
+        seen_expected.add(key)
+        expected_unique_rows.append(
+            {
+                "benchmark_suite": row.get("benchmark_suite", ""),
+                "scenario_family": row.get("scenario_family", ""),
+                "sample_id": row.get("sample_id", ""),
+                "repeatable": row.get("repeatable", True),
+                "tier": row.get("tier", ""),
+            }
+        )
     lines = [
-        "# 客服链路 Benchmark 报告",
+        "# Benchmark Raw Report",
         "",
-        f"- 生成时间：{now_iso()}",
-        f"- Profile：{profile}",
-        f"- 数据集层级：{dataset_tier}",
-        f"- 配置文件：`{config_path}`",
-        f"- 输出目录：`{output_dir}`",
-        f"- Python：{sys.version.split()[0]}",
-        f"- 系统集合：{', '.join(systems)}",
-        f"- 场景集合：{', '.join(scenario_families)}",
-        f"- 客户账号：`{auth_cfg.customer_email}`",
-        f"- 商家账号：`{auth_cfg.merchant_email}`",
+        f"- Generated At: {now_iso()}",
+        f"- Profile: {profile}",
+        f"- Dataset Tier: {dataset_tier}",
+        f"- Selection Mode: {selection_mode}",
+        f"- Config: `{config_path}`",
+        f"- Output Dir: `{output_dir}`",
+        f"- Python: {sys.version.split()[0]}",
+        f"- Systems: {', '.join(systems)}",
+        f"- Scenario Families: {', '.join(scenario_families)}",
+        f"- Customer Seed Account: `{auth_cfg.customer_email}`",
+        f"- Merchant Seed Account: `{auth_cfg.merchant_email}`",
         "",
-        "## 数据集文件",
+        "## Dataset Files",
         render_markdown_table([{"scenario_family": family, "path": str(path)} for family, path in dataset_files.items()]),
         "",
-        "## 系统矩阵",
+        "## Expected Unique Samples",
+        render_markdown_table(expected_unique_rows),
+        "",
+        "## Prompt Versions",
+        render_markdown_table(prompt_versions),
+        "",
+        "## System Matrix",
         render_markdown_table(matrix_rows),
         "",
-        "## 批次摘要",
+        "## Summary",
         render_markdown_table(summary_rows),
         "",
-        "## 场景质量",
+        "## Scenario Quality",
         render_markdown_table(quality_rows),
         "",
-        "## 能力覆盖",
+        "## Capability Coverage",
         render_markdown_table(capability_rows),
     ]
     return "\n".join(lines)
@@ -1373,14 +1667,18 @@ async def execute_benchmark(args: argparse.Namespace) -> Path:
     selected_families = parse_csv_values(args.scenarios) or list(DEFAULT_SCENARIO_FAMILIES)
     profile_cfg = config.get("profiles", {}).get(args.profile)
     if not isinstance(profile_cfg, dict):
-        raise RuntimeError(f"Profile 不存在：{args.profile}")
+        raise RuntimeError(f"Profile �����ڣ�{args.profile}")
     dataset_tier = (args.dataset_tier or str(profile_cfg.get("dataset_tier") or "core")).strip()
+    selection_mode = resolve_selection_mode(args.profile, profile_cfg)
     scenario_families = list(profile_cfg.get("scenarios") or selected_families)
     if args.scenarios.strip():
         scenario_families = selected_families
     system_targets = resolve_system_targets(config, selected_systems)
     dataset_files = resolve_dataset_files(args.dataset, dataset_tier, scenario_families)
-    dataset_map = {family: load_dataset_file(path) for family, path in dataset_files.items()}
+    dataset_map = {
+        family: [sample for sample in load_dataset_file(path) if sample_allowed_for_profile(sample, args.profile)]
+        for family, path in dataset_files.items()
+    }
     concurrency_levels = parse_concurrency_override(args.concurrency) or [int(item) for item in profile_cfg.get("concurrency", []) if int(item) > 0]
     requests_per_level = int(args.requests_per_level) if args.requests_per_level is not None else int(profile_cfg.get("requests_per_level", 1))
     repeats = int(args.repeats) if args.repeats is not None else int(profile_cfg.get("repeats", 1))
@@ -1391,12 +1689,16 @@ async def execute_benchmark(args: argparse.Namespace) -> Path:
     results_root = args.results_root if args.results_root is not None else (ROOT_DIR / configured_results_root)
     if not results_root.is_absolute():
         results_root = (ROOT_DIR / results_root).resolve()
-    output_dir = results_root / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{args.profile}_system_benchmark"
+    run_id = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{args.profile}_system_benchmark"
+    output_dir = results_root / run_id
     output_dir.mkdir(parents=True, exist_ok=True)
+    prompt_versions = collect_prompt_versions()
+    sample_universe_rows = [build_sample_metadata_row(sample) for family in scenario_families for sample in dataset_map.get(family, [])]
+    expected_sample_rows: list[dict[str, Any]] = []
 
     all_conversations: list[ConversationEvent] = []
     all_turns: list[TurnEvent] = []
-    async with httpx.AsyncClient(timeout=timeout_sec) as client:
+    async with httpx.AsyncClient(timeout=timeout_sec, trust_env=False) as client:
         for system_name, system in system_targets.items():
             if args.verbose:
                 print(f"[benchmark] system={system_name}")
@@ -1409,7 +1711,7 @@ async def execute_benchmark(args: argparse.Namespace) -> Path:
                 ),
                 next(iter(dataset_map.values()))[0],
             )
-            await warmup_system(client, system, warmup_sample, auth_cfg, config, warmup_requests)
+            await warmup_system(client, system, warmup_sample, auth_cfg, config, warmup_requests, run_id)
             for family in scenario_families:
                 samples = dataset_map[family]
                 for repeat in range(1, repeats + 1):
@@ -1418,6 +1720,20 @@ async def execute_benchmark(args: argparse.Namespace) -> Path:
                             samples,
                             requests_per_level,
                             seed + repeat * 97 + concurrency * 17 + sum(ord(ch) for ch in system_name + family),
+                            selection_mode=selection_mode,
+                            repeat=repeat,
+                        )
+                        expected_sample_rows.extend(
+                            [
+                                build_expected_sample_row(
+                                    system=system_name,
+                                    sample=sample,
+                                    repeat=repeat,
+                                    concurrency=concurrency,
+                                    selection_mode=selection_mode,
+                                )
+                                for sample in planned
+                            ]
                         )
                         batch_conversations, batch_turns = await execute_batch(
                             client=client,
@@ -1427,6 +1743,7 @@ async def execute_benchmark(args: argparse.Namespace) -> Path:
                             config=config,
                             repeat=repeat,
                             concurrency=concurrency,
+                            run_id=run_id,
                         )
                         all_conversations.extend(batch_conversations)
                         all_turns.extend(batch_turns)
@@ -1448,6 +1765,24 @@ async def execute_benchmark(args: argparse.Namespace) -> Path:
     write_csv(output_dir / "conversation_summary.csv", conversation_rows)
     write_csv(output_dir / "capability_coverage.csv", capability_rows)
     write_csv(output_dir / "system_matrix.csv", matrix_rows)
+    write_json(output_dir / "prompt_versions.json", {"items": prompt_versions}, indent=2)
+    write_json(
+        output_dir / "run_metadata.json",
+        {
+            "profile": args.profile,
+            "selection_mode": selection_mode,
+            "dataset_tier": dataset_tier,
+            "scenario_families": scenario_families,
+            "dataset_files": {family: str(path) for family, path in dataset_files.items()},
+            "systems": list(system_targets.keys()),
+            "repeats": repeats,
+            "requests_per_level": requests_per_level,
+            "concurrency_levels": concurrency_levels,
+            "sample_universe": sample_universe_rows,
+            "expected_samples": expected_sample_rows,
+        },
+        indent=2,
+    )
     (output_dir / "report.md").write_text(
         build_report(
             output_dir=output_dir,
@@ -1457,11 +1792,14 @@ async def execute_benchmark(args: argparse.Namespace) -> Path:
             scenario_families=scenario_families,
             profile=args.profile,
             dataset_tier=dataset_tier,
+            selection_mode=selection_mode,
             auth_cfg=auth_cfg,
             summary_rows=summary_rows,
             quality_rows=quality_rows,
             matrix_rows=matrix_rows,
             capability_rows=capability_rows,
+            prompt_versions=prompt_versions,
+            expected_sample_rows=expected_sample_rows,
         ),
         encoding="utf-8",
     )
