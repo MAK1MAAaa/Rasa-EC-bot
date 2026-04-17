@@ -41,10 +41,167 @@ GRID_COLOR = "#d0d7de"
 TEXT_COLOR = "#1f2328"
 SUBTLE_TEXT_COLOR = "#57606a"
 BACKGROUND_COLOR = "#ffffff"
+REPORT_FIELD_LABELS = {
+    "name": "提示词名称",
+    "path": "文件路径",
+    "sha256": "SHA-256",
+    "rank": "名次",
+    "suite": "套件键",
+    "suite_label": "套件",
+    "system": "系统键",
+    "system_label": "系统",
+    "is_target_system": "是否正式参赛系统",
+    "scenario_family": "场景族键",
+    "scenario_label": "场景族",
+    "expected_unique_samples": "预期唯一样本数",
+    "executed_unique_samples": "实际执行唯一样本数",
+    "coverage_rate": "覆盖率",
+    "missing_sample_ids": "缺失样本 ID",
+    "suite_family_macro_pass_rate": "场景族等权通过率",
+    "suite_unique_micro_pass_rate": "去重样本微平均通过率",
+    "suite_unique_micro_pass_rate_ci_low": "微平均通过率置信区间下界",
+    "suite_unique_micro_pass_rate_ci_high": "微平均通过率置信区间上界",
+    "suite_family_macro_success_rate": "场景族等权成功率",
+    "eligibility_rate": "可评分样本占比",
+    "repeat_stability": "重复稳定性",
+    "suite_pass_rate": "原始轮次通过率",
+    "family_unique_samples": "场景族唯一样本数",
+    "family_pass_rate": "场景族通过率",
+    "family_success_rate": "场景族成功率",
+    "family_eligibility_rate": "场景族可评分占比",
+    "leader_system_label": "领先系统",
+    "runner_up_system_label": "第二名系统",
+    "leader_rate": "领先系统微平均通过率",
+    "runner_up_rate": "第二名微平均通过率",
+    "gap_note": "领先差距稳定性",
+    "leader_status": "领先状态",
+    "leader_system": "领先系统键",
+    "leader_family_pass_rate": "领先场景族通过率",
+    "leader_family_success_rate": "领先场景族成功率",
+    "leader_coverage_rate": "领先系统覆盖率",
+    "primary_failure_reason": "主失败原因键",
+    "primary_failure_label": "主失败原因",
+    "count": "次数",
+    "failure_rate": "失败占比",
+    "failed_supported_conversations": "失败且可评分会话数",
+    "unsupported_conversations": "不支持会话数",
+    "missing_required_keywords": "缺少必需关键词",
+    "contains_forbidden_keywords": "包含禁用关键词",
+    "missing_required_cards": "缺少必需卡片",
+    "missing_required_actions": "缺少必需动作",
+    "missing_confirmation_buttons": "缺少确认按钮",
+    "missing_order_id": "缺少订单号",
+    "hallucinated_order_id": "幻觉订单号",
+    "login_block_failure": "登录拦截失败",
+    "image_flow_failure": "图片流程失败",
+    "pending_decision_failure": "待确认动作失败",
+    "technical_failure": "技术失败",
+    "format_error": "格式不达标",
+}
+FIELD_GLOSSARY_ROWS = [
+    {
+        "英文字段 ID": "suite_family_macro_pass_rate",
+        "中文含义": "套件场景族等权通过率",
+        "统计口径": "正式主指标。先计算 `sample_pass_rate`，再在每个场景族内部对样本求平均，最后对各场景族等权平均。",
+    },
+    {
+        "英文字段 ID": "suite_unique_micro_pass_rate",
+        "中文含义": "套件去重样本微平均通过率",
+        "统计口径": "对套件内所有唯一样本的 `sample_pass_rate` 直接平均，用于正式排序第二关键字。",
+    },
+    {
+        "英文字段 ID": "suite_unique_micro_pass_rate_ci_low",
+        "中文含义": "微平均通过率 95% Wilson 置信区间下界",
+        "统计口径": "基于 `suite_unique_micro_pass_rate` 和唯一样本数计算，仅用于判断领先差距是否稳定，不参与正式排序。",
+    },
+    {
+        "英文字段 ID": "suite_unique_micro_pass_rate_ci_high",
+        "中文含义": "微平均通过率 95% Wilson 置信区间上界",
+        "统计口径": "基于 `suite_unique_micro_pass_rate` 和唯一样本数计算，仅用于判断领先差距是否稳定，不参与正式排序。",
+    },
+    {
+        "英文字段 ID": "suite_family_macro_success_rate",
+        "中文含义": "套件场景族等权成功率",
+        "统计口径": "把 `conversation_success` 的样本聚合结果按场景族等权平均，用于正式排序第三关键字。",
+    },
+    {
+        "英文字段 ID": "eligibility_rate",
+        "中文含义": "可评分样本占比",
+        "统计口径": "去重样本中至少有一次 `supported` 轮次的比例，反映系统能力适配情况。",
+    },
+    {
+        "英文字段 ID": "coverage_rate",
+        "中文含义": "样本覆盖率",
+        "统计口径": "`executed_unique_samples / expected_unique_samples`，用于检查正式评测是否漏跑样本。",
+    },
+    {
+        "英文字段 ID": "repeat_stability",
+        "中文含义": "重复稳定性",
+        "统计口径": "同一样本多次 `repeat` 时，`pass/fail` 是否稳定一致；`1.0` 表示完全稳定。",
+    },
+    {
+        "英文字段 ID": "suite_pass_rate",
+        "中文含义": "原始轮次通过率",
+        "统计口径": "保留为调试字段，不再参与正式排名，避免重复 `attempt` 放大得分。",
+    },
+    {
+        "英文字段 ID": "primary_failure_reason",
+        "中文含义": "主失败原因",
+        "统计口径": "互斥失败标签，按固定优先级选主因，仅用于独占失败统计和饼图。",
+    },
+    {
+        "英文字段 ID": "failure_flags.csv",
+        "中文含义": "多标签失败诊断统计",
+        "统计口径": "保留所有失败标签的累计次数，用于诊断，不参与正式排名。",
+    },
+    {
+        "英文字段 ID": "missing_sample_ids",
+        "中文含义": "缺失样本 ID",
+        "统计口径": "预期应跑但未执行到的 `sample_id` 列表；覆盖率异常时优先检查这里。",
+    },
+    {
+        "英文字段 ID": "leader_status",
+        "中文含义": "场景领先状态",
+        "统计口径": "当某场景族的最高 `family_pass_rate` 仍为 0 时，输出 `no_pass`，表示该场景族没有可宣称的领先系统。",
+    },
+]
+REPORT_VALUE_LABELS: dict[str, dict[str, str]] = {
+    "leader_status": {
+        "leader": "有领先系统",
+        "no_pass": "无人通过",
+    },
+}
+
+
+def render_markdown_table(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return "_无数据_"
+    headers = list(rows[0].keys())
+    lines = [
+        "| " + " | ".join(headers) + " |",
+        "| " + " | ".join(["---"] * len(headers)) + " |",
+    ]
+    for row in rows:
+        lines.append("| " + " | ".join(str(row.get(header, "")) for header in headers) + " |")
+    return "\n".join(lines)
+
+
+def _rename_rows(rows: list[dict[str, Any]], mapping: dict[str, str] | None = None) -> list[dict[str, Any]]:
+    mapping = mapping or REPORT_FIELD_LABELS
+    renamed: list[dict[str, Any]] = []
+    for row in rows:
+        localized_row: dict[str, Any] = {}
+        for key, value in row.items():
+            key_str = str(key)
+            if key_str in REPORT_VALUE_LABELS:
+                value = REPORT_VALUE_LABELS[key_str].get(str(value), value)
+            localized_row[mapping.get(key_str, key_str)] = value
+        renamed.append(localized_row)
+    return renamed
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Analyze benchmark result directory.")
+    parser = argparse.ArgumentParser(description="分析 benchmark 结果目录并生成中文报告与图表。")
     parser.add_argument("--result-dir", type=Path, required=True)
     parser.add_argument("--labels", type=Path, default=DEFAULT_LABELS_PATH)
     return parser.parse_args()
@@ -71,6 +228,14 @@ def _series_bool(series: pd.Series) -> pd.Series:
 
 def _series_number(series: pd.Series) -> pd.Series:
     return pd.to_numeric(series, errors="coerce").fillna(0.0)
+
+
+def _first_nonempty_text(values: pd.Series, default: str) -> str:
+    for value in values.tolist():
+        text = str(value).strip()
+        if text and text.lower() != "nan":
+            return text
+    return default
 
 
 def _slugify(value: str) -> str:
@@ -656,7 +821,7 @@ def _build_confidence_notes(suite_metrics: pd.DataFrame, labels: dict[str, Any])
                     "runner_up_system_label": "",
                     "leader_rate": leader["suite_unique_micro_pass_rate"],
                     "runner_up_rate": "",
-                    "gap_note": "Not enough systems to assess stability",
+                "gap_note": "参赛系统不足，暂时无法判断领先差距是否稳定",
                 }
             )
             continue
@@ -671,7 +836,7 @@ def _build_confidence_notes(suite_metrics: pd.DataFrame, labels: dict[str, Any])
                 "runner_up_system_label": runner_up["system_label"],
                 "leader_rate": leader["suite_unique_micro_pass_rate"],
                 "runner_up_rate": runner_up["suite_unique_micro_pass_rate"],
-                "gap_note": "Wilson 95% CI separated" if separated else "Wilson 95% CI overlaps",
+                "gap_note": "95% Wilson 置信区间不重叠，领先差距相对稳定" if separated else "95% Wilson 置信区间重叠，领先差距暂不稳定",
             }
         )
     return pd.DataFrame(rows).sort_values(["suite"]).reset_index(drop=True)
@@ -694,10 +859,10 @@ def _build_suite_chart_svg(*, suite_metrics: pd.DataFrame, suite: str, labels: d
     height = top + plot_height + bottom
     max_value = max(1.0, float(scoped["suite_family_macro_pass_rate"].max()))
     lines = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" role="img" aria-label="{escape(suite_label)} ranking">',
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" role="img" aria-label="{escape(suite_label)}正式排名图">',
         f'<rect width="{width}" height="{height}" fill="{BACKGROUND_COLOR}" />',
-        f'<text x="40" y="42" font-size="28" font-weight="700" fill="{TEXT_COLOR}">{escape(suite_label)} ranking</text>',
-        f'<text x="40" y="70" font-size="14" fill="{SUBTLE_TEXT_COLOR}">Primary metric: suite_family_macro_pass_rate.</text>',
+        f'<text x="40" y="42" font-size="28" font-weight="700" fill="{TEXT_COLOR}">{escape(suite_label)}正式排名图</text>',
+        f'<text x="40" y="70" font-size="14" fill="{SUBTLE_TEXT_COLOR}">主指标：suite_family_macro_pass_rate（场景族等权通过率）。</text>',
     ]
     for tick in range(5):
         ratio = tick / 4
@@ -709,13 +874,13 @@ def _build_suite_chart_svg(*, suite_metrics: pd.DataFrame, suite: str, labels: d
         bar_y = y + 24
         label = str(row.system_label)
         if not bool(row.is_target_system):
-            label = f"{label} (baseline)"
+            label = f"{label}（基线）"
         bar_length = 0.0 if max_value <= 0 else plot_width * float(row.suite_family_macro_pass_rate) / max_value
         note = (
-            f"macro { _format_percent(row.suite_family_macro_pass_rate) } | "
-            f"micro { _format_percent(row.suite_unique_micro_pass_rate) } | "
-            f"coverage { _format_percent(row.coverage_rate) } | "
-            f"stability { _format_percent(row.repeat_stability) }"
+            f"等权通过率 { _format_percent(row.suite_family_macro_pass_rate) } | "
+            f"微平均 { _format_percent(row.suite_unique_micro_pass_rate) } | "
+            f"覆盖率 { _format_percent(row.coverage_rate) } | "
+            f"重复稳定性 { _format_percent(row.repeat_stability) }"
         )
         lines.extend(
             [
@@ -758,10 +923,10 @@ def _build_exclusive_failure_pie_svg(*, failure_breakdown: pd.DataFrame) -> str 
     legend_x = 470
     legend_y = 130
     lines = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" role="img" aria-label="exclusive failure pie">',
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" role="img" aria-label="独占主失败原因分布饼图">',
         f'<rect width="{width}" height="{height}" fill="{BACKGROUND_COLOR}" />',
-        f'<text x="40" y="42" font-size="28" font-weight="700" fill="{TEXT_COLOR}">Exclusive failure reasons</text>',
-        f'<text x="40" y="70" font-size="14" fill="{SUBTLE_TEXT_COLOR}">The pie total equals the failed conversation count.</text>',
+        f'<text x="40" y="42" font-size="28" font-weight="700" fill="{TEXT_COLOR}">独占主失败原因分布</text>',
+        f'<text x="40" y="70" font-size="14" fill="{SUBTLE_TEXT_COLOR}">饼图总数等于失败会话数。</text>',
     ]
     current_angle = -90.0
     for index, (label, value) in enumerate(slices):
@@ -779,7 +944,7 @@ def _build_exclusive_failure_pie_svg(*, failure_breakdown: pd.DataFrame) -> str 
     lines.extend(
         [
             f'<circle cx="{center_x}" cy="{center_y}" r="74" fill="{BACKGROUND_COLOR}" />',
-            f'<text x="{center_x}" y="{center_y - 4}" text-anchor="middle" font-size="16" font-weight="700" fill="{TEXT_COLOR}">Failures</text>',
+            f'<text x="{center_x}" y="{center_y - 4}" text-anchor="middle" font-size="16" font-weight="700" fill="{TEXT_COLOR}">失败会话</text>',
             f'<text x="{center_x}" y="{center_y + 24}" text-anchor="middle" font-size="28" font-weight="700" fill="{TEXT_COLOR}">{total}</text>',
             "</svg>",
         ]
@@ -806,10 +971,10 @@ def _build_failure_flags_bar_svg(*, failure_flags: pd.DataFrame, labels: dict[st
     height = top + plot_height + bottom
     max_value = max(value for _, value in totals)
     lines = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" role="img" aria-label="failure flags bar">',
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" role="img" aria-label="多标签失败诊断柱状图">',
         f'<rect width="{width}" height="{height}" fill="{BACKGROUND_COLOR}" />',
-        f'<text x="40" y="42" font-size="28" font-weight="700" fill="{TEXT_COLOR}">Multi-label failure flags</text>',
-        f'<text x="40" y="70" font-size="14" fill="{SUBTLE_TEXT_COLOR}">Diagnostic counts only.</text>',
+        f'<text x="40" y="42" font-size="28" font-weight="700" fill="{TEXT_COLOR}">多标签失败诊断</text>',
+        f'<text x="40" y="70" font-size="14" fill="{SUBTLE_TEXT_COLOR}">仅用于诊断，不参与正式排名。</text>',
     ]
     for index, (label, value) in enumerate(totals):
         y = top + index * row_height
@@ -838,17 +1003,17 @@ def _build_chart_artifacts(*, analysis_dir: Path, suite_metrics: pd.DataFrame, f
             continue
         filename = f"{_slugify(suite)}_ranking.svg"
         _write_svg(charts_dir / filename, svg)
-        artifacts.append({"title": f"{_label_of(suite_labels, suite)} ranking", "path": f"charts/{filename}"})
+        artifacts.append({"title": f"{_label_of(suite_labels, suite)}正式排名图", "path": f"charts/{filename}"})
     pie_svg = _build_exclusive_failure_pie_svg(failure_breakdown=failure_breakdown)
     if pie_svg is not None:
         filename = "exclusive_failure_pie.svg"
         _write_svg(charts_dir / filename, pie_svg)
-        artifacts.append({"title": "Exclusive failure pie", "path": f"charts/{filename}"})
+        artifacts.append({"title": "独占主失败原因分布饼图", "path": f"charts/{filename}"})
     bar_svg = _build_failure_flags_bar_svg(failure_flags=failure_flags, labels=labels)
     if bar_svg is not None:
         filename = "failure_flags_bar.svg"
         _write_svg(charts_dir / filename, bar_svg)
-        artifacts.append({"title": "Failure flags bar", "path": f"charts/{filename}"})
+        artifacts.append({"title": "多标签失败诊断柱状图", "path": f"charts/{filename}"})
     return artifacts
 
 
@@ -859,79 +1024,106 @@ def _table_subset(frame: pd.DataFrame, columns: list[str]) -> list[dict[str, Any
     return frame[keep].to_dict(orient="records")
 
 
+def _render_localized_table(frame: pd.DataFrame, columns: list[str]) -> str:
+    return render_markdown_table(_rename_rows(_table_subset(frame, columns)))
+
+
+def _render_localized_rows(rows: list[dict[str, Any]]) -> str:
+    return render_markdown_table(_rename_rows(rows))
+
+
 def _render_report(*, analysis_dir: Path, metadata: dict[str, Any], suite_metrics: pd.DataFrame, family_metrics: pd.DataFrame, sample_coverage: pd.DataFrame, scenario_leaders: pd.DataFrame, failure_breakdown: pd.DataFrame, failure_flags: pd.DataFrame, confidence_notes: pd.DataFrame, prompt_versions: list[dict[str, str]], chart_artifacts: list[dict[str, str]]) -> str:
     shared_core_rows = suite_metrics[(suite_metrics["suite"] == "shared_core") & (suite_metrics["is_target_system"])]
     agent_target_rows = suite_metrics[(suite_metrics["suite"] == "agent_extension") & (suite_metrics["is_target_system"])]
     agent_baseline_rows = suite_metrics[(suite_metrics["suite"] == "agent_extension") & (~suite_metrics["is_target_system"])]
     repeat_rows = suite_metrics[["suite_label", "system_label", "repeat_stability", "suite_unique_micro_pass_rate", "suite_unique_micro_pass_rate_ci_low", "suite_unique_micro_pass_rate_ci_high"]] if not suite_metrics.empty else pd.DataFrame()
+    shared_core_label = _first_nonempty_text(suite_metrics.loc[suite_metrics["suite"] == "shared_core", "suite_label"], "共享核心能力") if "suite_label" in suite_metrics.columns else "共享核心能力"
+    agent_extension_label = _first_nonempty_text(suite_metrics.loc[suite_metrics["suite"] == "agent_extension", "suite_label"], "智能体扩展能力") if "suite_label" in suite_metrics.columns else "智能体扩展能力"
+    profile_label = {
+        "quick": "快速冒烟",
+        "standard": "标准全量",
+        "paper": "论文全量",
+    }.get(str(metadata.get("profile", "")), str(metadata.get("profile", "")))
+    selection_mode_label = {
+        "sampled": "抽样轮询",
+        "all_unique": "全量唯一样本",
+    }.get(str(metadata.get("selection_mode", "")), str(metadata.get("selection_mode", "")))
+    metadata_source = {
+        "run_metadata": "运行元数据文件",
+        "fallback_config": "实验配置回推",
+    }.get(str(metadata.get("metadata_source", "unknown")), str(metadata.get("metadata_source", "unknown")))
     lines = [
-        "# Benchmark Analysis Report",
+        "# 基准测试结果分析报告",
         "",
-        f"Result Dir: `{analysis_dir.parent}`",
-        f"Profile: `{metadata.get('profile', '')}`",
-        f"Selection Mode: `{metadata.get('selection_mode', '')}`",
-        f"Metadata Source: `{metadata.get('metadata_source', 'unknown')}`",
+        f"结果目录：`{analysis_dir.parent}`",
+        f"评测档位：`{profile_label}`",
+        f"抽样模式：`{selection_mode_label}`",
+        f"元数据来源：`{metadata_source}`",
         "",
-        "Ranking rule: `suite_family_macro_pass_rate > suite_unique_micro_pass_rate > suite_family_macro_success_rate > eligibility_rate`.",
-        "`suite_pass_rate` is preserved as a raw attempt debug field only.",
+        "正式排名按 `suite_family_macro_pass_rate`、`suite_unique_micro_pass_rate`、`suite_family_macro_success_rate`、`eligibility_rate` 依次决胜。",
+        "`suite_pass_rate` 仅保留为原始轮次调试字段，不参与正式排序。",
         "",
     ]
     if prompt_versions:
-        lines.extend(["## Prompt Versions", "", render_markdown_table(prompt_versions), ""])
+        lines.extend(["## 提示词版本", "", _render_localized_rows(prompt_versions), ""])
     if chart_artifacts:
-        lines.extend(["## Charts", ""])
+        lines.extend(["## 图表", ""])
         for chart in chart_artifacts:
             lines.extend([f"### {chart['title']}", "", f"![{chart['title']}]({chart['path']})", ""])
     lines.extend(
         [
-            "## Coverage",
+            "## 样本覆盖情况",
             "",
-            render_markdown_table(_table_subset(sample_coverage, ["suite_label", "system_label", "scenario_label", "expected_unique_samples", "executed_unique_samples", "coverage_rate", "missing_sample_ids"])),
+            _render_localized_table(sample_coverage, ["suite_label", "system_label", "scenario_label", "expected_unique_samples", "executed_unique_samples", "coverage_rate", "missing_sample_ids"]),
             "",
-            "## shared_core Ranking",
+            f"## 正式排名：{shared_core_label}",
             "",
-            render_markdown_table(_table_subset(shared_core_rows, ["rank", "system_label", "expected_unique_samples", "executed_unique_samples", "coverage_rate", "suite_family_macro_pass_rate", "suite_unique_micro_pass_rate", "suite_unique_micro_pass_rate_ci_low", "suite_unique_micro_pass_rate_ci_high", "suite_family_macro_success_rate", "eligibility_rate", "repeat_stability", "suite_pass_rate"])),
+            _render_localized_table(shared_core_rows, ["rank", "system_label", "expected_unique_samples", "executed_unique_samples", "coverage_rate", "suite_family_macro_pass_rate", "suite_unique_micro_pass_rate", "suite_unique_micro_pass_rate_ci_low", "suite_unique_micro_pass_rate_ci_high", "suite_family_macro_success_rate", "eligibility_rate", "repeat_stability", "suite_pass_rate"]),
             "",
-            "## agent_extension Ranking",
+            f"## 正式排名：{agent_extension_label}",
             "",
-            render_markdown_table(_table_subset(agent_target_rows, ["rank", "system_label", "expected_unique_samples", "executed_unique_samples", "coverage_rate", "suite_family_macro_pass_rate", "suite_unique_micro_pass_rate", "suite_unique_micro_pass_rate_ci_low", "suite_unique_micro_pass_rate_ci_high", "suite_family_macro_success_rate", "eligibility_rate", "repeat_stability", "suite_pass_rate"])),
+            _render_localized_table(agent_target_rows, ["rank", "system_label", "expected_unique_samples", "executed_unique_samples", "coverage_rate", "suite_family_macro_pass_rate", "suite_unique_micro_pass_rate", "suite_unique_micro_pass_rate_ci_low", "suite_unique_micro_pass_rate_ci_high", "suite_family_macro_success_rate", "eligibility_rate", "repeat_stability", "suite_pass_rate"]),
             "",
         ]
     )
     if not agent_baseline_rows.empty:
-        lines.extend(["### agent_extension Baseline", "", render_markdown_table(_table_subset(agent_baseline_rows, ["system_label", "coverage_rate", "suite_family_macro_pass_rate", "suite_unique_micro_pass_rate", "suite_family_macro_success_rate", "eligibility_rate", "repeat_stability", "suite_pass_rate"])), ""])
+        lines.extend([f"### {agent_extension_label}基线（仅作参考）", "", _render_localized_table(agent_baseline_rows, ["system_label", "coverage_rate", "suite_family_macro_pass_rate", "suite_unique_micro_pass_rate", "suite_family_macro_success_rate", "eligibility_rate", "repeat_stability", "suite_pass_rate"]), ""])
     lines.extend(
         [
-            "## Family Metrics",
+            "## 场景族分项结果",
             "",
-            render_markdown_table(_table_subset(family_metrics, ["suite_label", "scenario_label", "system_label", "family_unique_samples", "executed_unique_samples", "coverage_rate", "family_pass_rate", "family_success_rate", "family_eligibility_rate"])),
+            _render_localized_table(family_metrics, ["suite_label", "scenario_label", "system_label", "family_unique_samples", "executed_unique_samples", "coverage_rate", "family_pass_rate", "family_success_rate", "family_eligibility_rate"]),
             "",
-            "## Stability And CI Notes",
+            "## 重复稳定性与置信区间",
             "",
-            render_markdown_table(repeat_rows.to_dict(orient="records")),
+            _render_localized_table(repeat_rows, ["suite_label", "system_label", "repeat_stability", "suite_unique_micro_pass_rate", "suite_unique_micro_pass_rate_ci_low", "suite_unique_micro_pass_rate_ci_high"]),
             "",
-            render_markdown_table(confidence_notes.to_dict(orient="records")),
+            _render_localized_table(confidence_notes, ["suite_label", "leader_system_label", "runner_up_system_label", "leader_rate", "runner_up_rate", "gap_note"]),
             "",
-            "## Scenario Leaders",
+            "## 字段说明",
             "",
-            render_markdown_table(scenario_leaders.to_dict(orient="records")),
+            render_markdown_table(FIELD_GLOSSARY_ROWS),
             "",
-            "## Exclusive Failure Breakdown",
+            "## 场景族领先者",
             "",
-            render_markdown_table(failure_breakdown.to_dict(orient="records")),
+            _render_localized_table(scenario_leaders, ["suite_label", "scenario_label", "leader_status", "leader_system_label", "leader_family_pass_rate", "leader_family_success_rate", "leader_coverage_rate"]),
             "",
-            "## Multi-label Failure Flags",
+            "## 独占主失败原因统计",
             "",
-            render_markdown_table(failure_flags.to_dict(orient="records")),
+            _render_localized_table(failure_breakdown, ["suite_label", "system_label", "primary_failure_label", "count", "failure_rate"]),
             "",
-            "## Notes",
+            "## 多标签失败诊断",
             "",
-            "- Coverage uses expected unique sample ids.",
-            "- `leader_status = no_pass` means no system achieved a positive family pass rate.",
-            "- Wilson 95% CI is used for stability notes only.",
-            "- `failure_breakdown.csv` is exclusive; `failure_flags.csv` keeps multi-label diagnostics.",
+            _render_localized_table(failure_flags, ["suite_label", "system_label", "failed_supported_conversations", "unsupported_conversations", *MULTI_LABEL_FAILURE_COLUMNS]),
             "",
-            f"Analysis Dir: `{analysis_dir}`",
+            "## 统计说明",
+            "",
+            "- 覆盖率基于预期唯一样本数计算。",
+            "- `leader_status = no_pass` 表示该场景族没有任何系统取得正的 `family_pass_rate`。",
+            "- 95% Wilson 置信区间仅用于判断领先差距是否稳定，不直接改变正式名次。",
+            "- `failure_breakdown.csv` 使用互斥主失败原因；`failure_flags.csv` 保留多标签诊断统计。",
+            "",
+            f"分析输出目录：`{analysis_dir}`",
         ]
     )
     return "\n".join(lines)

@@ -26,7 +26,7 @@
 | `sql/reset_benchmark_state.sql` | 基线状态重置 SQL |
 | `scripts/build_dataset.py` | 重建数据集与 manifest |
 | `scripts/run_benchmark.py` | 执行 benchmark |
-| `scripts/analyze_results.py` | 分析一次运行结果 |
+| `scripts/analyze_results.py` | 分析一次运行结果，生成中文报告、图表和字段说明 |
 | `src/benchmark/` | benchmark 核心实现 |
 | `tests/` | benchmark 单测 |
 
@@ -301,6 +301,8 @@ uv run python scripts/analyze_results.py --result-dir results/<run_id>
 - `charts/exclusive_failure_pie.svg`
 - `charts/failure_flags_bar.svg`
 - `report.md`
+
+`analysis/report.md` 现在会输出中文章节标题、中文表头与中文图表标题，并优先隐藏调试键列；英文字段 ID 会集中放在字段说明里解释，方便直接阅读和写实验结论。
 
 ## 正式排名口径
 

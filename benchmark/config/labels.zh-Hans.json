@@ -6,7 +6,7 @@
   },
   "suites": {
     "shared_core": "共享核心能力",
-    "agent_extension": "Agent 扩展能力"
+    "agent_extension": "智能体扩展能力"
   },
   "scenarios": {
     "recommendation": "推荐",
@@ -18,7 +18,7 @@
   },
   "failures": {
     "unsupported": "能力不支持",
-    "technical_failure": "技术失败 / HTTP 错误",
+    "technical_failure": "技术失败或 HTTP 错误",
     "image_flow_failure": "图片流程失败",
     "pending_decision_failure": "待确认动作失败",
     "hallucinated_order_id": "幻觉订单号",

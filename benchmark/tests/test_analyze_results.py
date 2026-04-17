@@ -390,10 +390,10 @@ class AnalyzeResultsTests(unittest.TestCase):
             self.assertEqual(shared_flag_row["technical_failure"], "1")
 
             report_text = (analysis_dir / "report.md").read_text(encoding="utf-8")
-            self.assertIn("Coverage", report_text)
-            self.assertIn("## shared_core Ranking", report_text)
-            self.assertIn("## Family Metrics", report_text)
-            self.assertIn("## Stability And CI Notes", report_text)
+            self.assertIn("## 样本覆盖情况", report_text)
+            self.assertIn("## 正式排名：Shared Core", report_text)
+            self.assertIn("## 场景族分项结果", report_text)
+            self.assertIn("## 重复稳定性与置信区间", report_text)
 
     def test_analyze_result_dir_generates_new_metrics_and_charts(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -798,10 +798,10 @@ class AnalyzeResultsTests(unittest.TestCase):
             self.assertEqual(shared_flag_row["technical_failure"], "1")
 
             report_text = (analysis_dir / "report.md").read_text(encoding="utf-8")
-            self.assertIn("Coverage", report_text)
-            self.assertIn("## shared_core Ranking", report_text)
-            self.assertIn("## Family Metrics", report_text)
-            self.assertIn("## Stability And CI Notes", report_text)
+            self.assertIn("## 样本覆盖情况", report_text)
+            self.assertIn("## 正式排名：Shared Core", report_text)
+            self.assertIn("## 场景族分项结果", report_text)
+            self.assertIn("## 重复稳定性与置信区间", report_text)
 
 
 if __name__ == "__main__":
