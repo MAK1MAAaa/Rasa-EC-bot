@@ -22,6 +22,58 @@
 - [benchmark/README.md](benchmark/README.md)
 - [tests/README.md](tests/README.md)
 
+## 常用入口命令
+
+完整启动顺序和依赖说明分别维护在各子模块 README 中，这里只保留最常用的进入命令。
+
+### Windows
+
+```powershell
+cd frontend
+pnpm install
+pnpm dev
+```
+
+```powershell
+cd backend
+Copy-Item .env.sample .env
+uv sync
+```
+
+```powershell
+cd rasa
+uv sync
+```
+
+```powershell
+cd benchmark
+uv sync
+```
+
+### macOS / Linux
+
+```bash
+cd frontend
+pnpm install
+pnpm dev
+```
+
+```bash
+cd backend
+cp .env.sample .env
+uv sync
+```
+
+```bash
+cd rasa
+uv sync
+```
+
+```bash
+cd benchmark
+uv sync
+```
+
 ## 常用端口
 
 | 服务 | 端口 | 说明 |
@@ -45,3 +97,4 @@
 - 后端 agent prompt 已外置到 `backend/prompts/*.md`，benchmark 运行结果会记录 prompt 文件路径与 hash。
 - 主线 Rasa 训练数据位于 `rasa/data/main/`，benchmark 基线继续使用 `rasa/data/nlu.yml` 快照，二者隔离维护。
 - 登录用户的服务端记忆以 PostgreSQL 为主存储，Markdown 文件落在 `backend/data/chat_memory/`，仅作为派生产物。
+- 后端商品推荐已补上显式预算、颜色和常见规格词（如 `Type-C`、`27 寸`）的约束解析与候选过滤，避免把不满足条件的商品混进推荐结果。

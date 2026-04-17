@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import importlib.util
 import sys
 import tempfile
@@ -120,6 +121,10 @@ class ChatMemoryLogicTests(unittest.TestCase):
                 context_file_exists=True,
             )
         )
+
+    def test_refresh_snapshot_sql_casts_session_id_for_asyncpg(self) -> None:
+        source = inspect.getsource(MEMORY_MODULE.refresh_chat_memory_artifacts)
+        self.assertIn("CAST(:session_id AS varchar)", source)
 
 
 if __name__ == "__main__":

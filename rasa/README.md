@@ -16,28 +16,64 @@
 
 ## 安装依赖
 
+Windows：
+
 ```powershell
+cd rasa
+uv sync
+```
+
+macOS / Linux：
+
+```bash
 cd rasa
 uv sync
 ```
 
 ## 训练主线模型
 
+Windows：
+
 ```powershell
+cd rasa
+uv run rasa train --config config.yml --domain domain.yml --data data/main
+```
+
+macOS / Linux：
+
+```bash
 cd rasa
 uv run rasa train --config config.yml --domain domain.yml --data data/main
 ```
 
 ## 启动主线 Rasa Server
 
+Windows：
+
 ```powershell
+cd rasa
+uv run rasa run --enable-api --cors "*" --credentials credentials.yml --endpoints endpoints.yml --port 5005
+```
+
+macOS / Linux：
+
+```bash
 cd rasa
 uv run rasa run --enable-api --cors "*" --credentials credentials.yml --endpoints endpoints.yml --port 5005
 ```
 
 ## 启动 Action Server
 
+Windows：
+
 ```powershell
+cd rasa
+uv run rasa run actions --actions actions --port 5055
+```
+
+macOS / Linux：
+
+```bash
 cd rasa
 uv run rasa run actions --actions actions --port 5055
 ```

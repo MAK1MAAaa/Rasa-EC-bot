@@ -190,13 +190,15 @@ const safeParseSessions = (raw: string | null): ChatSession[] => {
           : []
 
         const fallback = createSession()
-        return {
+        const session = {
           id: typeof item?.id === 'string' && item.id ? item.id : fallback.id,
           title: typeof item?.title === 'string' && item.title ? item.title : '新会话',
           createdAt: typeof item?.createdAt === 'string' && item.createdAt ? item.createdAt : fallback.createdAt,
           updatedAt: typeof item?.updatedAt === 'string' && item.updatedAt ? item.updatedAt : fallback.updatedAt,
           bubbles: bubbles.length > 0 ? bubbles : [buildWelcomeBubble()]
         }
+        session.title = deriveSessionTitle(session)
+        return session
       })
       .filter((session) => !!session.id)
   } catch {
@@ -259,7 +261,7 @@ const moveSessionToTop = (sessionId: string) => {
 
 const touchSession = (session: ChatSession) => {
   session.updatedAt = new Date().toISOString()
-  session.title = '新会话'
+  session.title = deriveSessionTitle(session)
   moveSessionToTop(session.id)
 }
 
@@ -995,9 +997,12 @@ watch(
 }
 
 .support-layout {
+  --support-panel-height: clamp(640px, 76vh, 860px);
   display: grid;
-  grid-template-columns: 290px 1fr;
+  grid-template-columns: 290px minmax(0, 1fr);
   gap: 14px;
+  align-items: stretch;
+  min-height: var(--support-panel-height);
 }
 
 .history-panel {
@@ -1005,9 +1010,13 @@ watch(
   border: 1px solid var(--line);
   border-radius: 18px;
   padding: 12px;
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 10px;
-  height: fit-content;
+  min-height: 0;
+  height: var(--support-panel-height);
+  max-height: var(--support-panel-height);
+  overflow: hidden;
 }
 
 .history-head {
@@ -1038,11 +1047,34 @@ watch(
 }
 
 .history-list {
-  max-height: 520px;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
   display: grid;
+  align-content: start;
   gap: 8px;
-  padding-right: 2px;
+  padding-right: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(87, 64, 31, 0.34) rgba(112, 92, 56, 0.1);
+}
+
+.history-list::-webkit-scrollbar {
+  width: 10px;
+}
+
+.history-list::-webkit-scrollbar-track {
+  background: rgba(112, 92, 56, 0.1);
+  border-radius: 999px;
+}
+
+.history-list::-webkit-scrollbar-thumb {
+  background: rgba(87, 64, 31, 0.34);
+  border-radius: 999px;
+}
+
+.history-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(87, 64, 31, 0.5);
 }
 
 .history-item {
@@ -1052,7 +1084,10 @@ watch(
   border: 1px solid #e3d6c0;
   border-radius: 12px;
   background: #fff8ee;
-  padding: 6px;
+  padding: 8px;
+  min-height: 88px;
+  height: 88px;
+  align-items: stretch;
 }
 
 .history-item.active {
@@ -1065,30 +1100,45 @@ watch(
   background: transparent;
   text-align: left;
   display: grid;
-  gap: 4px;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 6px;
   cursor: pointer;
+  min-width: 0;
+  height: 100%;
+  align-content: stretch;
 }
 
 .history-main strong {
   color: #3f2f16;
   font-size: 13px;
-  line-height: 1.4;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-height: calc(1.35em * 2);
 }
 
 .history-main span {
   color: #7d7568;
   font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .history-del {
   border: none;
-  border-radius: 8px;
-  padding: 4px 8px;
+  border-radius: 10px;
+  padding: 0 10px;
   background: #efe1c8;
   color: #624d29;
   font-size: 11px;
   cursor: pointer;
-  align-self: center;
+  align-self: stretch;
+  min-width: 48px;
+  height: 100%;
 }
 
 .chat-panel {
@@ -1100,15 +1150,21 @@ watch(
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  min-height: clamp(640px, 76vh, 860px);
+  min-width: 0;
+  min-height: 0;
+  height: var(--support-panel-height);
+  max-height: var(--support-panel-height);
 }
 
 .chat-log {
   padding: 18px 16px 0;
   flex: 1 1 auto;
   min-height: 0;
+  align-content: start;
   align-items: start;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-padding-bottom: 18px;
   scrollbar-width: thin;
   scrollbar-color: rgba(87, 64, 31, 0.42) rgba(112, 92, 56, 0.12);
   background: transparent;
@@ -1361,21 +1417,32 @@ watch(
 
 @media (max-width: 980px) {
   .support-layout {
+    --support-panel-height: auto;
     grid-template-columns: 1fr;
+    min-height: auto;
   }
 
   .history-panel {
     order: 2;
+    height: auto;
+    max-height: none;
   }
 
   .chat-panel {
     order: 1;
+    height: clamp(620px, 78vh, 820px);
+    max-height: clamp(620px, 78vh, 820px);
+  }
+
+  .history-list {
+    max-height: 320px;
   }
 }
 
 @media (max-width: 760px) {
   .chat-panel {
-    min-height: 78vh;
+    height: min(78vh, 760px);
+    max-height: min(78vh, 760px);
   }
 
   .bubble {

@@ -11,6 +11,7 @@
 | `src/api/client.ts` | 后端 API 客户端 |
 | `src/stores/` | Pinia 状态管理 |
 | `src/components/` | 业务组件与基础 UI 组件 |
+| `src/lib/` | 前端共享样式工具与通用辅助函数 |
 | `src/utils/` | AMap、实时通信等前端工具 |
 
 ## 主要页面
@@ -34,11 +35,30 @@
 - 可从 `frontend/.env.sample` 复制一份再修改。
 - 前端通常至少需要配置后端 API 基地址，以及地图服务或实时通信相关地址。
 
+Windows：
+
+```powershell
+cd frontend
+Copy-Item .env.sample .env
+```
+
+macOS / Linux：
+
+```bash
+cd frontend
+cp .env.sample .env
+```
+
 ## 本地开发
 
 安装依赖：
 
 ```powershell
+cd frontend
+pnpm install
+```
+
+```bash
 cd frontend
 pnpm install
 ```
@@ -50,9 +70,19 @@ cd frontend
 pnpm dev
 ```
 
+```bash
+cd frontend
+pnpm dev
+```
+
 构建生产包：
 
 ```powershell
+cd frontend
+pnpm build
+```
+
+```bash
 cd frontend
 pnpm build
 ```
@@ -64,8 +94,17 @@ cd frontend
 pnpm preview
 ```
 
+```bash
+cd frontend
+pnpm preview
+```
+
 ## 依赖关系
 
 - 前端默认对接 [../backend/README.md](../backend/README.md) 中的 FastAPI 后端。
 - 聊天页、订单页和商家中心都依赖后端接口返回的数据结构。
+- `/chat` 聊天页当前采用固定面板高度与内部滚动设计，聊天区和会话历史区在桌面端保持同高，超长内容会显示滚动条而不是继续把页面撑高。
+- `/chat` 的会话历史项采用统一卡片高度，长标题会截断到两行，避免列表项大小不一致。
+- `/chat` 的会话历史列表和消息列表都固定从容器顶部连续堆叠，不会在可用高度内被均匀拉散。
+- `/chat` 左侧会话标题默认取当前会话的首条用户问题，新建空会话才显示“新会话”。
 - benchmark 不直接在前端里执行；相关说明统一放在 [../tests/README.md](../tests/README.md)。

@@ -13,7 +13,15 @@
 
 建议在仓库根目录执行：
 
+Windows：
+
 ```powershell
+uv run modelscope download --dataset xuri2004/dianshang_dataset --local_dir LoRA/data/dianshang_dataset
+```
+
+macOS / Linux：
+
+```bash
 uv run modelscope download --dataset xuri2004/dianshang_dataset --local_dir LoRA/data/dianshang_dataset
 ```
 
@@ -25,6 +33,8 @@ uv run modelscope download --dataset xuri2004/dianshang_dataset --local_dir LoRA
 
 在 `LoRA/` 目录执行：
 
+Windows：
+
 ```powershell
 uv run python scripts/prepare_data.py `
   --faq-json data/Ecommerce_FAQ_intents.json `
@@ -33,6 +43,19 @@ uv run python scripts/prepare_data.py `
   --faq-upsample 6 `
   --ec-upsample 1 `
   --ec-max-samples 120000 `
+  --seed 42
+```
+
+macOS / Linux：
+
+```bash
+uv run python scripts/prepare_data.py \
+  --faq-json data/Ecommerce_FAQ_intents.json \
+  --ec-train-jsonl data/dianshang_dataset/output.jsonl \
+  --out-dir data/processed \
+  --faq-upsample 6 \
+  --ec-upsample 1 \
+  --ec-max-samples 120000 \
   --seed 42
 ```
 

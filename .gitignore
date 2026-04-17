@@ -46,12 +46,14 @@ Thumbs.db
 # Project Specific
 database/pgdata/
 database/redisdata/
+.rasa/
 backend/app/__pycache__/
 frontend/temp.html
 rasa/models/
 rasa/.rasa/
 backend/.env
 backend/data/chat_memory/
+backend/data/chat_uploads/
 rasa/.env
 LoRA/.env
 
@@ -84,3 +86,5 @@ benchmark/data/*
 # Historical benchmark archive under tests/
 tests/benchmark_results/*
 !tests/benchmark_results/.gitkeep
+tests/benchmark_data/*
+!tests/benchmark_data/.gitkeep

@@ -2,6 +2,12 @@
 
 `benchmark/` 是系统 benchmark 的唯一正式入口。环境准备、数据集、执行、结果分析和测试都以本 README 为准。
 
+## 平台说明
+
+- Windows 命令默认以 PowerShell 为准。
+- macOS / Linux 命令默认以 Bash 为准。
+- 涉及 `vLLM` 的命令本质上面向 Linux；如果你在 Windows 上跑 `vLLM`，推荐放在 WSL 里执行。
+
 ## 当前规则
 
 - 正式结论只输出 `shared_core` 和 `agent_extension` 双榜。
@@ -49,18 +55,33 @@
 
 ### 2. 安装依赖
 
+Windows：
+
 ```powershell
 cd benchmark
 uv sync
 ```
 
-同时安装主服务依赖：
-
 ```powershell
-cd backend
+cd ..\backend
 uv sync
 
 cd ..\rasa
+uv sync
+```
+
+macOS / Linux：
+
+```bash
+cd benchmark
+uv sync
+```
+
+```bash
+cd ../backend
+uv sync
+
+cd ../rasa
 uv sync
 ```
 
@@ -68,93 +89,184 @@ uv sync
 
 PostgreSQL：
 
-```powershell
-docker run --name rasa-postgres `
-  -e POSTGRES_PASSWORD=postgres `
-  -e POSTGRES_USER=postgres `
-  -e POSTGRES_DB=postgres `
-  -p 5432:5432 `
-  -d postgres:16
-```
+Windows：
 
-已存在容器时：
+```powershell
+docker run --name rasa-postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_USER=postgres -e POSTGRES_DB=postgres -p 5432:5432 -d postgres:16
+```
 
 ```powershell
 docker start rasa-postgres
 ```
 
+macOS / Linux：
+
+```bash
+docker run --name rasa-postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_USER=postgres -e POSTGRES_DB=postgres -p 5432:5432 -d postgres:16
+```
+
+```bash
+docker start rasa-postgres
+```
+
 初始化 PostgreSQL：
+
+Windows：
 
 ```powershell
 cd backend
 .\scripts\init_postgres.ps1
 ```
 
+macOS / Linux：
+
+```bash
+cd backend
+bash scripts/init_postgres.sh
+```
+
 启动 Redis：
+
+Windows：
 
 ```powershell
 cd backend
 .\scripts\start_redis.ps1
 ```
 
+macOS / Linux：
+
+```bash
+cd backend
+bash scripts/start_redis.sh
+```
+
 初始化 Redis：
+
+Windows：
 
 ```powershell
 cd backend
 .\scripts\init_redis.ps1
 ```
 
+macOS / Linux：
+
+```bash
+cd backend
+bash scripts/init_redis.sh
+```
+
 ### 4. 启动模型服务
 
-如果要跑 `rasa_plus_llm`，先启动 Ollama：
+如果要跑 `rasa_plus_llm`，先启动 Ollama。
+
+Windows：
 
 ```powershell
 ollama serve
 ```
 
-首次使用拉取模型：
-
 ```powershell
 ollama pull qwen3.5:2b
 ```
 
-如果要跑 `rasa_plus_lora_llm`，还需要启动兼容 OpenAI 的 LoRA 推理服务，例如：
+macOS / Linux：
 
 ```bash
-cd /mnt/d/Github/Rasa-EC-bot/LoRA
+ollama serve
+```
+
+```bash
+ollama pull qwen3.5:2b
+```
+
+如果要跑 `rasa_plus_lora_llm`，还需要启动兼容 OpenAI 的 LoRA 推理服务。
+
+Windows（推荐在 WSL 中执行）：
+
+```bash
+cd /mnt/<drive>/path/to/Rasa-EC-bot/LoRA
 uv sync
 uv run --with vllm python -m vllm.entrypoints.openai.api_server \
   --host 0.0.0.0 \
   --port 8002 \
-  --model /mnt/d/Github/Rasa-EC-bot/LoRA/models/Qwen3.5-2B \
+  --model /mnt/<drive>/path/to/Rasa-EC-bot/LoRA/models/Qwen3.5-2B \
   --served-model-name qwen3.5-2b-lora \
   --enable-lora \
-  --lora-modules qwen3.5-2b-lora=/mnt/d/Github/Rasa-EC-bot/LoRA/outputs/smoke_ec_faq_only/adapter \
+  --lora-modules qwen3.5-2b-lora=/mnt/<drive>/path/to/Rasa-EC-bot/LoRA/outputs/smoke_ec_faq_only/adapter \
   --max-model-len 4096 \
   --max-num-seqs 2 \
   --gpu-memory-utilization 0.55 \
   --enforce-eager
 ```
 
+macOS / Linux：
+
+```bash
+cd /path/to/Rasa-EC-bot/LoRA
+uv sync
+uv run --with vllm python -m vllm.entrypoints.openai.api_server \
+  --host 0.0.0.0 \
+  --port 8002 \
+  --model /path/to/Rasa-EC-bot/LoRA/models/Qwen3.5-2B \
+  --served-model-name qwen3.5-2b-lora \
+  --enable-lora \
+  --lora-modules qwen3.5-2b-lora=/path/to/Rasa-EC-bot/LoRA/outputs/smoke_ec_faq_only/adapter \
+  --max-model-len 4096 \
+  --max-num-seqs 2 \
+  --gpu-memory-utilization 0.55 \
+  --enforce-eager
+```
+
+如为 macOS，本段通常只作为命令格式参考；实际跑 `vLLM` 仍建议使用 Linux 环境。
+
 ### 5. 启动主线 Rasa 服务
 
 训练主线模型：
+
+Windows：
 
 ```powershell
 cd rasa
 uv run rasa train --config config.yml --domain domain.yml --data data/main
 ```
 
+macOS / Linux：
+
+```bash
+cd rasa
+uv run rasa train --config config.yml --domain domain.yml --data data/main
+```
+
 启动主线 Rasa Server：
+
+Windows：
 
 ```powershell
 cd rasa
 uv run rasa run --enable-api --cors "*" --credentials credentials.yml --endpoints endpoints.yml --port 5005
 ```
 
+macOS / Linux：
+
+```bash
+cd rasa
+uv run rasa run --enable-api --cors "*" --credentials credentials.yml --endpoints endpoints.yml --port 5005
+```
+
 启动 Action Server：
 
+Windows：
+
 ```powershell
+cd rasa
+uv run rasa run actions --actions actions --port 5055
+```
+
+macOS / Linux：
+
+```bash
 cd rasa
 uv run rasa run actions --actions actions --port 5055
 ```
@@ -163,38 +275,57 @@ uv run rasa run actions --actions actions --port 5055
 
 训练基线模型：
 
+Windows：
+
 ```powershell
 cd rasa
-uv run rasa train `
-  --config benchmark/rasa_only/config.yml `
-  --domain benchmark/rasa_only/domain.yml `
-  --data data/nlu.yml benchmark/rasa_only/rules.yml `
-  --out models/benchmark_rasa_only
+uv run rasa train --config benchmark/rasa_only/config.yml --domain benchmark/rasa_only/domain.yml --data data/nlu.yml benchmark/rasa_only/rules.yml --out models/benchmark_rasa_only
+```
+
+macOS / Linux：
+
+```bash
+cd rasa
+uv run rasa train --config benchmark/rasa_only/config.yml --domain benchmark/rasa_only/domain.yml --data data/nlu.yml benchmark/rasa_only/rules.yml --out models/benchmark_rasa_only
 ```
 
 启动 5006 基线服务：
 
+Windows：
+
 ```powershell
 cd rasa
-uv run rasa run `
-  --model models/benchmark_rasa_only `
-  --enable-api `
-  --cors "*" `
-  --credentials credentials.yml `
-  --endpoints endpoints.yml `
-  --port 5006
+uv run rasa run --model models/benchmark_rasa_only --enable-api --cors "*" --credentials credentials.yml --endpoints endpoints.yml --port 5006
+```
+
+macOS / Linux：
+
+```bash
+cd rasa
+uv run rasa run --model models/benchmark_rasa_only --enable-api --cors "*" --credentials credentials.yml --endpoints endpoints.yml --port 5006
 ```
 
 ### 7. 启动后端服务
 
 基础版：
 
+Windows：
+
 ```powershell
 cd backend
 uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
+macOS / Linux：
+
+```bash
+cd backend
+uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
 LoRA 版：
+
+Windows：
 
 ```powershell
 cd backend
@@ -205,33 +336,79 @@ $env:AGENT_LLM_MODEL = "qwen3.5-2b-lora"
 uv run uvicorn app.main:app --host 127.0.0.1 --port 8001
 ```
 
+macOS / Linux：
+
+```bash
+cd backend
+export AGENT_LLM_PROVIDER=openai_compat
+export AGENT_LLM_BASE_URL=http://127.0.0.1:8002/v1
+export AGENT_LLM_API_KEY=EMPTY
+export AGENT_LLM_MODEL=qwen3.5-2b-lora
+uv run uvicorn app.main:app --host 127.0.0.1 --port 8001
+```
+
 ### 8. 重置 benchmark 基线状态
 
-正式跑 benchmark 前，先恢复业务数据和聊天状态：
+正式跑 benchmark 前，先恢复业务数据和聊天状态。
 
 如果本机已有 `psql`：
+
+Windows：
 
 ```powershell
 psql -h 127.0.0.1 -U postgres -d rasa_ec_bot -f benchmark/sql/reset_benchmark_state.sql
 ```
 
-如果没有本机 `psql`，推荐直接用 Docker 容器内的 `psql`，并避免 PowerShell 管道转码：
+macOS / Linux：
+
+```bash
+psql -h 127.0.0.1 -U postgres -d rasa_ec_bot -f benchmark/sql/reset_benchmark_state.sql
+```
+
+如果没有本机 `psql`，推荐直接用 Docker 容器内的 `psql`：
+
+Windows：
 
 ```powershell
 docker cp benchmark/sql/reset_benchmark_state.sql rasa-postgres:/tmp/reset_benchmark_state.sql
 docker exec rasa-postgres psql -U postgres -d rasa_ec_bot -f /tmp/reset_benchmark_state.sql
 ```
 
+macOS / Linux：
+
+```bash
+docker cp benchmark/sql/reset_benchmark_state.sql rasa-postgres:/tmp/reset_benchmark_state.sql
+docker exec rasa-postgres psql -U postgres -d rasa_ec_bot -f /tmp/reset_benchmark_state.sql
+```
+
 ### 9. 重建数据集
+
+Windows：
 
 ```powershell
 cd benchmark
 uv run python scripts/build_dataset.py
 ```
 
+macOS / Linux：
+
+```bash
+cd benchmark
+uv run python scripts/build_dataset.py
+```
+
 ### 10. 先跑单测
 
+Windows：
+
 ```powershell
+cd benchmark
+uv run python -m unittest discover -s tests -p "test_*.py"
+```
+
+macOS / Linux：
+
+```bash
 cd benchmark
 uv run python -m unittest discover -s tests -p "test_*.py"
 ```
@@ -240,28 +417,64 @@ uv run python -m unittest discover -s tests -p "test_*.py"
 
 Smoke：
 
+Windows：
+
 ```powershell
+cd benchmark
+uv run python scripts/run_benchmark.py --profile quick --verbose
+```
+
+macOS / Linux：
+
+```bash
 cd benchmark
 uv run python scripts/run_benchmark.py --profile quick --verbose
 ```
 
 标准档：
 
+Windows：
+
 ```powershell
+cd benchmark
+uv run python scripts/run_benchmark.py --profile standard
+```
+
+macOS / Linux：
+
+```bash
 cd benchmark
 uv run python scripts/run_benchmark.py --profile standard
 ```
 
 论文档：
 
+Windows：
+
 ```powershell
+cd benchmark
+uv run python scripts/run_benchmark.py --profile paper
+```
+
+macOS / Linux：
+
+```bash
 cd benchmark
 uv run python scripts/run_benchmark.py --profile paper
 ```
 
 ### 12. 分析结果
 
+Windows：
+
 ```powershell
+cd benchmark
+uv run python scripts/analyze_results.py --result-dir results/<run_id>
+```
+
+macOS / Linux：
+
+```bash
 cd benchmark
 uv run python scripts/analyze_results.py --result-dir results/<run_id>
 ```

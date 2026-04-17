@@ -1014,7 +1014,7 @@ async def refresh_chat_memory_artifacts(
                     SELECT
                         id,
                         CAST(:user_id AS uuid),
-                        :session_id,
+                        CAST(:session_id AS varchar),
                         :snapshot_version,
                         1,
                         :end_sequence_no,
@@ -1023,7 +1023,7 @@ async def refresh_chat_memory_artifacts(
                         CAST(:recent_window AS jsonb),
                         :context_file_path
                     FROM chat_sessions
-                    WHERE user_id = CAST(:user_id AS uuid) AND session_id = :session_id
+                    WHERE user_id = CAST(:user_id AS uuid) AND session_id = CAST(:session_id AS varchar)
                     """
                 ),
                 {

@@ -4,13 +4,15 @@
 
 ## 当前测试文件
 
-| 文件 | 说明 |
-| --- | --- |
-| `test_chat_router_logic.py` | 聊天路由逻辑测试 |
-| `test_chat_memory_logic.py` | 记忆系统逻辑测试 |
+| 文件                                   | 说明             |
+| -------------------------------------- | ---------------- |
+| `test_chat_router_logic.py`            | 聊天路由逻辑测试 |
+| `test_chat_memory_logic.py`            | 记忆系统逻辑测试 |
 | `test_product_recommendation_logic.py` | 商品推荐逻辑测试 |
 
 ## 运行
+
+Windows：
 
 ```powershell
 cd backend
@@ -18,7 +20,10 @@ uv sync
 uv run python -m unittest discover -s ..\tests -p "test_*.py"
 ```
 
-## 说明
+macOS / Linux：
 
-- benchmark 相关工程、数据集、运行脚本、结果归档和分析脚本已经迁到 [../benchmark/README.md](../benchmark/README.md)。
-- 历史 `tests/benchmark_results/` 仅作为旧实验归档，不属于当前默认流程。
+```bash
+cd backend
+uv sync
+uv run python -m unittest discover -s ../tests -p "test_*.py"
+```

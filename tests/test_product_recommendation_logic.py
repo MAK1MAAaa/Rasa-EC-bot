@@ -86,6 +86,16 @@ class ProductRecommendationLogicTests(unittest.TestCase):
         self.assertIn("办公笔记本", terms)
         self.assertNotIn("推荐", terms)
 
+    def test_extract_recommendation_terms_split_color_and_category_constraints(self) -> None:
+        terms = MAIN_MODULE.extract_recommendation_query_terms("帮我推荐一款白色的4000元以下的手机")
+        self.assertIn("白", terms)
+        self.assertIn("手机", terms)
+
+    def test_extract_recommendation_constraints_parse_budget_and_color(self) -> None:
+        constraints = MAIN_MODULE.extract_recommendation_query_constraints("帮我推荐一款白色的4000元以下的手机")
+        self.assertEqual(constraints.max_price, 4000.0)
+        self.assertIn("白", constraints.required_terms)
+
     def test_infer_explicit_category_prefers_longest_match(self) -> None:
         category = MAIN_MODULE.infer_explicit_category_from_query(
             "推荐几款笔记本电脑",
@@ -113,6 +123,64 @@ class ProductRecommendationLogicTests(unittest.TestCase):
         matched_score = MAIN_MODULE.compute_product_history_score(matched, profile)
         unmatched_score = MAIN_MODULE.compute_product_history_score(unmatched, profile)
         self.assertGreater(matched_score, unmatched_score)
+
+    def test_constraint_filter_excludes_products_outside_budget_or_color(self) -> None:
+        constraints = MAIN_MODULE.extract_recommendation_query_constraints("帮我推荐一款白色的4000元以下的手机")
+        matched = make_product(
+            category="手机",
+            price=3520.0,
+            tags=["月岩白", "长续航"],
+            spec_highlights=["月岩白", "12GB+512GB"],
+            name="曜石 Note Air",
+        )
+        wrong_color = make_product(
+            category="手机",
+            price=3760.0,
+            tags=["海盐蓝", "手游旗舰"],
+            spec_highlights=["海盐蓝", "12GB+256GB"],
+            name="曜石 Note Max",
+        )
+        over_budget = make_product(
+            category="手机",
+            price=4020.0,
+            tags=["月岩白", "轻薄"],
+            spec_highlights=["月岩白", "12GB+256GB"],
+            name="星云 X1 Ultra",
+        )
+
+        self.assertTrue(MAIN_MODULE.product_matches_recommendation_constraints(matched, constraints))
+        self.assertFalse(MAIN_MODULE.product_matches_recommendation_constraints(wrong_color, constraints))
+        self.assertFalse(MAIN_MODULE.product_matches_recommendation_constraints(over_budget, constraints))
+
+    def test_query_score_reads_spec_highlights(self) -> None:
+        with_spec = make_product(
+            category="显示器",
+            name="护眼显示器",
+            tags=["护眼"],
+            spec_highlights=["27寸", "Type-C"],
+        )
+        without_spec = make_product(
+            category="显示器",
+            name="护眼显示器",
+            tags=["护眼"],
+            spec_highlights=[],
+        )
+        query_terms = MAIN_MODULE.extract_recommendation_query_terms("推荐一款 27 寸 Type-C 显示器")
+
+        with_spec_score = MAIN_MODULE.compute_product_query_score(
+            with_spec,
+            query="推荐一款 27 寸 Type-C 显示器",
+            query_terms=query_terms,
+            explicit_category="显示器",
+        )
+        without_spec_score = MAIN_MODULE.compute_product_query_score(
+            without_spec,
+            query="推荐一款 27 寸 Type-C 显示器",
+            query_terms=query_terms,
+            explicit_category="显示器",
+        )
+
+        self.assertGreater(with_spec_score, without_spec_score)
 
     def test_recommendation_query_detection(self) -> None:
         self.assertTrue(ORCHESTRATOR_MODULE.is_product_recommendation_query("推荐几款适合办公的显示器"))

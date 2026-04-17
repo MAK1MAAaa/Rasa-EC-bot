@@ -286,6 +286,93 @@ CHAT_ACTION_TYPE_LOGISTICS_COMPLAINT = "logistics_complaint"
 PRODUCT_VIEW_HISTORY_MAX_ITEMS = 20
 DEFAULT_PRODUCT_HISTORY_LIMIT = 8
 DEFAULT_PRODUCT_RECOMMENDATION_LIMIT = 5
+RECOMMENDATION_QUERY_NOISE_TERMS = [
+    "给我",
+    "帮我",
+    "推荐",
+    "几款",
+    "看看",
+    "想买",
+    "适合",
+    "有没有",
+    "哪些",
+    "什么",
+    "哪个",
+    "比较",
+    "一下",
+    "请问",
+    "可以",
+    "用于",
+    "用来",
+    "一款",
+    "一个",
+    "一台",
+    "一部",
+    "预算",
+    "控制在",
+    "价位",
+    "以内",
+    "以下",
+    "之内",
+    "左右",
+    "上下",
+    "以内的",
+    "以下的",
+    "元内",
+    "元以内",
+    "元以下",
+    "块钱内",
+    "块钱以内",
+    "块钱以下",
+    "的",
+    "和",
+    "及",
+    "与",
+]
+RECOMMENDATION_PREFERENCE_TERMS = [
+    "日常办公",
+    "视频会议",
+    "内容创作",
+    "高性能剪辑",
+    "轻度游戏",
+    "宿舍追剧",
+    "长续航",
+    "出差便携",
+    "大屏阅读",
+    "通勤影像",
+    "夜景人像",
+    "办公",
+    "通勤",
+    "追剧",
+    "游戏",
+    "拍照",
+    "续航",
+    "屏幕",
+    "重量",
+    "出差",
+    "携带",
+    "轻薄",
+    "护眼",
+    "直屏",
+    "折叠",
+    "旗舰",
+    "商务",
+    "阅读",
+]
+RECOMMENDATION_COLOR_ALIASES = {
+    "白": ["白色", "月岩白", "雪山白", "月光白", "冰川白", "奶油白", "云雾白", "云母白", "珍珠白"],
+    "黑": ["黑色", "曜石黑", "夜幕黑", "深空黑", "极夜黑", "石墨黑"],
+    "蓝": ["蓝色", "海盐蓝", "深海蓝", "湖水蓝", "雾海蓝"],
+    "粉": ["粉色", "晨雾粉", "珊瑚粉"],
+    "绿": ["绿色", "松针绿", "云杉绿"],
+    "银": ["银色", "冰川银", "星雾银", "月光银", "银白色"],
+    "金": ["金色", "星砂金", "暖沙金", "香槟金"],
+    "灰": ["灰色", "深空灰", "石墨灰", "枪灰色"],
+    "紫": ["紫色"],
+    "红": ["红色", "酒红色"],
+    "黄": ["黄色"],
+    "橙": ["橙色"],
+}
 PENDING_CHAT_ACTION_MEMORY: dict[str, dict[str, Any]] = {}
 _amap_throttle_lock = asyncio.Lock()
 _amap_last_call_time = 0.0
@@ -2386,7 +2473,7 @@ async def run_nexau_agent_orchestrator(
             limit=max(1, min(limit, 20)),
         )
         cards = [product_read_to_chat_card(item) for item in response.items]
-        return {"observation": dump_response_model(response), "cards": cards}
+        return {"observation": build_product_recommendation_observation(query, response), "cards": cards}
 
     async def tool_retrieve_policy_knowledge(query: str) -> dict[str, Any]:
         matches = await retrieve_kb_knowledge(
@@ -3349,6 +3436,12 @@ class RecommendationHistoryProfile:
     shop_scores: dict[UUID, int]
 
 
+@dataclass
+class RecommendationQueryConstraints:
+    max_price: float | None
+    required_terms: list[str]
+
+
 def to_product_view_history_item(
     history: ProductViewHistory,
     product: Product,
@@ -3395,44 +3488,101 @@ def normalize_match_text(value: str | None) -> str:
     return re.sub(r"\s+", "", value.strip().lower())
 
 
+def unique_preserve_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    unique_values: list[str] = []
+    for value in values:
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        unique_values.append(value)
+    return unique_values
+
+
+def normalize_recommendation_term(term: str | None) -> str:
+    normalized = normalize_match_text(term)
+    if not normalized:
+        return ""
+    normalized = normalized.replace("英寸", "寸")
+    if normalized in {"typec", "usb-c", "usbc"}:
+        return "type-c"
+    return normalized
+
+
+def extract_recommendation_max_price(query: str) -> float | None:
+    text = (query or "").strip().lower()
+    if not text:
+        return None
+
+    hard_patterns = [
+        r"(?:预算|控制在|控制到|价位在)?\s*(\d+(?:\.\d+)?)\s*(?:元|块|块钱)(?:以内|以下|之内|内|封顶)",
+        r"(?:不超过|别超过|不要超过|不高于|低于|少于|小于)\s*(\d+(?:\.\d+)?)\s*(?:元|块|块钱)?",
+    ]
+    for pattern in hard_patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            return float(match.group(1))
+
+    budget_match = re.search(r"预算\s*(?:在|约|大概|控制在)?\s*(\d+(?:\.\d+)?)\s*(?:元|块|块钱)", text, flags=re.IGNORECASE)
+    if budget_match:
+        return float(budget_match.group(1))
+
+    return None
+
+
+def extract_recommendation_required_terms(query: str) -> list[str]:
+    normalized_query = normalize_match_text(query)
+    if not normalized_query:
+        return []
+
+    terms: list[str] = []
+    for canonical, aliases in RECOMMENDATION_COLOR_ALIASES.items():
+        if any(normalize_match_text(alias) in normalized_query for alias in aliases):
+            terms.append(canonical)
+
+    if re.search(r"(?:type\s*[- ]?\s*c|usb\s*[- ]?\s*c)", query or "", flags=re.IGNORECASE):
+        terms.append("type-c")
+
+    for match in re.finditer(r"(\d+(?:\.\d+)?)\s*(?:英寸|寸)", query or "", flags=re.IGNORECASE):
+        terms.append(normalize_recommendation_term(f"{match.group(1)}寸"))
+    for match in re.finditer(r"(\d+(?:\.\d+)?)\s*(?:gb|tb)", query or "", flags=re.IGNORECASE):
+        terms.append(normalize_recommendation_term(match.group(0)))
+
+    return unique_preserve_order([normalize_recommendation_term(term) for term in terms])[:6]
+
+
+def extract_recommendation_query_constraints(query: str) -> RecommendationQueryConstraints:
+    return RecommendationQueryConstraints(
+        max_price=extract_recommendation_max_price(query),
+        required_terms=extract_recommendation_required_terms(query),
+    )
+
+
 def extract_recommendation_query_terms(query: str) -> list[str]:
     cleaned = (query or "").strip().lower()
     if not cleaned:
         return []
 
     normalized = cleaned
-    for marker in [
-        "给我",
-        "帮我",
-        "推荐",
-        "几款",
-        "看看",
-        "想买",
-        "适合",
-        "有没有",
-        "哪些",
-        "什么",
-        "哪个",
-        "比较",
-        "一下",
-        "请问",
-        "可以",
-        "用于",
-        "一款",
-        "一个",
-    ]:
+    for marker in sorted(RECOMMENDATION_QUERY_NOISE_TERMS, key=len, reverse=True):
         normalized = normalized.replace(marker, " ")
+    normalized = re.sub(r"[，。！？、,.!?/\\|:：]+", " ", normalized)
 
-    tokens = re.findall(r"[\u4e00-\u9fffA-Za-z0-9]+", normalized)
-    unique_terms: list[str] = []
-    seen: set[str] = set()
-    for token in tokens:
-        term = token.strip()
-        if len(term) < 2 or term in seen:
+    extracted_terms: list[str] = []
+    extracted_terms.extend(extract_recommendation_required_terms(query))
+
+    for preference in sorted(RECOMMENDATION_PREFERENCE_TERMS, key=len, reverse=True):
+        normalized_preference = normalize_recommendation_term(preference)
+        if normalized_preference and normalized_preference in normalize_match_text(normalized):
+            extracted_terms.append(normalized_preference)
+
+    for token in re.findall(r"\d+(?:\.\d+)?\s*(?:gb|tb|hz|w)|[a-z]+(?:-[a-z0-9]+)?|[\u4e00-\u9fff]{2,8}", normalized):
+        term = normalize_recommendation_term(token)
+        if len(term) < 2:
             continue
-        seen.add(term)
-        unique_terms.append(term)
-    return unique_terms[:8]
+        extracted_terms.append(term)
+
+    return unique_preserve_order(extracted_terms)[:12]
 
 
 def infer_explicit_category_from_query(query: str, categories: list[str]) -> str:
@@ -3500,16 +3650,25 @@ def compute_product_query_score(
     normalized_name = normalize_match_text(product.name)
     normalized_description = normalize_match_text(product.description)
     normalized_tags = [normalize_match_text(item) for item in list(product.tags or [])]
+    normalized_spec_highlights = [normalize_match_text(item) for item in list(product.spec_highlights or [])]
 
     if explicit_category and normalized_category == normalize_match_text(explicit_category):
         score += 1200
 
-    text_fields = [normalized_name, normalized_category, normalized_brand, normalized_model, normalized_description, *normalized_tags]
+    text_fields = [
+        normalized_name,
+        normalized_category,
+        normalized_brand,
+        normalized_model,
+        normalized_description,
+        *normalized_tags,
+        *normalized_spec_highlights,
+    ]
     if normalized_query and any(normalized_query in field for field in text_fields if field):
         score += 280
 
     for term in query_terms:
-        normalized_term = normalize_match_text(term)
+        normalized_term = normalize_recommendation_term(term)
         if not normalized_term:
             continue
         if normalized_term in normalized_name:
@@ -3520,6 +3679,8 @@ def compute_product_query_score(
             score += 95
         elif any(normalized_term in tag for tag in normalized_tags):
             score += 80
+        elif any(normalized_term in spec for spec in normalized_spec_highlights):
+            score += 76
         elif normalized_term in normalized_description:
             score += 45
 
@@ -3538,6 +3699,120 @@ def compute_product_history_score(product: ProductRead, profile: RecommendationH
     for tag in list(product.tags or []):
         score += profile.tag_scores.get(normalize_match_text(tag), 0) * 14
     return score
+
+
+def build_recommendation_product_text(product: ProductRead) -> str:
+    parts = [
+        product.name,
+        product.category,
+        product.brand,
+        product.model,
+        product.description,
+        *list(product.tags or []),
+        *list(product.spec_highlights or []),
+    ]
+    return normalize_match_text(" ".join(str(part) for part in parts if isinstance(part, str) and part.strip()))
+
+
+def product_contains_recommendation_term(product: ProductRead, term: str, *, normalized_text: str | None = None) -> bool:
+    search_text = normalized_text or build_recommendation_product_text(product)
+    normalized_term = normalize_recommendation_term(term)
+    if not normalized_term:
+        return False
+    if normalized_term == "type-c":
+        return any(alias in search_text for alias in ["type-c", "typec", "usb-c", "usbc"])
+    return normalized_term in search_text
+
+
+def product_matches_recommendation_constraints(
+    product: ProductRead,
+    constraints: RecommendationQueryConstraints,
+    *,
+    normalized_text: str | None = None,
+) -> bool:
+    if constraints.max_price is not None and float(product.price) > constraints.max_price:
+        return False
+    return all(
+        product_contains_recommendation_term(product, term, normalized_text=normalized_text)
+        for term in constraints.required_terms
+    )
+
+
+def compute_product_constraint_score(
+    product: ProductRead,
+    constraints: RecommendationQueryConstraints,
+    *,
+    normalized_text: str | None = None,
+) -> int:
+    score = 0
+    if constraints.max_price is not None and float(product.price) <= constraints.max_price:
+        remaining_budget = max(0.0, constraints.max_price - float(product.price))
+        score += 260 + min(60, int(remaining_budget // 100))
+
+    for term in constraints.required_terms:
+        if product_contains_recommendation_term(product, term, normalized_text=normalized_text):
+            score += 110
+    return score
+
+
+def format_recommendation_filter_value(value: float) -> str:
+    return str(int(value)) if float(value).is_integer() else f"{value:.2f}".rstrip("0").rstrip(".")
+
+
+def describe_product_recommendation_match(
+    product: ProductRead,
+    constraints: RecommendationQueryConstraints,
+    *,
+    normalized_text: str | None = None,
+) -> list[str]:
+    reasons: list[str] = []
+    if constraints.max_price is not None and float(product.price) <= constraints.max_price:
+        reasons.append(f"价格不高于 {format_recommendation_filter_value(constraints.max_price)} 元")
+
+    for term in constraints.required_terms:
+        if not product_contains_recommendation_term(product, term, normalized_text=normalized_text):
+            continue
+        if term == "type-c":
+            reasons.append("包含 Type-C")
+        elif term in RECOMMENDATION_COLOR_ALIASES:
+            reasons.append(f"{term}色系")
+        else:
+            reasons.append(term)
+    return unique_preserve_order(reasons)
+
+
+def build_product_recommendation_observation(query: str, response: ProductRecommendationResponse) -> dict[str, Any]:
+    constraints = extract_recommendation_query_constraints(query)
+    items: list[dict[str, Any]] = []
+    for product in response.items:
+        normalized_text = build_recommendation_product_text(product)
+        items.append(
+            {
+                "name": product.name,
+                "category": product.category or "",
+                "brand": product.brand or "",
+                "model": product.model or "",
+                "price": float(product.price),
+                "rating": float(product.rating) if product.rating is not None else None,
+                "tags": list(product.tags or [])[:6],
+                "spec_highlights": list(product.spec_highlights or [])[:5],
+                "match_reasons": describe_product_recommendation_match(
+                    product,
+                    constraints,
+                    normalized_text=normalized_text,
+                ),
+            }
+        )
+
+    return {
+        "query": query,
+        "personalized": response.personalized,
+        "applied_filters": {
+            "max_price": constraints.max_price,
+            "required_terms": constraints.required_terms,
+        },
+        "items": items,
+    }
 
 
 async def fetch_recent_product_view_rows(
@@ -3679,21 +3954,47 @@ async def get_personalized_product_recommendations(
 
     shop_map = await get_shop_map(session, [product.shop_id for product in products])
     query_terms = extract_recommendation_query_terms(cleaned_query)
+    constraints = extract_recommendation_query_constraints(cleaned_query)
     recent_product_id_set = set(history_profile.recent_product_ids)
+    candidate_products = [
+        to_product_read(product, shop=shop_map.get(product.shop_id), shop_name="Unknown Shop")
+        for product in products
+    ]
+    normalized_product_texts = {
+        product.id: build_recommendation_product_text(product)
+        for product in candidate_products
+    }
+
+    constrained_products = [
+        product
+        for product in candidate_products
+        if product_matches_recommendation_constraints(
+            product,
+            constraints,
+            normalized_text=normalized_product_texts.get(product.id),
+        )
+    ]
+    if constrained_products:
+        candidate_products = constrained_products
 
     scored_items: list[tuple[ProductRead, int, int, int, float, float, datetime, bool]] = []
-    for product in products:
-        product_read = to_product_read(product, shop=shop_map.get(product.shop_id), shop_name="Unknown Shop")
+    for product_read in candidate_products:
+        normalized_text = normalized_product_texts.get(product_read.id)
         query_score = compute_product_query_score(
             product_read,
             query=cleaned_query,
             query_terms=query_terms,
             explicit_category=resolved_category,
         )
+        query_score += compute_product_constraint_score(
+            product_read,
+            constraints,
+            normalized_text=normalized_text,
+        )
         history_score = compute_product_history_score(product_read, history_profile)
-        sales_score = int(product.monthly_sales or 0)
-        rating_score = float(product.rating or 0.0)
-        review_score = float(product.review_count or 0)
+        sales_score = int(product_read.monthly_sales or 0)
+        rating_score = float(product_read.rating or 0.0)
+        review_score = float(product_read.review_count or 0)
         scored_items.append(
             (
                 product_read,
@@ -3702,8 +4003,8 @@ async def get_personalized_product_recommendations(
                 sales_score,
                 rating_score,
                 review_score,
-                product.created_at,
-                product.id in recent_product_id_set,
+                product_read.created_at,
+                product_read.id in recent_product_id_set,
             )
         )
 
