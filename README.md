@@ -88,6 +88,44 @@ uv sync
 | PostgreSQL | `5432` | 主数据库 |
 | Redis | `6379` | 缓存、锁与会话辅助 |
 
+## Tailscale 跨机启动分工
+
+当前仓库默认采用这一套跨机演示拓扑：
+
+- MBA 负责前端、后端和主线 Rasa。
+- 台式机负责数据库、缓存和模型服务。
+
+### MBA 上启动
+
+| 服务 | 端口 | 说明 |
+| --- | --- | --- |
+| 前端 | `5173` | `frontend/` 的 Vite 开发服务 |
+| 后端基础版或 LoRA 版 | `8000` 或 `8001` | 二选一；都跑在 MBA，本机继续连 `127.0.0.1:5005` 的 Rasa |
+| Rasa Server | `5005` | 主线 Rasa 服务 |
+| Rasa Action Server | `5055` | 主线 Action Server |
+
+补充说明：
+
+- `backend/.env` 里的 `RASA_SERVER_URL`、`FRONTEND_BASE_URL` 保持指向 MBA 本机。
+- `rasa/.env` 里的 `BACKEND_API_URL`、`FRONTEND_BASE_URL` 也保持指向 MBA 本机。
+- 如果要跑 benchmark，`benchmark/` 命令和 `5006` 的 benchmark 基线通常也放在 MBA 上启动，不放到台式机。
+
+### 台式机上启动
+
+| 服务 | 端口 | 说明 |
+| --- | --- | --- |
+| PostgreSQL | `5432` | `backend/.env` 的 `DATABASE_URL` 指向这里 |
+| Redis | `6379` | `backend/.env` 的 `REDIS_URL` 指向这里；用于缓存、锁和会话辅助 |
+| Ollama | `11434` | `backend/.env` 和 `rasa/.env` 的 `OLLAMA_BASE_URL` 指向这里 |
+| vLLM / OpenAI-compatible | `8002` | `backend/.env` 的 `AGENT_LLM_BASE_URL` 指向这里 |
+
+补充说明：
+
+- Ollama 需要监听 `0.0.0.0:11434`，否则 MBA 无法通过 Tailscale 访问。
+- vLLM 继续保持 `--host 0.0.0.0 --port 8002` 即可。
+- Redis 默认仍是本地安全模式；只有当 MBA 需要访问台式机 Redis 时，才需要显式配置 `REDIS_BIND_ADDRESS`、`REDIS_PROTECTED_MODE`、`REDIS_PASSWORD`。
+- Windows 防火墙建议只对 MBA 的 Tailnet IP 或 Tailscale 网卡放行 `11434`、`8002`、`5432`、`6379`。
+
 ## 说明
 
 - benchmark 相关命令、数据集、结果与分析已经统一迁到 [benchmark/README.md](benchmark/README.md)。
