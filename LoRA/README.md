@@ -65,7 +65,7 @@ uv run python scripts/prepare_data.py \
 
 ### 2. 过滤出当前训练配置使用的数据集
 
-当前默认训练配置 [configs/smoke_ec_faq_only.yaml](/D:/Github/Rasa-EC-bot/LoRA/configs/smoke_ec_faq_only.yaml) 使用的是 `data/processed/ec_faq_only/`：
+当前默认训练配置 [configs/smoke_ec_faq_only.yaml](configs/smoke_ec_faq_only.yaml) 使用的是 `data/processed/ec_faq_only/`：
 
 ```powershell
 cd LoRA
@@ -153,17 +153,19 @@ uv run python scripts/export_ollama_model.py \
 
 下面示例会把基础模型和 LoRA adapter 组合成 OpenAI-compatible 服务：
 
+如果这台机器要通过 Tailscale 给另一台机器上的后端提供服务，保持 `--host 0.0.0.0 --port 8002` 不变即可；另外再到系统防火墙里只放行给对应的 Tailnet 设备。
+
 Windows（推荐在 WSL 中执行）：
 
 ```bash
-cd /mnt/<drive>/path/to/Rasa-EC-bot/LoRA
+cd LoRA
 uv run --with vllm python -m vllm.entrypoints.openai.api_server \
   --host 0.0.0.0 \
   --port 8002 \
-  --model /mnt/<drive>/path/to/Rasa-EC-bot/LoRA/models/Qwen3.5-2B \
+  --model models/Qwen3.5-2B \
   --served-model-name qwen3.5-2b-lora \
   --enable-lora \
-  --lora-modules qwen3.5-2b-lora=/mnt/<drive>/path/to/Rasa-EC-bot/LoRA/outputs/smoke_ec_faq_only/adapter \
+  --lora-modules qwen3.5-2b-lora=outputs/smoke_ec_faq_only/adapter \
   --max-model-len 4096 \
   --max-num-seqs 2 \
   --gpu-memory-utilization 0.55 \
@@ -173,14 +175,14 @@ uv run --with vllm python -m vllm.entrypoints.openai.api_server \
 macOS / Linux：
 
 ```bash
-cd /path/to/Rasa-EC-bot/LoRA
+cd LoRA
 uv run --with vllm python -m vllm.entrypoints.openai.api_server \
   --host 0.0.0.0 \
   --port 8002 \
-  --model /path/to/Rasa-EC-bot/LoRA/models/Qwen3.5-2B \
+  --model models/Qwen3.5-2B \
   --served-model-name qwen3.5-2b-lora \
   --enable-lora \
-  --lora-modules qwen3.5-2b-lora=/path/to/Rasa-EC-bot/LoRA/outputs/smoke_ec_faq_only/adapter \
+  --lora-modules qwen3.5-2b-lora=outputs/smoke_ec_faq_only/adapter \
   --max-model-len 4096 \
   --max-num-seqs 2 \
   --gpu-memory-utilization 0.55 \
@@ -189,7 +191,7 @@ uv run --with vllm python -m vllm.entrypoints.openai.api_server \
 
 如为 macOS，本段通常只作为命令格式参考；实际跑 `vLLM` 仍建议使用 Linux 环境。
 
-后端如何接到该服务，见 [backend/README.md](/D:/Github/Rasa-EC-bot/backend/README.md)。
+后端如何接到该服务，见 [backend/README.md](../backend/README.md)。
 
 ## 迁移到其他设备时需要带哪些文件
 
@@ -227,6 +229,6 @@ uv run --with vllm python -m vllm.entrypoints.openai.api_server \
 
 ## 相关文档
 
-- [README.md](/D:/Github/Rasa-EC-bot/README.md)
-- [backend/README.md](/D:/Github/Rasa-EC-bot/backend/README.md)
-- [tests/README.md](/D:/Github/Rasa-EC-bot/tests/README.md)
+- [README.md](../README.md)
+- [backend/README.md](../backend/README.md)
+- [tests/README.md](../tests/README.md)

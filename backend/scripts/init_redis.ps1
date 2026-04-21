@@ -28,6 +28,21 @@ $ContainerName = Get-ConfigValue -Lines $EnvLines -Key "REDIS_DOCKER_CONTAINER_N
 $InitMarkerKey = Get-ConfigValue -Lines $EnvLines -Key "REDIS_INIT_MARKER_KEY" -Default "rasa_ec_bot:system:initialized_at"
 $SchemaKey = Get-ConfigValue -Lines $EnvLines -Key "REDIS_INIT_SCHEMA_KEY" -Default "rasa_ec_bot:system:schema_version"
 $SchemaVersion = Get-ConfigValue -Lines $EnvLines -Key "REDIS_INIT_SCHEMA_VERSION" -Default "1"
+$RedisPassword = Get-ConfigValue -Lines $EnvLines -Key "REDIS_PASSWORD" -Default ""
+
+function Invoke-RedisCli {
+    param(
+        [Parameter(ValueFromRemainingArguments = $true)]
+        [string[]]$RedisCommandArgs
+    )
+
+    $RedisCliArgs = @()
+    if ($RedisPassword) {
+        $RedisCliArgs += @("-a", $RedisPassword)
+    }
+    $RedisCliArgs += $RedisCommandArgs
+    docker exec $ContainerName redis-cli @RedisCliArgs
+}
 
 $Running = docker ps --filter "name=^/$ContainerName$" --format "{{.Names}}"
 if (-not $Running) {
@@ -37,7 +52,7 @@ if (-not $Running) {
 $MaxRetries = 15
 $Ready = $false
 for ($i = 1; $i -le $MaxRetries; $i++) {
-    $pong = docker exec $ContainerName redis-cli ping 2>$null
+    $pong = Invoke-RedisCli ping 2>$null
     if ($pong -match "PONG") {
         $Ready = $true
         break
@@ -50,8 +65,8 @@ if (-not $Ready) {
 }
 
 $timestamp = [DateTime]::UtcNow.ToString("o")
-docker exec $ContainerName redis-cli SET $InitMarkerKey $timestamp | Out-Null
-docker exec $ContainerName redis-cli SETNX $SchemaKey $SchemaVersion | Out-Null
+Invoke-RedisCli SET $InitMarkerKey $timestamp | Out-Null
+Invoke-RedisCli SETNX $SchemaKey $SchemaVersion | Out-Null
 
 Write-Host "Redis initialization complete."
 Write-Host "Container: $ContainerName"

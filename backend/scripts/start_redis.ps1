@@ -35,6 +35,9 @@ $HostPort = Get-ConfigValue -Lines $EnvLines -Key "REDIS_DOCKER_HOST_PORT" -Defa
 $ContainerPort = Get-ConfigValue -Lines $EnvLines -Key "REDIS_DOCKER_CONTAINER_PORT" -Default "6379"
 $DataDirRaw = Get-ConfigValue -Lines $EnvLines -Key "REDIS_DOCKER_DATA_DIR" -Default "../database/redisdata"
 $AppendOnly = Get-ConfigValue -Lines $EnvLines -Key "REDIS_APPENDONLY" -Default "yes"
+$BindAddress = Get-ConfigValue -Lines $EnvLines -Key "REDIS_BIND_ADDRESS" -Default "0.0.0.0"
+$ProtectedMode = Get-ConfigValue -Lines $EnvLines -Key "REDIS_PROTECTED_MODE" -Default "yes"
+$RedisPassword = Get-ConfigValue -Lines $EnvLines -Key "REDIS_PASSWORD" -Default ""
 
 $DataDir = if ([System.IO.Path]::IsPathRooted($DataDirRaw)) {
     $DataDirRaw
@@ -57,7 +60,11 @@ if ($Existing -and $Recreate) {
 
 if (-not $Existing) {
     Write-Host "Creating redis container: $ContainerName"
-    docker run --name $ContainerName -p "${HostPort}:${ContainerPort}" -v "${DataDir}:/data" -d $Image redis-server --appendonly $AppendOnly | Out-Null
+    $RedisArgs = @("redis-server", "--appendonly", $AppendOnly, "--bind", $BindAddress, "--protected-mode", $ProtectedMode)
+    if ($RedisPassword) {
+        $RedisArgs += @("--requirepass", $RedisPassword)
+    }
+    docker run --name $ContainerName -p "${HostPort}:${ContainerPort}" -v "${DataDir}:/data" -d $Image @RedisArgs | Out-Null
 } else {
     $Running = docker ps --filter "name=^/$ContainerName$" --format "{{.Names}}"
     if (-not $Running) {
@@ -72,3 +79,6 @@ Write-Host "Redis docker setup complete."
 Write-Host "Container: $ContainerName"
 Write-Host "Data dir : $DataDir"
 Write-Host "Port map : $HostPort -> $ContainerPort"
+Write-Host "Bind addr: $BindAddress"
+Write-Host "Protected: $ProtectedMode"
+Write-Host ("Password : " + ($(if ($RedisPassword) { "configured" } else { "not configured" })))

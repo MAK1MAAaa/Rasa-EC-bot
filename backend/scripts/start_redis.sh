@@ -51,6 +51,9 @@ HOST_PORT="$(get_config_value "REDIS_DOCKER_HOST_PORT" "6379")"
 CONTAINER_PORT="$(get_config_value "REDIS_DOCKER_CONTAINER_PORT" "6379")"
 DATA_DIR_RAW="$(get_config_value "REDIS_DOCKER_DATA_DIR" "../database/redisdata")"
 APPENDONLY="$(get_config_value "REDIS_APPENDONLY" "yes")"
+BIND_ADDRESS="$(get_config_value "REDIS_BIND_ADDRESS" "0.0.0.0")"
+PROTECTED_MODE="$(get_config_value "REDIS_PROTECTED_MODE" "yes")"
+REDIS_PASSWORD="$(get_config_value "REDIS_PASSWORD" "")"
 
 if [[ "${DATA_DIR_RAW}" = /* ]]; then
   DATA_DIR="${DATA_DIR_RAW}"
@@ -71,12 +74,21 @@ fi
 
 if [[ -z "${EXISTING}" ]]; then
   echo "Creating redis container: ${CONTAINER_NAME}"
+  REDIS_ARGS=(
+    redis-server
+    --appendonly "${APPENDONLY}"
+    --bind "${BIND_ADDRESS}"
+    --protected-mode "${PROTECTED_MODE}"
+  )
+  if [[ -n "${REDIS_PASSWORD}" ]]; then
+    REDIS_ARGS+=(--requirepass "${REDIS_PASSWORD}")
+  fi
   docker run \
     --name "${CONTAINER_NAME}" \
     -p "${HOST_PORT}:${CONTAINER_PORT}" \
     -v "${DATA_DIR}:/data" \
     -d "${IMAGE}" \
-    redis-server --appendonly "${APPENDONLY}" >/dev/null
+    "${REDIS_ARGS[@]}" >/dev/null
 else
   RUNNING="$(docker ps --filter "name=^/${CONTAINER_NAME}$" --format "{{.Names}}" | head -n 1 || true)"
   if [[ -z "${RUNNING}" ]]; then
@@ -91,3 +103,10 @@ echo "Redis docker setup complete."
 echo "Container: ${CONTAINER_NAME}"
 echo "Data dir : ${DATA_DIR}"
 echo "Port map : ${HOST_PORT} -> ${CONTAINER_PORT}"
+echo "Bind addr: ${BIND_ADDRESS}"
+echo "Protected: ${PROTECTED_MODE}"
+if [[ -n "${REDIS_PASSWORD}" ]]; then
+  echo "Password : configured"
+else
+  echo "Password : not configured"
+fi

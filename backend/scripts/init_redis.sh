@@ -44,6 +44,15 @@ CONTAINER_NAME="$(get_config_value "REDIS_DOCKER_CONTAINER_NAME" "rasa-redis")"
 INIT_MARKER_KEY="$(get_config_value "REDIS_INIT_MARKER_KEY" "rasa_ec_bot:system:initialized_at")"
 SCHEMA_KEY="$(get_config_value "REDIS_INIT_SCHEMA_KEY" "rasa_ec_bot:system:schema_version")"
 SCHEMA_VERSION="$(get_config_value "REDIS_INIT_SCHEMA_VERSION" "1")"
+REDIS_PASSWORD="$(get_config_value "REDIS_PASSWORD" "")"
+
+redis_cli_exec() {
+  if [[ -n "${REDIS_PASSWORD}" ]]; then
+    docker exec "${CONTAINER_NAME}" redis-cli -a "${REDIS_PASSWORD}" "$@"
+  else
+    docker exec "${CONTAINER_NAME}" redis-cli "$@"
+  fi
+}
 
 RUNNING="$(docker ps --filter "name=^/${CONTAINER_NAME}$" --format "{{.Names}}" | head -n 1 || true)"
 if [[ -z "${RUNNING}" ]]; then
@@ -55,7 +64,7 @@ MAX_RETRIES=15
 READY=0
 
 for ((i=1; i<=MAX_RETRIES; i++)); do
-  PONG="$(docker exec "${CONTAINER_NAME}" redis-cli ping 2>/dev/null || true)"
+  PONG="$(redis_cli_exec ping 2>/dev/null || true)"
   if [[ "${PONG}" == "PONG" ]]; then
     READY=1
     break
@@ -69,8 +78,8 @@ if [[ "${READY}" -ne 1 ]]; then
 fi
 
 TIMESTAMP="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-docker exec "${CONTAINER_NAME}" redis-cli SET "${INIT_MARKER_KEY}" "${TIMESTAMP}" >/dev/null
-docker exec "${CONTAINER_NAME}" redis-cli SETNX "${SCHEMA_KEY}" "${SCHEMA_VERSION}" >/dev/null
+redis_cli_exec SET "${INIT_MARKER_KEY}" "${TIMESTAMP}" >/dev/null
+redis_cli_exec SETNX "${SCHEMA_KEY}" "${SCHEMA_VERSION}" >/dev/null
 
 echo "Redis initialization complete."
 echo "Container  : ${CONTAINER_NAME}"

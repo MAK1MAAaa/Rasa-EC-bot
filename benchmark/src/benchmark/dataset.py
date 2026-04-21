@@ -153,8 +153,18 @@ def _compute_stats(tier: str, grouped: dict[str, list[dict[str, Any]]]) -> Datas
     )
 
 
+def _serialize_manifest_path(path: Path) -> str:
+    if not path.is_absolute():
+        return path.as_posix()
+
+    try:
+        return path.relative_to(ROOT_DIR).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="�ؽ� benchmark ���ݼ�Ŀ¼�� manifest��")
+    parser = argparse.ArgumentParser(description="Rebuild benchmark datasets and manifest.")
     parser.add_argument("--source-dir", type=Path, default=DEFAULT_SOURCE_DIR)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--rasa-nlu", type=Path, default=DEFAULT_RASA_NLU)
@@ -172,7 +182,7 @@ def build_dataset(*, source_dir: Path, output_dir: Path, seed: int, rasa_nlu: Pa
         for family, records in grouped.items():
             path = output_dir / tier / f"{family}.jsonl"
             _write_jsonl(path, records)
-            outputs[tier][family] = str(path)
+            outputs[tier][family] = _serialize_manifest_path(path)
         stats = _compute_stats(tier, grouped)
         stats_payload[tier] = {
             "total_count": stats.total_count,
@@ -184,9 +194,9 @@ def build_dataset(*, source_dir: Path, output_dir: Path, seed: int, rasa_nlu: Pa
         "seed": seed,
         "outputs": outputs,
         "sources": {
-            "source_dir": str(source_dir),
-            "rasa_nlu": str(rasa_nlu),
-            "lora_jsonl": [str(path) for path in lora_jsonl],
+            "source_dir": _serialize_manifest_path(source_dir),
+            "rasa_nlu": _serialize_manifest_path(rasa_nlu),
+            "lora_jsonl": [_serialize_manifest_path(path) for path in lora_jsonl],
         },
         "stats": stats_payload,
     }

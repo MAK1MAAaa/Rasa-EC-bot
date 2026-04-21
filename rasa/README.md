@@ -14,6 +14,15 @@
 | `endpoints.yml` | Rasa 外部依赖配置 |
 | `credentials.yml` | 渠道配置 |
 
+## 环境变量
+
+- 仓库根目录下的 `rasa/.env` 已提供 MBA 本机跑 Rasa、台式机远程跑 Ollama 的模板。
+- 当前默认启用的是 MagicDNS 写法，远程主机占位符是 `__TAILSCALE_DESKTOP_MAGICDNS__`。
+- 同一份文件里保留了 Tailnet IP 备选行，占位符是 `__TAILSCALE_DESKTOP_IP__`。
+- 本机链路保持不变：`BACKEND_API_URL=http://127.0.0.1:8000/api/v1`、`FRONTEND_BASE_URL=http://localhost:5173`。
+- 远程链路只改 `OLLAMA_BASE_URL`。
+- `RASA_INTERNAL_TOKEN` 需要和 `backend/.env` 保持一致。
+
 ## 安装依赖
 
 Windows：
@@ -81,4 +90,4 @@ uv run rasa run actions --actions actions --port 5055
 ## 说明
 
 - 本 README 只覆盖主线 Rasa 的训练与运行。
-- Benchmark 基线模型训练、5006 端口服务启动和完整 benchmark 流程统一维护在 [`benchmark/README.md`](/D:/Github/Rasa-EC-bot/benchmark/README.md)。
+- Benchmark 基线模型训练、5006 端口服务启动和完整 benchmark 流程统一维护在 [`benchmark/README.md`](../benchmark/README.md)。

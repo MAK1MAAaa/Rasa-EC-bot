@@ -2,27 +2,27 @@
   "seed": 20260412,
   "outputs": {
     "core": {
-      "after_sales_query": "D:\\Github\\Rasa-EC-bot\\benchmark\\datasets\\core\\after_sales_query.jsonl",
-      "knowledge_and_multimodal": "D:\\Github\\Rasa-EC-bot\\benchmark\\datasets\\core\\knowledge_and_multimodal.jsonl",
-      "logistics_query": "D:\\Github\\Rasa-EC-bot\\benchmark\\datasets\\core\\logistics_query.jsonl",
-      "order_query": "D:\\Github\\Rasa-EC-bot\\benchmark\\datasets\\core\\order_query.jsonl",
-      "recommendation": "D:\\Github\\Rasa-EC-bot\\benchmark\\datasets\\core\\recommendation.jsonl",
-      "transactional_action": "D:\\Github\\Rasa-EC-bot\\benchmark\\datasets\\core\\transactional_action.jsonl"
+      "after_sales_query": "benchmark/datasets/core/after_sales_query.jsonl",
+      "knowledge_and_multimodal": "benchmark/datasets/core/knowledge_and_multimodal.jsonl",
+      "logistics_query": "benchmark/datasets/core/logistics_query.jsonl",
+      "order_query": "benchmark/datasets/core/order_query.jsonl",
+      "recommendation": "benchmark/datasets/core/recommendation.jsonl",
+      "transactional_action": "benchmark/datasets/core/transactional_action.jsonl"
     },
     "extended": {
-      "after_sales_query": "D:\\Github\\Rasa-EC-bot\\benchmark\\datasets\\extended\\after_sales_query.jsonl",
-      "knowledge_and_multimodal": "D:\\Github\\Rasa-EC-bot\\benchmark\\datasets\\extended\\knowledge_and_multimodal.jsonl",
-      "logistics_query": "D:\\Github\\Rasa-EC-bot\\benchmark\\datasets\\extended\\logistics_query.jsonl",
-      "order_query": "D:\\Github\\Rasa-EC-bot\\benchmark\\datasets\\extended\\order_query.jsonl",
-      "recommendation": "D:\\Github\\Rasa-EC-bot\\benchmark\\datasets\\extended\\recommendation.jsonl",
-      "transactional_action": "D:\\Github\\Rasa-EC-bot\\benchmark\\datasets\\extended\\transactional_action.jsonl"
+      "after_sales_query": "benchmark/datasets/extended/after_sales_query.jsonl",
+      "knowledge_and_multimodal": "benchmark/datasets/extended/knowledge_and_multimodal.jsonl",
+      "logistics_query": "benchmark/datasets/extended/logistics_query.jsonl",
+      "order_query": "benchmark/datasets/extended/order_query.jsonl",
+      "recommendation": "benchmark/datasets/extended/recommendation.jsonl",
+      "transactional_action": "benchmark/datasets/extended/transactional_action.jsonl"
     }
   },
   "sources": {
-    "source_dir": "D:\\Github\\Rasa-EC-bot\\benchmark\\datasets",
-    "rasa_nlu": "D:\\Github\\Rasa-EC-bot\\rasa\\data\\nlu.yml",
+    "source_dir": "benchmark/datasets",
+    "rasa_nlu": "rasa/data/nlu.yml",
     "lora_jsonl": [
-      "D:\\Github\\Rasa-EC-bot\\LoRA\\data\\processed\\eval_prompts_20.jsonl"
+      "LoRA/data/processed/eval_prompts_20.jsonl"
     ]
   },
   "stats": {

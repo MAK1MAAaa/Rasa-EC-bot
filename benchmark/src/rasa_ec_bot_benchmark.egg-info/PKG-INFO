@@ -1,3 +1,13 @@
+Metadata-Version: 2.4
+Name: rasa-ec-bot-benchmark
+Version: 0.1.0
+Summary: Root benchmark engineering for Rasa-EC-bot
+Requires-Python: <3.12,>=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: httpx<1,>=0.27
+Requires-Dist: pyyaml<7,>=6
+Requires-Dist: pandas<3,>=2
+
 # Benchmark
 
 `benchmark/` 是系统 benchmark 的唯一正式入口。环境准备、数据集、执行、结果分析和测试都以本 README 为准。

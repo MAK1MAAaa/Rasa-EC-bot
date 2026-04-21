@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
@@ -80,6 +81,50 @@ class DatasetBuilderTests(unittest.TestCase):
             self.assertEqual(written["stats"]["extended"]["total_count"], 1)
             self.assertEqual(written["stats"]["core"]["suite_counts"], {"shared_core": 1})
             self.assertEqual(written["stats"]["extended"]["suite_counts"], {"agent_extension": 1})
+
+    def test_build_dataset_serializes_repo_relative_paths_when_under_project_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source_dir = root / "source"
+            output_dir = root / "output"
+            (source_dir / "core").mkdir(parents=True)
+            (source_dir / "extended").mkdir(parents=True)
+
+            record = {
+                "id": "core-1",
+                "scenario_family": "recommendation",
+                "scenario": "basic",
+                "turns": [{"id": "t1", "kind": "chat_send", "message": "Recommend a white phone."}],
+                "account": "anonymous",
+                "required_capabilities": [],
+                "preconditions": {},
+                "expected_outcomes": {"required_any_text_keywords": ["recommend"], "min_response_chars": 8},
+                "tags": ["core"],
+            }
+
+            (source_dir / "core" / "recommendation.jsonl").write_text(
+                json.dumps(record, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+            (source_dir / "extended" / "recommendation.jsonl").write_text(
+                json.dumps(record, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+
+            with patch.object(MODULE, "ROOT_DIR", root):
+                manifest = MODULE.build_dataset(
+                    source_dir=source_dir,
+                    output_dir=output_dir,
+                    seed=20260412,
+                    rasa_nlu=root / "rasa" / "data" / "nlu.yml",
+                    lora_jsonl=[root / "LoRA" / "data" / "processed" / "eval_prompts_20.jsonl"],
+                )
+
+            self.assertEqual(manifest["sources"]["source_dir"], "source")
+            self.assertEqual(manifest["sources"]["rasa_nlu"], "rasa/data/nlu.yml")
+            self.assertEqual(manifest["sources"]["lora_jsonl"], ["LoRA/data/processed/eval_prompts_20.jsonl"])
+            self.assertEqual(manifest["outputs"]["core"]["recommendation"], "output/core/recommendation.jsonl")
+            self.assertEqual(manifest["outputs"]["extended"]["recommendation"], "output/extended/recommendation.jsonl")
 
 
 if __name__ == "__main__":
