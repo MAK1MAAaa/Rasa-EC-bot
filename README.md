@@ -138,3 +138,4 @@ uv sync
 - 后端商品推荐已补上显式预算、颜色和常见规格词（如 `Type-C`、`27 寸`）的约束解析与候选过滤，避免把不满足条件的商品混进推荐结果。
 - 仓库已补充一套 Tailscale 跨机演示用的 `backend/.env` 和 `rasa/.env` 本地模板：默认走 MagicDNS，占位符可切换为 Tailnet IP，适合 MBA 本机跑前后端/Rasa、台式机远程跑模型与数据库。
 - Redis Docker 启动脚本已支持 `REDIS_BIND_ADDRESS`、`REDIS_PROTECTED_MODE`、`REDIS_PASSWORD` 三个可选变量；默认行为不变，只有显式开启时才用于 Tailscale 跨机调试。
+- 前端 Vite 开发服务器现在默认监听 `0.0.0.0:5173`；如果整套服务都跑在台式机上，MBA 只需要访问 `http://<台式机 Tailnet IP>:5173`，前端代理会继续转发到台式机本机 `localhost:8000`。
