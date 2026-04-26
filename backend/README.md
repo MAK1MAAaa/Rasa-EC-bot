@@ -1,12 +1,13 @@
 # Backend
 
-`backend/` 提供 FastAPI 服务，负责认证、商品与订单接口、聊天路由、Rasa/LLM 协同、服务端记忆、知识库与附件处理。
+`backend/` 提供 FastAPI 服务，负责认证、商品与订单接口、聊天路由、Rasa/LLM 协同、服务端记忆、知识库和附件处理。
 
 ## 目录
 
 | 路径 | 说明 |
 | --- | --- |
 | `app/main.py` | FastAPI 入口 |
+| `app/llm_client.py` | 主备 LLM 调用与失败切换 |
 | `app/database.py` | PostgreSQL 连接与会话 |
 | `app/cache.py` | Redis 访问 |
 | `app/models.py` | SQLModel / Pydantic 模型 |
@@ -26,7 +27,7 @@
 - Python 3.10
 - `uv`
 - Docker
-- 可选：本地 PostgreSQL / Redis。如果不使用 Docker，只要 `.env` 指向正确实例即可。
+- 可选：本地 PostgreSQL / Redis。如果不用 Docker，只要 `.env` 指向正确实例即可。
 
 ## 环境变量
 
@@ -47,75 +48,69 @@ cp .env.sample .env
 - `DATABASE_URL`
 - `REDIS_URL`
 - `RASA_SERVER_URL`
+- `FRONTEND_BASE_URL`
+- `BACKEND_CORS_ALLOW_ORIGINS`
 - `OLLAMA_BASE_URL`
 - `AGENT_LLM_PROVIDER`
 - `AGENT_LLM_BASE_URL`
 - `AGENT_LLM_MODEL`
 
-### Tailscale 跨机演示模板
+### LLM 主备切换
 
-如果采用“MBA 跑前端/后端/Rasa，台式机跑 Postgres/Redis/Ollama/vLLM”的演示拓扑：
+后端现在支持“主用 LLM 失败时自动切换到后备 API”。默认行为：
 
-- 仓库根目录下的 `backend/.env` 已按这个拓扑预填好一份模板。
-- 当前默认启用的是 MagicDNS 写法，远程主机占位符是 `__TAILSCALE_DESKTOP_MAGICDNS__`。
-- 同一份文件里保留了 Tailnet IP 备选行，占位符是 `__TAILSCALE_DESKTOP_IP__`。
-- 本机链路保持不变：`RASA_SERVER_URL=http://127.0.0.1:5005`、`FRONTEND_BASE_URL=http://localhost:5173`。
-- 远程链路改到台式机：`DATABASE_URL`、`REDIS_URL`、`OLLAMA_BASE_URL`、`AGENT_LLM_BASE_URL`。
-- `RASA_INTERNAL_TOKEN` 需要和 `rasa/.env` 保持一致。
-- 当前仓库里的本地 `backend/.env` 已切到你提供的台式机 Tailnet IP `100.110.132.72`；如果之后改用 MagicDNS，只需要把对应行切回去。
+- 主用链路继续读取 `AGENT_LLM_PROVIDER`、`AGENT_LLM_BASE_URL`、`AGENT_LLM_MODEL`、`AGENT_LLM_API_KEY`、`AGENT_LLM_TIMEOUT_SEC`。
+- 后备链路读取 `AGENT_LLM_FALLBACK_PROVIDER`、`AGENT_LLM_FALLBACK_BASE_URL`、`AGENT_LLM_FALLBACK_MODEL`、`AGENT_LLM_FALLBACK_API_KEY`、`AGENT_LLM_FALLBACK_TIMEOUT_SEC`。
+- 主服务出现 `500/502/503/504`、`408`、`429`、超时、连接失败、空响应或无效响应时，会自动切到后备链路。
+- 主服务如果返回明确的 `4xx` 配置错误，默认不会盲目切后备，避免掩盖错误配置。
 
-### 台式机端调试清单
+示例：主用 Ollama，本机失败时切到 OpenAI-compatible API。
 
-如果台式机负责跑 Postgres、Redis、Ollama、vLLM，建议按下面检查：
+```env
+OLLAMA_BASE_URL=http://127.0.0.1:11434
 
-1. PostgreSQL
+AGENT_LLM_PROVIDER=ollama
+AGENT_LLM_BASE_URL=http://127.0.0.1:11434
+AGENT_LLM_MODEL=qwen3.5:2b-lora
+AGENT_LLM_TIMEOUT_SEC=45
 
-- 继续使用 `-p 5432:5432` 的 Docker 暴露方式即可。
-- 如果启用了 Windows 防火墙，只放行给 MBA 的 Tailnet IP `100.65.236.105` 或 Tailscale 网卡。
-
-2. Redis
-
-- `backend/.env.sample` 新增了 `REDIS_BIND_ADDRESS`、`REDIS_PROTECTED_MODE`、`REDIS_PASSWORD`。
-- 默认值仍是本地安全模式：`REDIS_PROTECTED_MODE=yes`，不影响原来的 Windows 单机运行。
-- 如果要让 MBA 通过 Tailscale 访问台式机 Redis，建议在台式机 `backend/.env` 里显式设置：
-
-```powershell
-REDIS_BIND_ADDRESS=0.0.0.0
-REDIS_PROTECTED_MODE=no
-REDIS_PASSWORD=改成你自己的强密码
+AGENT_LLM_FALLBACK_PROVIDER=openai_compat
+AGENT_LLM_FALLBACK_BASE_URL=http://127.0.0.1:8002/v1
+AGENT_LLM_FALLBACK_MODEL=qwen3.5-2b-lora
+AGENT_LLM_FALLBACK_API_KEY=EMPTY
+AGENT_LLM_FALLBACK_TIMEOUT_SEC=45
 ```
 
-- 然后重新运行：
+## 当前推荐拓扑
 
-```powershell
-cd backend
-.\scripts\start_redis.ps1 -Recreate
-.\scripts\init_redis.ps1
+当前仓库按“所有服务都跑在当前 Windows 主机”来演示更稳妥：
+
+- 前端、后端、Rasa、Redis、PostgreSQL、Ollama、vLLM 都启动在同一台 Windows 上。
+- 另一台电脑只通过 Tailscale 访问这台 Windows 主机的前端地址：`http://<本机 Tailnet IP>:5173`。
+- 后端、Rasa、Ollama、vLLM、Redis、PostgreSQL 之间都继续走 `127.0.0.1`，不要为了演示把它们改成 Tailnet IP。
+
+这套拓扑下：
+
+- `OLLAMA_BASE_URL` 应保持 `http://127.0.0.1:11434`。
+- `RASA_SERVER_URL` 应保持 `http://127.0.0.1:5005`。
+- `REDIS_URL` 应保持 `redis://127.0.0.1:6379/0`。
+- `DATABASE_URL` 应保持指向本机数据库。
+- `FRONTEND_BASE_URL` 建议改成对外演示地址，例如 `http://100.110.132.72:5173`，这样聊天卡片里的商品/订单链接会跳到远端用户可访问的地址，而不是 `localhost`。
+- `BACKEND_CORS_ALLOW_ORIGINS` 建议至少包含：
+
+```env
+BACKEND_CORS_ALLOW_ORIGINS=http://localhost:5173,http://127.0.0.1:5173,http://100.110.132.72:5173
 ```
 
-- 如果设置了 `REDIS_PASSWORD`，MBA 侧 `backend/.env` 的 `REDIS_URL` 也要改成：
+## Windows + Tailscale 检查结论
 
-```text
-redis://:你的密码@100.110.132.72:6379/0
-```
+当前机器上，如果你的 Tailscale 网卡已经是 `Private`，而且 Windows 防火墙的 `Private/Public` 配置档本身就是关闭状态，那么“Ollama 被拦截”通常不是防火墙主因，更常见的是：
 
-3. Ollama
+- Ollama 根本没启动。
+- Ollama 启动了，但你把业务链路错误地改成了 Tailnet IP。
+- 前端能访问，但后端链接仍然生成了 `localhost`。
 
-- 台式机上需要让 Ollama 监听非 `127.0.0.1` 地址，否则 MBA 无法访问：
-
-```powershell
-$env:OLLAMA_HOST="0.0.0.0:11434"
-ollama serve
-```
-
-4. vLLM
-
-- 台式机上的 vLLM 继续保持 `--host 0.0.0.0 --port 8002` 即可。
-
-5. 防火墙
-
-- 只放行 `11434`、`8002`、`5432`、`6379` 给 `100.65.236.105` 或 Tailscale 网卡。
-- 如果不需要 MBA 访问 Redis，可以保留 `REDIS_PROTECTED_MODE=yes`，后端会在 Redis 不可用时降级为无缓存模式。
+如果当前方案是“只让另一台电脑访问前端”，那就不要暴露 Ollama 端口；让它继续只监听本机即可。
 
 ## 安装依赖
 
@@ -187,13 +182,13 @@ cd backend
 bash scripts/start_redis.sh
 ```
 
-脚本现在会读取这些可选变量：
+脚本会读取这些可选变量：
 
 - `REDIS_BIND_ADDRESS`
 - `REDIS_PROTECTED_MODE`
 - `REDIS_PASSWORD`
 
-默认值保持原来的本地安全模式；只有你显式关闭 `REDIS_PROTECTED_MODE` 或设置密码时，才会改变跨机器访问行为。
+默认值保持本机安全模式；只有你显式关闭 `REDIS_PROTECTED_MODE` 或设置密码时，才会改变跨机器访问行为。
 
 ### 初始化
 
@@ -252,13 +247,13 @@ uv run uvicorn app.main:app --host 127.0.0.1 --port 8001
 3. 执行 `init_postgres.ps1` 或 `init_postgres.sh`。
 4. 启动 Redis。
 5. 执行 `init_redis.ps1` 或 `init_redis.sh`。
-6. 启动后端基础版或 LoRA 版。
+6. 启动 Rasa。
+7. 启动后端基础版或 LoRA 版。
+8. 启动前端 Vite 开发服务。
+9. 在另一台电脑访问 `http://<本机 Tailnet IP>:5173`。
 
 ## 说明
 
 - `backend/prompts/*.md` 是当前后端使用的正式 prompt 来源。
-- 商品推荐链路会解析用户消息里的显式预算、颜色和部分规格词，并优先过滤不满足这些硬约束的候选商品。
-- 聊天记忆快照刷新链路会显式转换 `session_id` 的 SQL 参数类型，避免 asyncpg 在原生 SQL 中因 `text` / `varchar` 推断冲突而报错。
-- `backend/data/chat_uploads/` 属于运行时上传产物目录，不再纳入版本控制。
-- Linux 和 macOS 现在统一复用同一份 `*.sh` 脚本，不再保留额外的 `*_fedora.sh` / `*_macos.sh` 包装层。
-- Benchmark 的完整启动顺序、基线重置和运行方法只在 [`benchmark/README.md`](../benchmark/README.md) 中维护。
+- 商品推荐链路会解析用户消息里的显式预算、颜色和部分规格词，并优先过滤不满足硬约束的候选商品。
+- 登录用户的服务端记忆以 PostgreSQL 为主存储，Markdown 文件落在 `backend/data/chat_memory/`，仅作为派生产物。

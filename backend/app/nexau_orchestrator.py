@@ -5,8 +5,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
-import httpx
-
+from .llm_client import LLMEndpointConfig, generate_text_with_failover, normalize_llm_provider
 from .prompts import load_prompt_text
 
 ToolHandler = Callable[..., Awaitable[dict[str, Any]]]
@@ -155,24 +154,28 @@ class NexAUAgentOrchestrator:
     def __init__(
         self,
         *,
-        llm_provider: str,
-        llm_base_url: str,
-        llm_model: str,
-        llm_timeout_sec: float,
-        llm_api_key: str,
+        primary_llm: LLMEndpointConfig,
+        fallback_llm: LLMEndpointConfig | None,
         frontend_base_url: str,
     ) -> None:
-        normalized_provider = (llm_provider or "openai_compat").strip().lower()
-        if normalized_provider == "openai":
-            normalized_provider = "openai_compat"
-        if normalized_provider not in {"openai_compat", "ollama"}:
-            raise ValueError(f"Unsupported llm_provider: {llm_provider}")
-
-        self._llm_provider = normalized_provider
-        self._llm_base_url = llm_base_url.rstrip("/")
-        self._llm_model = llm_model.strip()
-        self._llm_timeout_sec = llm_timeout_sec
-        self._llm_api_key = llm_api_key.strip()
+        self._primary_llm = LLMEndpointConfig(
+            provider=normalize_llm_provider(primary_llm.provider),
+            base_url=primary_llm.base_url.strip(),
+            model=primary_llm.model.strip(),
+            timeout_sec=primary_llm.timeout_sec,
+            api_key=primary_llm.api_key.strip(),
+            name=primary_llm.name or "primary",
+        )
+        self._fallback_llm = None
+        if fallback_llm and fallback_llm.is_configured():
+            self._fallback_llm = LLMEndpointConfig(
+                provider=normalize_llm_provider(fallback_llm.provider),
+                base_url=fallback_llm.base_url.strip(),
+                model=fallback_llm.model.strip(),
+                timeout_sec=fallback_llm.timeout_sec,
+                api_key=fallback_llm.api_key.strip(),
+                name=fallback_llm.name or "fallback",
+            )
         self._frontend_base_url = frontend_base_url.rstrip("/")
         self._tools: dict[str, ToolDefinition] = {}
 
@@ -348,83 +351,16 @@ class NexAUAgentOrchestrator:
             "memory_context": memory_context,
             "tool_observations": observations,
         }
-        if self._llm_provider == "openai_compat":
-            return await self._generate_with_openai_compat(system_prompt=system_prompt, user_payload=user_payload)
-        return await self._generate_with_ollama(system_prompt=system_prompt, user_payload=user_payload)
-
-    async def _generate_with_ollama(self, *, system_prompt: str, user_payload: dict[str, Any]) -> str:
         try:
-            async with httpx.AsyncClient(timeout=self._llm_timeout_sec) as client:
-                response = await client.post(
-                    f"{self._llm_base_url}/api/chat",
-                    json={
-                        "model": self._llm_model,
-                        "stream": False,
-                        "options": {"temperature": 0.2},
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
-                        ],
-                    },
-                )
-            response.raise_for_status()
-            payload = response.json()
-            content = payload.get("message", {}).get("content", "") if isinstance(payload, dict) else ""
-            if isinstance(content, str):
-                return content.strip()
+            return await generate_text_with_failover(
+                primary_endpoint=self._primary_llm,
+                fallback_endpoint=self._fallback_llm,
+                system_prompt=system_prompt,
+                user_payload=user_payload,
+                temperature=0.2,
+            )
         except Exception:  # noqa: BLE001
             return ""
-        return ""
-
-    async def _generate_with_openai_compat(self, *, system_prompt: str, user_payload: dict[str, Any]) -> str:
-        headers = {"Content-Type": "application/json"}
-        if self._llm_api_key:
-            headers["Authorization"] = f"Bearer {self._llm_api_key}"
-
-        endpoint = (
-            f"{self._llm_base_url}/chat/completions"
-            if self._llm_base_url.endswith("/v1")
-            else f"{self._llm_base_url}/v1/chat/completions"
-        )
-        body = {
-            "model": self._llm_model,
-            "temperature": 0.2,
-            "stream": False,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
-            ],
-        }
-        try:
-            async with httpx.AsyncClient(timeout=self._llm_timeout_sec) as client:
-                response = await client.post(endpoint, json=body, headers=headers)
-            response.raise_for_status()
-            payload = response.json()
-            if not isinstance(payload, dict):
-                return ""
-            choices = payload.get("choices")
-            if not isinstance(choices, list) or not choices:
-                return ""
-            first_choice = choices[0]
-            if not isinstance(first_choice, dict):
-                return ""
-            message = first_choice.get("message")
-            if not isinstance(message, dict):
-                return ""
-            content = message.get("content")
-            if isinstance(content, str):
-                return content.strip()
-            if isinstance(content, list):
-                parts: list[str] = []
-                for item in content:
-                    if isinstance(item, dict):
-                        text_value = item.get("text")
-                        if isinstance(text_value, str) and text_value.strip():
-                            parts.append(text_value.strip())
-                return "\n".join(parts).strip()
-        except Exception:  # noqa: BLE001
-            return ""
-        return ""
 
     def _fallback_answer(self, *, message: str, observations: list[dict[str, Any]], domains: set[str]) -> str:
         if not observations:

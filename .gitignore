@@ -88,3 +88,5 @@ tests/benchmark_results/*
 !tests/benchmark_results/.gitkeep
 tests/benchmark_data/*
 !tests/benchmark_data/.gitkeep
+
+paper/

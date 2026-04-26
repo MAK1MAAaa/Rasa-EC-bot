@@ -29,6 +29,7 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from .env import BACKEND_ROOT_DIR, ENV_FILE_PATH, load_backend_env
+from .llm_client import LLMEndpointConfig, generate_text_with_failover, normalize_llm_provider
 
 load_backend_env()
 
@@ -138,6 +139,37 @@ from .prompts import load_prompt_text
 app = FastAPI(title="Rasa-EC-bot Backend", version="0.3.0")
 logger = logging.getLogger("rasa_ec_bot.chat_router")
 
+
+def split_csv_env(var_name: str, default: list[str]) -> list[str]:
+    raw_value = os.getenv(var_name, "").strip()
+    if not raw_value:
+        return list(default)
+    return [item.strip() for item in raw_value.split(",") if item.strip()]
+
+
+def resolve_agent_llm_provider() -> str:
+    raw_provider = os.getenv("AGENT_LLM_PROVIDER", "").strip().lower()
+    if raw_provider:
+        return normalize_llm_provider(raw_provider)
+    if os.getenv("AGENT_LLM_BASE_URL", "").strip():
+        return "openai_compat"
+    return "ollama"
+
+
+def resolve_agent_llm_fallback_provider(primary_provider: str) -> str | None:
+    raw_provider = os.getenv("AGENT_LLM_FALLBACK_PROVIDER", "").strip().lower()
+    if raw_provider:
+        return normalize_llm_provider(raw_provider)
+
+    fallback_base_url = os.getenv("AGENT_LLM_FALLBACK_BASE_URL", "").strip()
+    fallback_model = os.getenv("AGENT_LLM_FALLBACK_MODEL", "").strip()
+    if not fallback_base_url or not fallback_model:
+        return None
+    if fallback_base_url.endswith("/v1") or "/v1/" in fallback_base_url:
+        return "openai_compat"
+    return primary_provider
+
+
 RASA_SERVER_URL = os.getenv("RASA_SERVER_URL", "http://127.0.0.1:5005")
 RASA_REST_WEBHOOK_PATH = os.getenv("RASA_REST_WEBHOOK_PATH", "/webhooks/rest/webhook")
 RASA_PARSE_PATH = os.getenv("RASA_PARSE_PATH", "/model/parse")
@@ -148,24 +180,53 @@ RASA_INTERNAL_TOKEN = os.getenv("RASA_INTERNAL_TOKEN", "")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3.5:2b")
 OLLAMA_TIMEOUT_SEC = float(os.getenv("OLLAMA_TIMEOUT_SEC", "45"))
-_agent_provider_raw = os.getenv("AGENT_LLM_PROVIDER", "").strip().lower()
-if _agent_provider_raw:
-    AGENT_LLM_PROVIDER = _agent_provider_raw
-elif os.getenv("AGENT_LLM_BASE_URL", "").strip():
-    AGENT_LLM_PROVIDER = "openai_compat"
-else:
-    AGENT_LLM_PROVIDER = "ollama"
+DEFAULT_BACKEND_CORS_ALLOW_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+]
+BACKEND_CORS_ALLOW_ORIGINS = split_csv_env("BACKEND_CORS_ALLOW_ORIGINS", DEFAULT_BACKEND_CORS_ALLOW_ORIGINS)
+BACKEND_CORS_ALLOW_ORIGIN_REGEX = os.getenv("BACKEND_CORS_ALLOW_ORIGIN_REGEX", "").strip() or None
+
+AGENT_LLM_PROVIDER = resolve_agent_llm_provider()
 AGENT_LLM_BASE_URL = os.getenv(
     "AGENT_LLM_BASE_URL",
-    "http://127.0.0.1:8002/v1" if AGENT_LLM_PROVIDER in {"openai", "openai_compat"} else OLLAMA_BASE_URL,
+    "http://127.0.0.1:8002/v1" if AGENT_LLM_PROVIDER == "openai_compat" else OLLAMA_BASE_URL,
 ).strip()
 AGENT_LLM_MODEL = os.getenv(
     "AGENT_LLM_MODEL",
-    os.getenv("AGENT_OLLAMA_MODEL", "qwen3.5-2b-lora" if AGENT_LLM_PROVIDER in {"openai", "openai_compat"} else "qwen3.5:2b-lora"),
+    os.getenv("AGENT_OLLAMA_MODEL", "qwen3.5-2b-lora" if AGENT_LLM_PROVIDER == "openai_compat" else "qwen3.5:2b-lora"),
 ).strip()
 AGENT_LLM_API_KEY = os.getenv("AGENT_LLM_API_KEY", "EMPTY").strip()
 AGENT_LLM_TIMEOUT_SEC = float(
     os.getenv("AGENT_LLM_TIMEOUT_SEC", os.getenv("AGENT_OLLAMA_TIMEOUT_SEC", str(OLLAMA_TIMEOUT_SEC)))
+)
+AGENT_LLM_ENDPOINT = LLMEndpointConfig(
+    provider=AGENT_LLM_PROVIDER,
+    base_url=AGENT_LLM_BASE_URL,
+    model=AGENT_LLM_MODEL,
+    timeout_sec=AGENT_LLM_TIMEOUT_SEC,
+    api_key=AGENT_LLM_API_KEY,
+    name="primary",
+)
+AGENT_LLM_FALLBACK_PROVIDER = resolve_agent_llm_fallback_provider(AGENT_LLM_PROVIDER)
+AGENT_LLM_FALLBACK_BASE_URL = os.getenv("AGENT_LLM_FALLBACK_BASE_URL", "").strip()
+AGENT_LLM_FALLBACK_MODEL = os.getenv("AGENT_LLM_FALLBACK_MODEL", "").strip()
+AGENT_LLM_FALLBACK_API_KEY = os.getenv("AGENT_LLM_FALLBACK_API_KEY", "").strip()
+AGENT_LLM_FALLBACK_TIMEOUT_SEC = float(
+    os.getenv("AGENT_LLM_FALLBACK_TIMEOUT_SEC", str(AGENT_LLM_TIMEOUT_SEC))
+)
+AGENT_LLM_FALLBACK_ENDPOINT = (
+    LLMEndpointConfig(
+        provider=AGENT_LLM_FALLBACK_PROVIDER,
+        base_url=AGENT_LLM_FALLBACK_BASE_URL,
+        model=AGENT_LLM_FALLBACK_MODEL,
+        timeout_sec=AGENT_LLM_FALLBACK_TIMEOUT_SEC,
+        api_key=AGENT_LLM_FALLBACK_API_KEY,
+        name="fallback",
+    )
+    if AGENT_LLM_FALLBACK_PROVIDER and AGENT_LLM_FALLBACK_BASE_URL and AGENT_LLM_FALLBACK_MODEL
+    else None
 )
 OLLAMA_EMBED_MODEL = os.getenv("OLLAMA_EMBED_MODEL", "mxbai-embed-large")
 OLLAMA_VLM_MODEL = os.getenv("OLLAMA_VLM_MODEL", "qwen3-vl:2b")
@@ -252,15 +313,10 @@ AFTER_SALES_TERMINAL_STATUSES = {
     AFTER_SALES_STATUS_CANCELLED,
 }
 
-origins = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://localhost:3000",
-]
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=BACKEND_CORS_ALLOW_ORIGINS,
+    allow_origin_regex=BACKEND_CORS_ALLOW_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -749,76 +805,14 @@ def normalize_rasa_intent_review(raw: dict[str, Any]) -> RasaIntentReviewResult 
     )
 
 
-def extract_openai_compat_message_text(payload: dict[str, Any]) -> str:
-    if not isinstance(payload, dict):
-        return ""
-    choices = payload.get("choices")
-    if not isinstance(choices, list) or not choices:
-        return ""
-    first_choice = choices[0]
-    if not isinstance(first_choice, dict):
-        return ""
-    message = first_choice.get("message")
-    if not isinstance(message, dict):
-        return ""
-    content = message.get("content")
-    if isinstance(content, str):
-        return content.strip()
-    if isinstance(content, list):
-        parts: list[str] = []
-        for item in content:
-            if not isinstance(item, dict):
-                continue
-            text_part = item.get("text")
-            if isinstance(text_part, str) and text_part.strip():
-                parts.append(text_part.strip())
-        return "\n".join(parts).strip()
-    return ""
-
-
 async def generate_agent_llm_text(*, system_prompt: str, user_payload: dict[str, Any], temperature: float = 0.0) -> str:
-    if AGENT_LLM_PROVIDER == "openai_compat":
-        headers = {"Content-Type": "application/json"}
-        if AGENT_LLM_API_KEY:
-            headers["Authorization"] = f"Bearer {AGENT_LLM_API_KEY}"
-        endpoint = (
-            f"{AGENT_LLM_BASE_URL}/chat/completions"
-            if AGENT_LLM_BASE_URL.endswith("/v1")
-            else f"{AGENT_LLM_BASE_URL}/v1/chat/completions"
-        )
-        body = {
-            "model": AGENT_LLM_MODEL,
-            "temperature": temperature,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
-            ],
-        }
-        async with httpx.AsyncClient(timeout=AGENT_LLM_TIMEOUT_SEC) as client:
-            response = await client.post(endpoint, json=body, headers=headers)
-        response.raise_for_status()
-        return extract_openai_compat_message_text(response.json())
-
-    payload = {
-        "model": AGENT_LLM_MODEL,
-        "stream": False,
-        "options": {"temperature": temperature},
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
-        ],
-    }
-    async with httpx.AsyncClient(timeout=AGENT_LLM_TIMEOUT_SEC) as client:
-        response = await client.post(f"{AGENT_LLM_BASE_URL.rstrip('/')}/api/chat", json=payload)
-    response.raise_for_status()
-    response_payload = response.json() if response.content else {}
-    if not isinstance(response_payload, dict):
-        return ""
-    message_payload = response_payload.get("message")
-    if not isinstance(message_payload, dict):
-        return ""
-    content = message_payload.get("content")
-    return str(content or "").strip()
+    return await generate_text_with_failover(
+        primary_endpoint=AGENT_LLM_ENDPOINT,
+        fallback_endpoint=AGENT_LLM_FALLBACK_ENDPOINT,
+        system_prompt=system_prompt,
+        user_payload=user_payload,
+        temperature=temperature,
+    )
 
 
 async def review_rasa_business_intent(
@@ -2356,11 +2350,8 @@ async def run_nexau_agent_orchestrator(
     attachments: list[str] | None = None,
 ) -> tuple[ChatReplyMessage, list[dict[str, Any]]]:
     orchestrator = NexAUAgentOrchestrator(
-        llm_provider=AGENT_LLM_PROVIDER,
-        llm_base_url=AGENT_LLM_BASE_URL,
-        llm_model=AGENT_LLM_MODEL,
-        llm_timeout_sec=AGENT_LLM_TIMEOUT_SEC,
-        llm_api_key=AGENT_LLM_API_KEY,
+        primary_llm=AGENT_LLM_ENDPOINT,
+        fallback_llm=AGENT_LLM_FALLBACK_ENDPOINT,
         frontend_base_url=FRONTEND_BASE_URL,
     )
     memory_bundle = (

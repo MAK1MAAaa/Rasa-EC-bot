@@ -31,23 +31,34 @@
 
 ## 环境变量
 
-- 使用 `frontend/.env` 作为本地环境文件。
-- 可从 `frontend/.env.sample` 复制一份再修改。
-- 前端通常至少需要配置后端 API 基地址，以及地图服务或实时通信相关地址。
-
-Windows：
+使用 `frontend/.env` 作为本地环境文件，可从 `frontend/.env.sample` 复制：
 
 ```powershell
 cd frontend
 Copy-Item .env.sample .env
 ```
 
-macOS / Linux：
-
 ```bash
 cd frontend
 cp .env.sample .env
 ```
+
+当前支持的关键变量：
+
+- `VITE_DEV_HOST`
+- `VITE_DEV_PORT`
+- `VITE_BACKEND_PROXY_TARGET`
+- `VITE_WS_BASE_URL`
+- `VITE_ENABLE_LOGISTICS_MAP`
+- `VITE_AMAP_JS_KEY`
+- `VITE_AMAP_SECURITY_JS_CODE`
+
+其中：
+
+- `VITE_DEV_HOST` 默认 `0.0.0.0`。
+- `VITE_DEV_PORT` 默认 `5173`。
+- `VITE_BACKEND_PROXY_TARGET` 默认 `http://127.0.0.1:8000`。
+- `VITE_WS_BASE_URL` 为空时，会自动使用当前浏览器访问的主机名和端口。
 
 ## 本地开发
 
@@ -75,11 +86,24 @@ cd frontend
 pnpm dev
 ```
 
+## Tailscale 演示方式
+
+如果所有服务都跑在当前 Windows 主机，推荐这样配置：
+
+```env
+VITE_DEV_HOST=0.0.0.0
+VITE_DEV_PORT=5173
+VITE_BACKEND_PROXY_TARGET=http://127.0.0.1:8000
+```
+
 说明：
 
-- Vite 开发服务器默认监听 `0.0.0.0:5173`。
-- 如果台式机承载整套服务，MBA 只需要浏览器访问 `http://<台式机 Tailnet IP>:5173`。
-- 前端代理仍固定转发到台式机本机 `localhost:8000`，因此后端主服务应继续运行在 `8000` 端口。
+- Vite 会监听 `0.0.0.0:5173`，因此另一台电脑可以直接访问 `http://<本机 Tailnet IP>:5173`。
+- 浏览器请求 `/api` 和 `/ws` 时，会由 Vite 代理到当前 Windows 主机本机的 `127.0.0.1:8000`。
+- 这意味着后端、Rasa、Ollama、Redis、PostgreSQL 都不需要为了演示暴露到 Tailnet。
+- 如果你切到 LoRA 后端端口 `8001`，只需要把 `VITE_BACKEND_PROXY_TARGET` 改成 `http://127.0.0.1:8001`。
+
+## 构建与预览
 
 构建生产包：
 
@@ -109,8 +133,4 @@ pnpm preview
 
 - 前端默认对接 [../backend/README.md](../backend/README.md) 中的 FastAPI 后端。
 - 聊天页、订单页和商家中心都依赖后端接口返回的数据结构。
-- `/chat` 聊天页当前采用固定面板高度与内部滚动设计，聊天区和会话历史区在桌面端保持同高，超长内容会显示滚动条而不是继续把页面撑高。
-- `/chat` 的会话历史项采用统一卡片高度，长标题会截断到两行，避免列表项大小不一致。
-- `/chat` 的会话历史列表和消息列表都固定从容器顶部连续堆叠，不会在可用高度内被均匀拉散。
-- `/chat` 左侧会话标题默认取当前会话的首条用户问题，新建空会话才显示“新会话”。
-- benchmark 不直接在前端里执行；相关说明统一放在 [../tests/README.md](../tests/README.md)。
+- 如果要让聊天卡片里的商品/订单链接在另一台电脑上可点击，记得把 `backend/.env` 和 `rasa/.env` 里的 `FRONTEND_BASE_URL` 改成 `http://<本机 Tailnet IP>:5173`，不要保留成 `http://localhost:5173`。

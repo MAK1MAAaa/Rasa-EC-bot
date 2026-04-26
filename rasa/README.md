@@ -16,12 +16,29 @@
 
 ## 环境变量
 
-- 仓库根目录下的 `rasa/.env` 已提供 MBA 本机跑 Rasa、台式机远程跑 Ollama 的模板。
-- 当前默认启用的是 MagicDNS 写法，远程主机占位符是 `__TAILSCALE_DESKTOP_MAGICDNS__`。
-- 同一份文件里保留了 Tailnet IP 备选行，占位符是 `__TAILSCALE_DESKTOP_IP__`。
-- 本机链路保持不变：`BACKEND_API_URL=http://127.0.0.1:8000/api/v1`、`FRONTEND_BASE_URL=http://localhost:5173`。
-- 远程链路只改 `OLLAMA_BASE_URL`。
-- `RASA_INTERNAL_TOKEN` 需要和 `backend/.env` 保持一致。
+使用 `rasa/.env` 作为本地环境文件，可从 `rasa/.env.sample` 复制：
+
+```powershell
+cd rasa
+Copy-Item .env.sample .env
+```
+
+```bash
+cd rasa
+cp .env.sample .env
+```
+
+当前推荐采用“所有服务都跑在当前 Windows 主机”的方式，因此建议：
+
+- `BACKEND_API_URL=http://127.0.0.1:8000/api/v1`
+- `OLLAMA_BASE_URL=http://127.0.0.1:11434`
+- `FRONTEND_BASE_URL=http://<本机 Tailnet IP>:5173`
+- `RASA_INTERNAL_TOKEN` 与 `backend/.env` 保持一致
+
+说明：
+
+- `BACKEND_API_URL` 和 `OLLAMA_BASE_URL` 都继续指向本机回环地址，不需要改成 Tailnet IP。
+- `FRONTEND_BASE_URL` 用于返回给用户的跳转链接，应该指向远端可访问的地址。
 
 ## 安装依赖
 
@@ -90,4 +107,4 @@ uv run rasa run actions --actions actions --port 5055
 ## 说明
 
 - 本 README 只覆盖主线 Rasa 的训练与运行。
-- Benchmark 基线模型训练、5006 端口服务启动和完整 benchmark 流程统一维护在 [`benchmark/README.md`](../benchmark/README.md)。
+- Benchmark 基线模型训练、`5006` 端口服务启动和完整 benchmark 流程统一维护在 [../benchmark/README.md](../benchmark/README.md)。
