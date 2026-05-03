@@ -5,7 +5,7 @@ import logging
 import re
 from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -174,6 +174,27 @@ def ensure_dict(value: Any) -> dict[str, Any]:
             return {}
         return parsed if isinstance(parsed, dict) else {}
     return {}
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def normalize_utc_datetime(value: Any) -> datetime | None:
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except Exception:
+            return None
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def unix_ts_to_utc(value: int) -> datetime:
+    return datetime.fromtimestamp(value, tz=timezone.utc)
 
 
 def ensure_list(value: Any) -> list[Any]:
@@ -763,7 +784,7 @@ async def get_pending_chat_action(
     payload = ensure_dict(raw)
     if payload:
         expires_at_ts = int(payload.get("expires_at_ts") or 0)
-        if expires_at_ts <= 0 or expires_at_ts > int(datetime.utcnow().timestamp()):
+        if expires_at_ts <= 0 or expires_at_ts > int(utc_now().timestamp()):
             return payload
 
     if not can_use_db_session(session):
@@ -785,22 +806,18 @@ async def get_pending_chat_action(
     if not row:
         return None
 
-    expires_at = row.get("expires_at")
-    if isinstance(expires_at, str):
-        try:
-            expires_at = datetime.fromisoformat(expires_at)
-        except Exception:
-            expires_at = None
-    if not isinstance(expires_at, datetime):
+    expires_at = normalize_utc_datetime(row.get("expires_at"))
+    if expires_at is None:
         await clear_pending_chat_action(session=session, cache=cache, user_id=user_id)
         return None
-    if expires_at <= datetime.utcnow():
+    now = utc_now()
+    if expires_at <= now:
         await clear_pending_chat_action(session=session, cache=cache, user_id=user_id)
         return None
 
     payload = ensure_dict(row.get("payload"))
     payload["expires_at_ts"] = int(expires_at.timestamp())
-    await cache.set_json(cache_key, payload, ttl_sec=max(1, int((expires_at - datetime.utcnow()).total_seconds())))
+    await cache.set_json(cache_key, payload, ttl_sec=max(1, int((expires_at - now).total_seconds())))
     return payload
 
 
@@ -815,9 +832,9 @@ async def set_pending_chat_action(
     normalized = dict(payload or {})
     expires_at_ts = int(normalized.get("expires_at_ts") or 0)
     if expires_at_ts <= 0:
-        expires_at_ts = int((datetime.utcnow() + timedelta(seconds=max(1, int(ttl_sec)))).timestamp())
+        expires_at_ts = int((utc_now() + timedelta(seconds=max(1, int(ttl_sec)))).timestamp())
         normalized["expires_at_ts"] = expires_at_ts
-    expires_at = datetime.utcfromtimestamp(expires_at_ts)
+    expires_at = unix_ts_to_utc(expires_at_ts)
 
     if can_use_db_session(session):
         try:
@@ -846,7 +863,7 @@ async def set_pending_chat_action(
     await cache.set_json(
         pending_action_cache_key(user_id),
         normalized,
-        ttl_sec=max(1, int((expires_at - datetime.utcnow()).total_seconds())),
+        ttl_sec=max(1, int((expires_at - utc_now()).total_seconds())),
     )
     return normalized
 

@@ -12,6 +12,10 @@ logger = logging.getLogger(__name__)
 
 
 SUPPORTED_LLM_PROVIDERS = {"openai_compat", "ollama"}
+LLM_PROVIDER_ALIASES = {
+    "openai": "openai_compat",
+    "deepseek": "openai_compat",
+}
 
 
 @dataclass(frozen=True)
@@ -33,8 +37,7 @@ class LLMInvocationError(RuntimeError):
 
 def normalize_llm_provider(provider: str) -> str:
     normalized = (provider or "ollama").strip().lower()
-    if normalized == "openai":
-        normalized = "openai_compat"
+    normalized = LLM_PROVIDER_ALIASES.get(normalized, normalized)
     if normalized not in SUPPORTED_LLM_PROVIDERS:
         raise ValueError(f"Unsupported llm_provider: {provider}")
     return normalized

@@ -63,6 +63,7 @@ cp .env.sample .env
 - 后备链路读取 `AGENT_LLM_FALLBACK_PROVIDER`、`AGENT_LLM_FALLBACK_BASE_URL`、`AGENT_LLM_FALLBACK_MODEL`、`AGENT_LLM_FALLBACK_API_KEY`、`AGENT_LLM_FALLBACK_TIMEOUT_SEC`。
 - 主服务出现 `500/502/503/504`、`408`、`429`、超时、连接失败、空响应或无效响应时，会自动切到后备链路。
 - 主服务如果返回明确的 `4xx` 配置错误，默认不会盲目切后备，避免掩盖错误配置。
+- `AGENT_LLM_PROVIDER` 和 `AGENT_LLM_FALLBACK_PROVIDER` 支持 `ollama`、`openai_compat`；`openai` 和 `deepseek` 会作为别名按 OpenAI-compatible 协议处理。
 
 示例：主用 Ollama，本机失败时切到 OpenAI-compatible API。
 
@@ -257,3 +258,6 @@ uv run uvicorn app.main:app --host 127.0.0.1 --port 8001
 - `backend/prompts/*.md` 是当前后端使用的正式 prompt 来源。
 - 商品推荐链路会解析用户消息里的显式预算、颜色和部分规格词，并优先过滤不满足硬约束的候选商品。
 - 登录用户的服务端记忆以 PostgreSQL 为主存储，Markdown 文件落在 `backend/data/chat_memory/`，仅作为派生产物。
+- 聊天待确认动作持久化在 `chat_pending_actions`，过期时间统一按 UTC 归一化后比较，兼容 PostgreSQL `TIMESTAMP WITH TIME ZONE` 返回的带时区时间。
+- 聊天下单和修改地址草案支持 `地址:`、`地址为`、`地址是`、`收货地址为` 等表达，避免漏提取地址后误用最近订单地址。
+- 知识库索引接口的请求字段仍使用 `metadata`，后端模型内部使用 `metadata_` 承载，避免和 SQLModel 基类属性重名产生启动 warning。

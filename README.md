@@ -22,6 +22,12 @@
 - [benchmark/README.md](benchmark/README.md)
 - [tests/README.md](tests/README.md)
 
+## 客服聊天交互
+
+- `/chat` 的待确认写操作由后端返回 `pending_action` 卡片和 `pending_action_decision` actions；前端只在消息外层 actions 区展示确认/取消入口，卡片本身只展示操作摘要和明细。
+- 用户发送文本、图片或快捷提问后，客服页会在接口响应前显示非持久化的“正在思考”气泡；该气泡不写入本地会话历史。
+- 客服聊天发送接口单独使用 90 秒前端超时，图片上传使用 30 秒超时，避免后端 LLM/VLM 仍在处理时被 15 秒全局请求超时提前中断。
+
 ## 常用端口
 
 | 服务 | 端口 | 说明 |
@@ -115,6 +121,7 @@ uv run rasa run actions --actions actions --port 5055
 - 前端代理：`frontend/.env` 中的 `VITE_BACKEND_PROXY_TARGET` 默认是 `http://127.0.0.1:8000`。
 - 后端主 LLM：`backend/.env` 中的 `AGENT_LLM_*`。
 - 后端后备 LLM：`backend/.env` 中的 `AGENT_LLM_FALLBACK_*`。
+- LLM provider：支持 `ollama`、`openai_compat`；`openai` 和 `deepseek` 会按 OpenAI-compatible 别名处理。
 - Ollama：当前推荐保持 `OLLAMA_BASE_URL=http://127.0.0.1:11434`。
 - 聊天跳转链接：`backend/.env` 和 `rasa/.env` 中的 `FRONTEND_BASE_URL` 应改成对外演示地址，而不是 `localhost`。
 - 后端 CORS：如果你不只通过 Vite 代理访问后端，而是前端直接跨域请求后端，需要把 `BACKEND_CORS_ALLOW_ORIGINS` 追加 `http://<本机 Tailnet IP>:5173`。
@@ -124,3 +131,6 @@ uv run rasa run actions --actions actions --port 5055
 - benchmark 相关命令、数据集、结果与分析统一维护在 [benchmark/README.md](benchmark/README.md)。
 - 登录用户的服务端记忆以 PostgreSQL 为主存储，Markdown 文件落在 `backend/data/chat_memory/`，仅作为派生产物。
 - 后端现在支持主备 LLM 故障切换：主链路出现 `500/超时/连接失败/空响应` 时，会自动切到 `AGENT_LLM_FALLBACK_*` 配置的后备服务。
+- 聊天待确认动作的过期时间统一按 UTC 处理，兼容数据库返回的带时区时间，避免阻塞后续 LLM 路由。
+- 聊天事务动作会从 `地址:`、`地址为`、`地址是`、`收货地址为` 等表达中提取地址，用于下单和修改收货信息草案。
+- 知识库索引请求仍对外使用 `metadata` 字段，后端内部避开 SQLModel 同名属性，启动时不再产生字段遮蔽 warning。

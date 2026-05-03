@@ -44,6 +44,27 @@ def make_customer_user() -> SimpleNamespace:
 
 
 class ChatRouterLogicTests(unittest.IsolatedAsyncioTestCase):
+    def test_kb_index_item_accepts_metadata_alias_without_sqlmodel_shadowing(self) -> None:
+        models_module = sys.modules["backend.app.models"]
+        item = models_module.KBIndexItem(
+            source_type="manual",
+            title="Shipping policy",
+            content="Orders ship within 48 hours.",
+            metadata={"section": "logistics"},
+        )
+
+        self.assertEqual(item.metadata_, {"section": "logistics"})
+
+    def test_extract_address_accepts_natural_marker(self) -> None:
+        self.assertEqual(
+            MAIN_MODULE.extract_address_from_message("帮我下单，地址为上海电力大学"),
+            "上海电力大学",
+        )
+        self.assertEqual(
+            MAIN_MODULE.extract_address_from_message("修改地址 ORD202604010001 收货地址是上海市浦东新区世纪大道200号"),
+            "上海市浦东新区世纪大道200号",
+        )
+
     async def test_business_intent_high_review_uses_rasa(self) -> None:
         rasa_messages = [MAIN_MODULE.build_chat_message("规则链路回复")]
         review = MAIN_MODULE.RasaIntentReviewResult(

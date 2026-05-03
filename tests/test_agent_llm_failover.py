@@ -35,6 +35,10 @@ def make_http_error(status_code: int) -> httpx.HTTPStatusError:
 
 
 class AgentLlmFailoverTests(unittest.IsolatedAsyncioTestCase):
+    def test_deepseek_provider_alias_uses_openai_compatible_client(self) -> None:
+        self.assertEqual(LLM_MODULE.normalize_llm_provider("DeepSeek"), "openai_compat")
+        self.assertEqual(LLM_MODULE.normalize_llm_provider("deepseek"), "openai_compat")
+
     async def test_primary_500_uses_fallback_endpoint(self) -> None:
         primary = LLM_MODULE.LLMEndpointConfig(
             provider="ollama",

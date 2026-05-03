@@ -72,6 +72,8 @@ const CHAT_GUEST_ID_KEY = 'chat_guest_id'
 const CHAT_STORAGE_PREFIX = 'chat_sessions_v2'
 const CHAT_ACTIVE_PREFIX = 'chat_active_session_v2'
 const MAX_IMAGE_UPLOAD_MB = 8
+const CHAT_UPLOAD_TIMEOUT_MS = 30000
+const CHAT_SEND_TIMEOUT_MS = 90000
 const IMAGE_ACCEPT = ['image/jpeg', 'image/png', 'image/webp']
 
 const readOrCreateGuestId = () => {
@@ -582,6 +584,13 @@ const triggerImagePicker = () => {
   imageInputRef.value?.click()
 }
 
+const getChatRequestErrorMessage = (err: any, fallback: string) => {
+  if (err?.code === 'ECONNABORTED') {
+    return '客服响应超时，请稍后重试。'
+  }
+  return err?.response?.data?.detail || fallback
+}
+
 const onImageSelected = (event: Event) => {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
@@ -612,7 +621,8 @@ const uploadSelectedImage = async (): Promise<string | null> => {
   const formData = new FormData()
   formData.append('file', selectedImageFile.value)
   const response = await api.post<ChatUploadImageResponse>('/chat/upload-image', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' }
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: CHAT_UPLOAD_TIMEOUT_MS
   })
   return response.data.attachment_id
 }
@@ -624,6 +634,7 @@ const sendMessage = async (overrideText?: string) => {
   pushBubble('user', message || '[图片]')
   inputText.value = ''
   sending.value = true
+  await scrollToBottom()
 
   try {
     const attachmentId = await uploadSelectedImage()
@@ -632,11 +643,13 @@ const sendMessage = async (overrideText?: string) => {
       message,
       sender_id: senderId.value,
       attachments
+    }, {
+      timeout: CHAT_SEND_TIMEOUT_MS
     })
     appendReplyMessages(response.data.messages)
     clearImageSelection()
   } catch (err: any) {
-    pushBubble('system', err.response?.data?.detail || '客服服务暂不可用，请稍后再试。')
+    pushBubble('system', getChatRequestErrorMessage(err, '客服服务暂不可用，请稍后再试。'))
   } finally {
     sending.value = false
     await scrollToBottom()
@@ -843,10 +856,6 @@ watch(
                       <strong>{{ getText(detail?.value, '-') }}</strong>
                     </div>
                   </div>
-                  <div class="card-actions">
-                    <button type="button" @click="openDecisionModal('confirm', card)">确认</button>
-                    <button type="button" class="danger" @click="openDecisionModal('cancel', card)">取消</button>
-                  </div>
                 </template>
 
                 <template v-else-if="card.type === 'image_analysis'">
@@ -887,6 +896,18 @@ watch(
               >
                 {{ action.label }}
               </button>
+            </div>
+          </article>
+
+          <article v-if="sending" class="bubble bot thinking-bubble" aria-label="客服正在思考">
+            <span class="tag">客服</span>
+            <div class="thinking-indicator" role="status">
+              <span class="thinking-copy">正在思考</span>
+              <span class="thinking-dots" aria-hidden="true">
+                <span></span>
+                <span></span>
+                <span></span>
+              </span>
             </div>
           </article>
         </div>
@@ -1233,6 +1254,62 @@ watch(
   border-color: #e1cfb0;
 }
 
+.bubble.thinking-bubble {
+  min-width: 156px;
+  padding: 10px 14px 12px;
+}
+
+.thinking-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 24px;
+  color: #433721;
+  font-size: 13px;
+}
+
+.thinking-copy {
+  font-weight: 700;
+}
+
+.thinking-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 32px;
+}
+
+.thinking-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #315f58;
+  opacity: 0.34;
+  animation: thinking-pulse 1.1s ease-in-out infinite;
+}
+
+.thinking-dots span:nth-child(2) {
+  animation-delay: 0.16s;
+}
+
+.thinking-dots span:nth-child(3) {
+  animation-delay: 0.32s;
+}
+
+@keyframes thinking-pulse {
+  0%,
+  80%,
+  100% {
+    opacity: 0.34;
+    transform: translateY(0);
+  }
+
+  40% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
 .bubble.system {
   justify-self: center;
   background: #fff1f2;
@@ -1413,6 +1490,14 @@ watch(
   color: inherit;
   text-decoration: underline;
   word-break: break-all;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thinking-dots span {
+    animation: none;
+    opacity: 0.72;
+    transform: none;
+  }
 }
 
 @media (max-width: 980px) {

@@ -6,6 +6,7 @@ import sys
 import tempfile
 import types
 import unittest
+from datetime import timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -125,6 +126,63 @@ class ChatMemoryLogicTests(unittest.TestCase):
     def test_refresh_snapshot_sql_casts_session_id_for_asyncpg(self) -> None:
         source = inspect.getsource(MEMORY_MODULE.refresh_chat_memory_artifacts)
         self.assertIn("CAST(:session_id AS varchar)", source)
+
+    def test_normalize_utc_datetime_accepts_aware_database_value(self) -> None:
+        expires_at = MEMORY_MODULE.utc_now().astimezone(timezone(timedelta(hours=8)))
+        normalized = MEMORY_MODULE.normalize_utc_datetime(expires_at)
+
+        self.assertIsNotNone(normalized)
+        self.assertEqual(normalized.tzinfo, timezone.utc)
+        self.assertEqual(int(normalized.timestamp()), int(expires_at.timestamp()))
+
+
+class ChatMemoryPendingActionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_get_pending_action_handles_aware_expires_at_from_database(self) -> None:
+        user_id = uuid4()
+        expires_at = MEMORY_MODULE.utc_now().astimezone(timezone(timedelta(hours=8))) + timedelta(minutes=5)
+
+        class FakeResult:
+            def mappings(self):
+                return self
+
+            def first(self):
+                return {"payload": {"type": "checkout"}, "expires_at": expires_at}
+
+        class FakeSession:
+            async def execute(self, *_args, **_kwargs):
+                return FakeResult()
+
+            async def commit(self):
+                return None
+
+            async def rollback(self):
+                return None
+
+        class FakeCache:
+            enabled = False
+
+            def __init__(self):
+                self.cached_payload = None
+                self.cached_ttl = None
+
+            async def set_json(self, _key, payload, ttl_sec):
+                self.cached_payload = payload
+                self.cached_ttl = ttl_sec
+
+            async def delete_keys(self, *_keys):
+                return None
+
+        cache = FakeCache()
+        payload = await MEMORY_MODULE.get_pending_chat_action(
+            session=FakeSession(),
+            cache=cache,
+            user_id=user_id,
+        )
+
+        self.assertEqual(payload["type"], "checkout")
+        self.assertGreater(payload["expires_at_ts"], 0)
+        self.assertIsNotNone(cache.cached_payload)
+        self.assertGreater(cache.cached_ttl, 0)
 
 
 if __name__ == "__main__":

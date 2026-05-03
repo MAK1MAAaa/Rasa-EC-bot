@@ -318,7 +318,7 @@ class KBIndexItem(SQLModel):
     content: str
     version: Optional[str] = None
     status: str = "active"
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata_: dict[str, Any] = Field(default_factory=dict, alias="metadata")
 
 
 class KBIndexRequest(SQLModel):

@@ -1284,10 +1284,11 @@ def extract_address_from_message(message: str) -> str | None:
     text = (message or "").strip()
     if not text:
         return None
-    match = re.search(r"(?:收货地址|地址)[:：]\s*(.+)$", text, flags=re.IGNORECASE)
+    match = re.search(r"(?:收货地址|地址)\s*(?:[:：]|为|是|在)\s*(.+)$", text, flags=re.IGNORECASE)
     if not match:
         return None
     value = match.group(1).strip()
+    value = value.strip("，,。；; ")
     value = re.split(r"(?:邮箱|email)[:：]", value, maxsplit=1, flags=re.IGNORECASE)[0].strip()
     return value or None
 
@@ -4850,7 +4851,10 @@ async def kb_index(
                     "chunk_order": chunk_order,
                     "chunk_text": chunk_text,
                     "embedding": build_vector_literal(embedding),
-                    "metadata": json.dumps(item.metadata if isinstance(item.metadata, dict) else {}, ensure_ascii=False),
+                    "metadata": json.dumps(
+                        item.metadata_ if isinstance(item.metadata_, dict) else {},
+                        ensure_ascii=False,
+                    ),
                 },
             )
             indexed_chunks += 1
