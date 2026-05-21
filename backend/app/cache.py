@@ -5,9 +5,9 @@ import logging
 from typing import Any
 
 try:
-    import aioredis
+    from redis import asyncio as redis_asyncio
 except Exception:  # pragma: no cover
-    aioredis = None
+    redis_asyncio = None
 
 
 logger = logging.getLogger(__name__)
@@ -19,7 +19,7 @@ class RedisCache:
         self._default_ttl_sec = max(1, int(default_ttl_sec))
         self._key_prefix = key_prefix.strip(": ")
         self._client = None
-        self._enabled = bool(self._redis_url) and aioredis is not None
+        self._enabled = bool(self._redis_url) and redis_asyncio is not None
 
     @property
     def enabled(self) -> bool:
@@ -33,12 +33,12 @@ class RedisCache:
 
     async def connect(self) -> None:
         if not self._enabled:
-            if self._redis_url and aioredis is None:
-                logger.warning("REDIS_URL is set but aioredis is unavailable. Redis cache disabled.")
+            if self._redis_url and redis_asyncio is None:
+                logger.warning("REDIS_URL is set but redis.asyncio is unavailable. Redis cache disabled.")
             return
 
         try:
-            self._client = aioredis.from_url(  # type: ignore[union-attr]
+            self._client = redis_asyncio.from_url(  # type: ignore[union-attr]
                 self._redis_url,
                 encoding="utf-8",
                 decode_responses=True,

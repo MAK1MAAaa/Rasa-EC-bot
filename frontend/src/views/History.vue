@@ -104,7 +104,7 @@ watch(
         @click="openProductDetail(item.id)"
       >
         <img
-          :src="item.image_url || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=800&q=80'"
+          :src="item.image_url || '/demo-assets/products/default.svg'"
           :alt="item.name"
           class="thumb"
         >

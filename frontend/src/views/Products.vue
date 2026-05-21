@@ -487,7 +487,7 @@ onBeforeUnmount(() => {
       <div v-else class="catalog-grid">
         <article v-for="product in products" :key="product.id" class="catalog-card">
           <div class="card-media" @click="openProductDetail(product.id)">
-            <img :src="product.image_url || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=800&q=80'" :alt="product.name">
+            <img :src="product.image_url || '/demo-assets/products/default.svg'" :alt="product.name">
             <div class="media-fade"></div>
           </div>
 

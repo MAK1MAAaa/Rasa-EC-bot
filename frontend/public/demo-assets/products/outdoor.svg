@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="720" viewBox="0 0 960 720" role="img" aria-label="Outdoor gear">
+  <rect width="960" height="720" fill="#eef6ed"/>
+  <path d="M112 570l210-292 138 196 116-154 272 250z" fill="#86a96f"/>
+  <path d="M322 278l68 96-42-16-42 24z" fill="#f8fafc"/>
+  <path d="M576 320l74 102-46-18-44 26z" fill="#f8fafc"/>
+  <circle cx="756" cy="146" r="58" fill="#fbbf24"/>
+  <path d="M176 600h640" stroke="#4b6f44" stroke-width="26" stroke-linecap="round"/>
+</svg>

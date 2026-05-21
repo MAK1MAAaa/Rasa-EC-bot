@@ -20,7 +20,7 @@ dependencies = [
     "python-multipart",
     "pydantic-settings",
     "pydantic[email]",
-    "aioredis",
+    "redis",
     "httpx",
     "bcrypt==3.2.0",
     "pillow",

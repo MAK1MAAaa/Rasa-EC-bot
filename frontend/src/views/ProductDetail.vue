@@ -231,7 +231,7 @@ watch(
     <article v-else class="detail-layout">
       <section class="detail-media panel-surface">
         <div class="media-frame">
-          <img :src="product.image_url || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=1000&q=80'" :alt="product.name" class="cover">
+          <img :src="product.image_url || '/demo-assets/products/default.svg'" :alt="product.name" class="cover">
         </div>
       </section>
 

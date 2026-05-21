@@ -156,7 +156,7 @@ onBeforeUnmount(() => {
           <article v-for="item in pagedItems" :key="item.id" class="item-card">
             <button type="button" class="item-cover" @click="openProductDetail(item.product_id)">
               <img
-                :src="item.product_image_url || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=400&q=80'"
+                :src="item.product_image_url || '/demo-assets/products/default.svg'"
                 :alt="item.product_name"
               >
             </button>

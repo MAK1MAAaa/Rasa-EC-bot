@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="720" viewBox="0 0 960 720" role="img" aria-label="Headphones">
+  <rect width="960" height="720" fill="#f5eef2"/>
+  <path d="M276 386c0-128 86-224 204-224s204 96 204 224" fill="none" stroke="#2d2f3a" stroke-width="54" stroke-linecap="round"/>
+  <rect x="210" y="360" width="142" height="188" rx="46" fill="#4b5563"/>
+  <rect x="608" y="360" width="142" height="188" rx="46" fill="#4b5563"/>
+  <rect x="244" y="410" width="74" height="84" rx="26" fill="#f59e0b"/>
+  <rect x="642" y="410" width="74" height="84" rx="26" fill="#f59e0b"/>
+</svg>

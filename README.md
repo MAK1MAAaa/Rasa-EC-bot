@@ -1,5 +1,75 @@
 # Rasa-EC-bot
 
+## 毕设演示数据
+
+`backend/db/seed_data.sql` 内置一套面向答辩演示的中文初始化数据，覆盖客服推荐、购物车下单、订单查询、物流查询、售后申请和商家售后处理。商品图、店铺 Logo 和前端缺省商品图均使用 `frontend/public/demo-assets/` 下的本地资源，初始化后商品图不依赖外部图片站点。
+
+### 演示账号
+
+| 角色 | 邮箱 | 密码 | 用途 |
+| --- | --- | --- | --- |
+| 客户 | `test1@example.com` | `password123` | 推荐、购物车下单、订单查询、物流查询、兼容 benchmark |
+| 客户 | `test2@example.com` | `password123` | 已签收订单、售后全状态、物流投诉历史 |
+| 商家 | `merchant1@example.com` | `password123` | 数码店订单与待处理售后 |
+| 商家 | `merchant3@example.com` | `password123` | 办公店售后同意、处理中状态演示 |
+| 商家 | `merchant4@example.com` | `password123` | 户外店售后处理中、已完成状态演示 |
+
+### 初始化命令
+
+Windows:
+
+```powershell
+cd backend
+.\scripts\init_postgres.ps1
+```
+
+macOS / Linux:
+
+```bash
+cd backend
+bash scripts/init_postgres.sh
+```
+
+### 推荐演示话术
+
+```text
+推荐一台适合写论文和轻量开发的银色笔记本，预算 6000 以内。
+```
+
+```text
+我最近看了显示器和笔记本，帮我推荐适合毕业设计答辩准备的商品。
+```
+
+### 下单演示话术
+
+`test1@example.com` 购物车预置了同店铺商品，可直接触发下单草稿：
+
+```text
+帮我把购物车里的商品下单，地址：北京市海淀区中关村软件园二期 8 号楼，邮箱：test1@example.com
+```
+
+### 订单、物流和售后演示话术
+
+```text
+帮我查询订单 ORD202603300001 的状态。
+```
+
+```text
+查询订单 ORD202603300002 的物流进度。
+```
+
+```text
+申请退货 ORD202603300001，原因：尺寸不合适。
+```
+
+```text
+查询订单 ORD202603300002 的售后进度。
+```
+
+```text
+申请换货 ORD202604010001，原因：屏幕边框有磕碰。
+```
+
 电商客服实验项目，包含前端商城、FastAPI 后端、Rasa 助手、LoRA 训练链路，以及独立 benchmark 工程。
 
 ## 仓库结构
@@ -123,6 +193,7 @@ uv run rasa run actions --actions actions --port 5055
 - 后端后备 LLM：`backend/.env` 中的 `AGENT_LLM_FALLBACK_*`。
 - LLM provider：支持 `ollama`、`openai_compat`；`openai` 和 `deepseek` 会按 OpenAI-compatible 别名处理。
 - Ollama：当前推荐保持 `OLLAMA_BASE_URL=http://127.0.0.1:11434`。
+- Redis：后端缓存使用 `redis.asyncio`，兼容 Python 3.10/3.11；配置 `REDIS_URL` 后启动日志应显示 Redis cache connected。
 - 聊天跳转链接：`backend/.env` 和 `rasa/.env` 中的 `FRONTEND_BASE_URL` 应改成对外演示地址，而不是 `localhost`。
 - 后端 CORS：如果你不只通过 Vite 代理访问后端，而是前端直接跨域请求后端，需要把 `BACKEND_CORS_ALLOW_ORIGINS` 追加 `http://<本机 Tailnet IP>:5173`。
 
