@@ -89,3 +89,6 @@ tests/benchmark_results/*
 tests/benchmark_data/*
 !tests/benchmark_data/.gitkeep
 
+design.md
+report.md
+report_presentation.html

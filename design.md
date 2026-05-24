@@ -1,541 +1,434 @@
-# 项目架构设计
+# Rasa-EC-bot 架构设计文档
 
-## 1. 设计目标
+## 1. 项目定位
 
-Rasa-EC-bot 当前不是单一聊天机器人，而是一个围绕电商客服场景构建的完整实验系统。系统需要同时满足四类目标：
+Rasa-EC-bot 是一个面向电商客服场景的毕业设计实验系统，不是单一聊天机器人。当前项目同时包含可运行的电商业务系统、混合式智能客服链路、本地模型推理链路、LoRA 实验链路和独立 benchmark 评测工程。
 
-- 电商业务可运行：支持用户侧商城、购物车、下单、订单查询，以及商家侧商品管理、发货、售后处理。
-- 客服链路可组合：支持规则型问答、事务查询、复杂多轮问答、知识检索、图片售后与待确认写操作。
-- 本地模型可替换：支持基础模型、LoRA 微调模型、视觉模型、向量模型的独立部署与切换。
-- 评测链路可复现：支持黑盒 benchmark、双榜排名、结果分析与论文复用。
+系统的核心目标是：
 
-系统采用“业务系统 + 混合客服路由 + 本地模型服务 + 独立 benchmark 工程”的拆分方式，避免业务逻辑、模型试验和评测工具链耦合在同一层。
+- 支撑完整电商演示：商品浏览、商品推荐、购物车、下单、订单查询、物流查询、售后申请、商家发货和商家售后处理。
+- 支撑混合客服能力：Rasa 负责高频规则型问题，LLM/Agent 负责复杂问题、推荐解释、知识检索、多模态图片分析和待确认事务草稿。
+- 支撑本地化部署：PostgreSQL、Redis、Rasa、Ollama、vLLM/OpenAI-compatible 服务均可在本机运行，适合离线演示和可复现实验。
+- 支撑实验评测：benchmark 作为独立工程运行，比较纯 Rasa、Rasa + LLM、Rasa + LoRA LLM 等方案在共享核心能力和 Agent 扩展能力上的表现。
+- 支撑答辩演示稳定性：初始化数据、商品图和店铺 Logo 使用本地资源，避免外部图片站点不可用影响演示。
 
-## 2. 当前新增创新点
-
-相对项目早期版本，当前架构新增并稳定落地了以下创新点：
-
-- 双层服务端会话记忆：把聊天记忆拆成“会话上下文快照”和“用户全局长期记忆”，同时持久化到 PostgreSQL 与 Markdown 文件，既便于运行时加载，也便于人工审查和实验展示。
-- 混合路由复审机制：后端不再简单做“Rasa 或 Agent”二选一，而是在 Rasa 意图识别之后加入复杂度判断与 LLM 复审，降低业务型问题误路由。
-- 显式推荐约束解析：商品推荐链路新增预算、颜色、常见规格词解析与硬约束过滤，避免把不满足条件的候选商品混入推荐结果。
-- 待确认事务执行边界：所有高风险写操作统一先生成待确认卡片，再由用户通过显式确认接口提交，模型只能生成草案，不能直接落库。
-- 提示词外置与版本追踪：Agent 最终回答、Rasa 复审、图片分析提示词都外置到 `backend/prompts/`，benchmark 会记录路径与 SHA-256，保证实验结果可追溯。
-- 双榜 benchmark 体系：benchmark 从旧式单榜口径升级为 `shared_core` 与 `agent_extension` 双榜，并引入样本去重、覆盖率、主失败原因和多标签失败诊断。
-- benchmark 污染隔离：benchmark 会话使用专门的 `benchmark_...` session id，后端自动跳过会话记忆加载与刷新，避免测试数据污染真实记忆。
-- 实时通知与地理化物流展示：后端通过 WebSocket 推送购物车、订单、售后、物流投诉、库存变化事件；物流链路加入地理坐标和路径点，前端可以做地图化展示。
-
-## 3. 总体架构
-
-### 3.1 逻辑分层
+## 2. 当前系统总览
 
 ```mermaid
 graph TD
-    A[Frontend Vue 3] --> B[FastAPI Backend]
-    A --> W[WebSocket Realtime]
-    B --> C[Rasa Server]
-    C --> D[Action Server]
-    D --> B
-    B --> E[(PostgreSQL)]
-    B --> F[(Redis)]
-    B --> G[Ollama]
-    B --> H[vLLM / OpenAI-Compatible]
-    B --> I[本地附件与记忆文件]
-    B --> J[AMap Geocode]
-    K[LoRA 训练链路] --> H
-    L[Benchmark Runner] --> B
-    L --> C
-    L --> H
+    U[用户 / 商家] --> FE[Vue 3 前端]
+    FE --> API[FastAPI 后端]
+    FE --> WS[WebSocket 实时通道]
+
+    API --> PG[(PostgreSQL)]
+    API --> RD[(Redis)]
+    API --> FS[本地文件: 上传图片 / 记忆 Markdown / demo-assets]
+    API --> RASA[Rasa Server]
+    RASA --> ACT[Rasa Action Server]
+    ACT --> API
+
+    API --> OLLAMA[Ollama: 基础 LLM / VLM / Embedding]
+    API --> VLLM[vLLM / OpenAI-compatible: LoRA 推理]
+    LORA[LoRA 训练工程] --> VLLM
+
+    BM[Benchmark 工程] --> API
+    BM --> RASA
+    BM --> VLLM
 ```
 
-### 3.2 分层职责
+当前推荐演示拓扑是：所有服务运行在同一台 Windows 主机，另一台设备只通过 Tailscale 访问前端 `5173` 端口。前端通过 Vite 代理访问本机后端，后端继续用 `127.0.0.1` 访问 Rasa、Ollama、Redis 和 PostgreSQL，避免把内部模型服务暴露到 Tailnet。
 
-#### 前端层 `frontend/`
-
-- 基于 Vue 3 + Vite + Pinia + Vue Router。
-- 承担商城、订单、商家中心、客服聊天、物流地图展示。
-- 通过统一 REST API 与 WebSocket 接入后端。
-- 聊天页采用固定面板高度、内部滚动、统一会话卡片尺寸，保证长会话场景下界面稳定。
-
-#### 后端应用层 `backend/`
-
-- 基于 FastAPI + SQLModel + SQLAlchemy Async。
-- 提供业务 REST API、聊天入口、附件上传、知识库索引、实时通知、内部摘要接口。
-- 负责客服路由决策、Agent 编排、待确认操作、会话记忆、推荐过滤和多模态处理。
-
-#### 对话编排层 `rasa/`
-
-- 承担高频、确定性、低风险、结构稳定的规则型客服问题。
-- 主线数据位于 `rasa/data/main/`。
-- `benchmark/rasa_only/` 保留纯 Rasa 对照配置，用于 benchmark 基线。
-
-#### 模型服务层 `Ollama + vLLM`
-
-- Ollama：基础聊天模型、视觉模型、向量模型。
-- vLLM / OpenAI-Compatible：加载 LoRA adapter 的主 Agent 推理入口。
-- LoRA 训练与推理运行时解耦，训练产物默认以 adapter 形式交付。
-
-#### 实验评测层 `benchmark/`
-
-- 作为独立 `uv` 工程维护，不再混在后端目录内。
-- 负责数据集构建、黑盒执行、结果聚合、分析报告、图表输出。
-
-## 4. 当前目录与模块边界
+## 3. 目录与模块边界
 
 ```text
 Rasa-EC-bot/
-├─ frontend/                  Vue 前端，包含商城、订单、商家中心、客服页面
-├─ backend/                   FastAPI 后端与聊天编排主入口
-│  ├─ app/                    业务 API、聊天路由、记忆、推荐、实时推送
-│  ├─ prompts/                外置提示词
-│  ├─ db/                     初始化 SQL 与种子数据
-│  └─ scripts/                PostgreSQL / Redis 初始化脚本
-├─ rasa/                      Rasa 主线规则与 rasa_only 基线
-├─ LoRA/                      数据准备、训练、评估、导出、adapter 产物
+├─ frontend/                  Vue 3 + Vite 前端商城、客服页、订单页、商家工作台
+│  └─ public/demo-assets/      本地演示图片资源，商品图和店铺 Logo 从这里加载
+├─ backend/                   FastAPI 后端，业务 API 与客服编排主入口
+│  ├─ app/                    API、模型、认证、聊天路由、记忆、缓存、Agent 编排
+│  ├─ db/                     init_db.sql 与 seed_data.sql
+│  ├─ prompts/                Agent、Rasa 复审、图片分析等外置提示词
+│  └─ scripts/                PostgreSQL 初始化脚本
+├─ rasa/                      主线 Rasa 助手与 action server
+│  └─ benchmark/rasa_only/     纯 Rasa benchmark 基线
+├─ LoRA/                      LoRA 数据准备、训练、评估和导出链路
 ├─ benchmark/                 独立 benchmark 工程
-│  ├─ datasets/               core / extended 数据集
-│  ├─ kb_seed/                知识库种子文档
-│  ├─ scripts/                build / run / analyze 脚本
-│  └─ src/benchmark/          数据集、执行器、评分、报告生成
-├─ tests/                     后端核心逻辑单测
+├─ tests/                     后端核心逻辑单元测试
+├─ README.md                  运行、演示和常用命令入口
+├─ report.md                  实验报告与 benchmark 结论
 └─ design.md                  当前架构设计文档
 ```
 
-边界原则：
+模块边界如下：
 
-- `frontend/` 不直接依赖模型服务，只依赖后端协议。
-- `rasa/` 不直接访问数据库，优先通过后端内部摘要接口获取业务数据。
-- `LoRA/` 不直接依赖业务运行，只负责训练与产物交付。
-- `benchmark/` 只走黑盒接口，不直接调用后端内部函数。
+- `frontend/` 只依赖后端 REST API 和 WebSocket 协议，不直接访问数据库、Rasa 或模型服务。
+- `backend/` 是业务状态的唯一写入口，负责权限校验、事务执行、缓存失效、实时通知和客服编排。
+- `rasa/` 不直接访问数据库，需要业务数据时通过后端内部摘要接口获取。
+- `LoRA/` 不参与在线业务状态写入，只负责训练和模型产物交付。
+- `benchmark/` 通过黑盒接口运行，不直接调用后端内部 Python 函数，避免评测和实现耦合。
 
-## 5. 后端核心架构
+## 4. 前端设计
 
-### 5.1 聊天统一入口
+前端基于 Vue 3、Vite、Pinia 和 Vue Router，主要页面包括：
 
-统一入口为：
+- 商品列表与筛选：展示商品、价格、库存、评分、类目、店铺信息。
+- 商品详情：展示商品规格、店铺信息，并支持加入购物车。
+- 购物车与结算：支持购物车状态同步和订单创建。
+- 订单详情：支持订单状态、物流、售后申请、物流投诉、修改待发货订单地址。
+- 智能客服：统一展示文本、商品推荐卡片、订单卡片、售后卡片、图片分析卡片和待确认动作。
+- 商家工作台：支持店铺资料、发货地址、商品管理、订单发货、物流推进和售后处理。
 
-- `POST /api/v1/chat/send`
-- `POST /api/v1/chat/upload-image`
-- `POST /api/v1/chat/pending-action/decision`
+图片资源策略：
 
-前端始终使用统一响应结构：
+- 种子商品图片和店铺 Logo 使用 `/demo-assets/...`。
+- 商品图兜底统一使用 `/demo-assets/products/default.svg`。
+- 不依赖 Unsplash、picsum 等外部图片站点，保证离线或弱网环境下演示稳定。
 
-- `messages[].text`
-- `messages[].cards`
-- `messages[].actions`
+## 5. 后端核心设计
 
-因此前端不需要知道底层是 Rasa、Agent、知识库还是图片分析。
+后端基于 FastAPI、SQLModel、SQLAlchemy Async 和 PostgreSQL。主要职责包括：
 
-### 5.2 混合路由架构
+- 用户、商家、店铺、商品、购物车、订单、物流、售后和投诉 API。
+- 聊天入口、图片上传、待确认动作确认接口。
+- Rasa 路由、LLM 复审、Agent 编排和本地模型调用。
+- 聊天记忆、知识库索引、商品推荐和多模态图片分析。
+- Redis 缓存、分布式锁、状态缓存和实时 WebSocket 通知。
 
-当前聊天路由不是简单的静态分流，而是四步决策：
+关键 API 分组：
 
-1. 基于消息内容做领域识别与复杂度判断。
-2. 调用 Rasa `/model/parse` 获取意图和置信度。
-3. 对高频业务意图执行 LLM 复审，判断是继续走规则链路还是切到 Agent。
-4. 将最终路由元数据写入消息持久化记录，便于排障和分析。
+- 认证：`/api/v1/auth/register`、`/api/v1/auth/login`、`/api/v1/auth/me`
+- 商品：`/api/v1/products`、`/api/v1/products/filters`、`/api/v1/products/history`
+- 购物车：`/api/v1/cart`
+- 订单：`/api/v1/orders`
+- 售后与投诉：`/api/v1/orders/{order_id}/after-sales`、`/api/v1/orders/{order_id}/logistics-complaints`
+- 客服：`/api/v1/chat/send`、`/api/v1/chat/upload-image`、`/api/v1/chat/pending-action/decision`
+- 商家：`/api/v1/merchant/shop`、`/api/v1/merchant/products`、`/api/v1/merchant/orders`、`/api/v1/merchant/after-sales`
+- Rasa 内部摘要：`/api/v1/chat/internal/*`
 
-当前路由层的核心价值：
+## 6. 客服混合路由设计
 
-- 高频确定性问题优先走规则链路，保持稳定、低成本、低时延。
-- 复杂、多领域、跨步骤问题自动切到 Agent，保留推理能力。
-- 对业务类意图加入 LLM 复审，减少 Rasa 高置信误命中的副作用。
-- 路由结果与原因可追踪，可进入测试与 benchmark 分析。
+客服入口统一为 `POST /api/v1/chat/send`。前端只关心统一响应结构：
 
-### 5.3 Rasa 规则链路
+```json
+{
+  "messages": [
+    {
+      "text": "...",
+      "cards": [],
+      "actions": []
+    }
+  ]
+}
+```
 
-适合以下类型：
+后端内部按以下顺序决策：
 
-- 问候与轻量 FAQ
-- 商品推荐类标准问法
-- 订单查询
-- 物流查询
-- 售后进度查询
+1. 解析用户身份、附件、sender id 和会话 id。
+2. 判断是否命中事务型动作，例如下单、售后、取消订单、修改地址、物流投诉。
+3. 对普通问题进行领域识别和复杂度判断。
+4. 调用 Rasa `/model/parse` 获取意图和置信度。
+5. 对关键业务意图执行 LLM 复审，决定继续走规则链路还是切到 Agent。
+6. 将路由元数据写入聊天消息记录，便于排查和 benchmark 分析。
 
-处理流程：
+路由原则：
 
-1. 后端转发到 Rasa。
-2. Rasa 命中 `intent + rule`。
-3. 如需业务数据，调用 Action Server。
-4. Action Server 再访问后端内部摘要接口，而不是直接碰数据库。
-5. 后端统一把结果组装成前端协议。
+- 高频、确定性、结构化任务优先走 Rasa 和后端规则链路。
+- 复杂、多领域、解释性强的问题交给 Agent。
+- 事务写操作不允许模型直接落库，只能生成待确认草稿。
+- benchmark 会话使用专门 session id，避免污染真实用户记忆。
 
-这一设计保留了可控性，也为 `rasa_only` benchmark 基线提供了干净实现。
+## 7. Rasa 规则链路
 
-### 5.4 Agent 编排链路
+Rasa 适合处理稳定、可枚举、低风险的客服问题：
 
-Agent 由 `backend/app/nexau_orchestrator.py` 负责编排，采用轻量 ReAct 风格：
+- 问候、告别、能力说明。
+- 标准订单查询。
+- 标准物流查询。
+- 标准售后进度查询。
+- 部分商品推荐触发。
 
-- 先做领域推断和工具规划。
-- 工具分为 `read` 与 `write` 两类。
-- `read` 工具可自动执行，例如订单摘要、物流摘要、售后摘要、推荐查询、知识检索、图片分析。
-- `write` 工具不直接落库，而是只生成待确认草案。
-- 最终由 Agent 汇总 observation，调用外置提示词生成回答。
+Rasa Action Server 获取业务数据时，不直接访问数据库，而是调用后端内部摘要接口：
 
-当前 Agent 的设计边界很明确：
+- `/api/v1/chat/internal/orders-summary`
+- `/api/v1/chat/internal/orders-logistics-summary`
+- `/api/v1/chat/internal/after-sales-summary`
+- `/api/v1/chat/internal/product-recommendations`
 
-- 读操作自动执行。
-- 写操作只允许“生成草案 -> 用户确认 -> 后端执行”。
-- 模型本身不拥有直接数据库写权限。
+这种设计保留了 Rasa 的流程稳定性，同时避免 Rasa 和数据库表结构耦合。
 
-### 5.5 待确认事务执行机制
+## 8. Agent 编排设计
 
-这是当前系统最重要的安全边界之一。
+Agent 编排位于 `backend/app/nexau_orchestrator.py`，采用轻量 ReAct 风格。它不直接持有数据库写权限，而是通过后端封装的工具获取 observation 并生成最终回答。
 
-适用场景包括：
+工具分为两类：
 
-- 结算下单
-- 发起售后
-- 取消订单
-- 修改发货信息
-- 发起物流投诉
+- 读工具：订单摘要、物流摘要、售后摘要、商品推荐、知识检索、图片分析。
+- 写草稿工具：下单、申请售后、取消订单、修改地址、物流投诉。
 
-实现方式：
+写草稿工具只生成 `pending_action`，不会直接执行业务写入。用户必须在前端点击确认后，后端才通过 `POST /api/v1/chat/pending-action/decision` 执行真实操作。
 
-1. 用户在聊天中表达操作意图。
-2. 后端生成 `pending_action` 卡片和 `pending_action_decision` 按钮。
-3. 待确认 payload 存入 PostgreSQL + Redis。
-4. 用户通过显式确认接口提交 `confirm` 或 `cancel`。
-5. 后端执行真实写操作，并清理待确认状态。
+这一设计把“自然语言理解”和“业务状态变更”分开，降低模型误操作风险。
 
-这套机制把“自然语言理解”和“业务提交”分离开来，降低了误执行风险，也让 benchmark 可以评测确认、取消、过期等完整流程。
+## 9. 待确认事务机制
 
-## 6. 服务端会话记忆设计
+待确认事务是当前系统最重要的安全边界之一。
 
-### 6.1 设计目标
+适用场景：
 
-当前记忆系统的目标不是单纯保留聊天记录，而是为 Agent 提供结构化、可控、可压缩的长期上下文。
-
-### 6.2 双层记忆结构
-
-#### 会话级记忆
-
-- 表：`chat_sessions`、`chat_messages`、`chat_context_snapshots`
-- 文件：`backend/data/chat_memory/<user>/<session>/context_memory.md`
-- 作用：保存单个会话的上下文摘要、最近窗口、快照版本
-
-#### 用户级全局记忆
-
-- 表：`chat_user_global_memory`
-- 文件：`backend/data/chat_memory/<user>/global_memory.md`
-- 作用：沉淀用户长期偏好，如预算、颜色、品牌、场景、相关订单
-
-### 6.3 记忆提取与压缩
-
-记忆刷新时，系统会从用户消息中提取：
-
-- 预算
-- 颜色
-- 规格
-- 品牌
-- 使用场景
-- 订单号
-- 主题标签
-
-当消息数量或字符数达到阈值时，系统会触发快照压缩，生成新的上下文摘要和最近窗口，并更新数据库与 Markdown 文件。
-
-### 6.4 benchmark 隔离
-
-benchmark 会话使用 `benchmark_` 前缀 session id。后端检测到此类会话后，会跳过：
-
-- 记忆加载
-- 记忆刷新
-- 真实用户长期记忆污染
-
-这保证实验样本不会影响后续真实会话和重复实验。
-
-## 7. 商品推荐架构
-
-### 7.1 推荐链路定位
-
-推荐不是单独的推荐系统服务，而是嵌入客服链路中的“轻量业务推荐能力”。
-
-其输入来自三部分：
-
-- 用户当前查询
-- 用户近期浏览历史
-- 商品基础属性与运营标签
-
-### 7.2 新增的显式约束解析
-
-当前推荐链路新增了三类硬约束：
-
-- 预算约束：例如“4000 元以下”
-- 颜色约束：例如“白色”“月岩白”
-- 规格约束：例如“27 寸”“Type-C”“12GB+512GB”
+- 帮用户提交购物车下单。
+- 帮用户申请退货或换货。
+- 帮用户取消待发货订单。
+- 帮用户修改待发货订单收货地址。
+- 帮用户发起物流投诉。
 
 处理流程：
 
-1. 从自然语言中抽取预算上限、必需词、偏好词。
-2. 对商品文本做统一归一化。
-3. 用硬约束先过滤不满足条件的候选。
-4. 再结合浏览历史和排序指标生成推荐。
-5. 在 observation 中记录匹配原因，便于调试和解释。
+1. 用户在客服中表达事务意图。
+2. 后端解析必要字段，例如订单号、地址、邮箱、售后类型和原因。
+3. 后端生成 `pending_action` 卡片和 `pending_action_decision` actions。
+4. pending payload 持久化到 PostgreSQL，并通过 Redis 缓存加速读取。
+5. 用户确认后，后端再次校验权限、状态和时效。
+6. 写入订单、售后、投诉等业务表，并清理 pending 状态。
+7. 通过 WebSocket 通知前端相关页面刷新。
 
-这部分是当前系统相对早期版本最直接的功能增强，已经用于修复“超预算或颜色不符商品被错误推荐”的问题。
+## 10. 数据层设计
 
-## 8. 多模态与知识增强
+### 10.1 PostgreSQL
 
-### 8.1 知识库增强
+PostgreSQL 是主数据源，负责：
 
-知识增强由后端统一维护，核心能力包括：
+- 用户、商家、店铺、发货地址。
+- 商品、购物车、浏览历史。
+- 订单、订单明细、物流、售后、物流投诉。
+- 聊天会话、聊天消息、上下文快照、用户全局记忆、待确认动作。
+- 知识库文档、知识块和向量数据。
 
-- 文档切块
-- embedding
-- pgvector 检索
-- 检索结果回填到 Agent / 图片分析链路
+`backend/db/init_db.sql` 负责建表，`backend/db/seed_data.sql` 负责演示数据初始化。初始化脚本会重建业务表，适合本地演示库重置，不适合直接用于生产数据库。
 
-典型知识源：
+### 10.2 Redis
 
-- 售后政策
-- 商品说明书
-- benchmark 种子知识文档
+Redis 用于缓存和轻量并发控制。后端当前使用 `redis.asyncio`，兼容 Python 3.10/3.11。
 
-### 8.2 图片售后分析
+主要用途：
 
-图片售后采用两段式流程：
+- 商品筛选元数据缓存。
+- 订单、物流、售后摘要缓存。
+- 聊天记忆 bundle 缓存。
+- pending action 缓存。
+- 会话记忆刷新锁和防抖。
 
-1. 上传图片，获得 `attachment_id`
-2. 在聊天消息中携带 `attachments`
+Redis 只缓存摘要和派生结果，不复制业务主表。业务一致性以 PostgreSQL 为准。
 
-后端会：
+### 10.3 本地文件系统
 
-- 校验 MIME 与体积
-- 文件落盘
-- 调视觉模型做结构化分析
-- 将分析结果以 `image_analysis` 卡片返回
-- 支持继续生成售后待确认草案
+本地文件系统保存三类内容：
 
-这让系统从“纯文本客服”扩展到“图片佐证 + 售后判断”的多模态客服。
+- `backend/data/chat_uploads/`：用户上传的图片附件。
+- `backend/data/chat_memory/`：服务端记忆 Markdown 派生产物。
+- `frontend/public/demo-assets/`：演示商品图、店铺 Logo 和默认兜底图。
 
-## 9. 物流与实时通知架构
+## 11. 演示数据设计
 
-### 9.1 地理化物流链路
+当前 `seed_data.sql` 面向毕业答辩演示重构，覆盖完整客服链路。
 
-当前物流系统不仅维护文本状态，还维护：
+演示账号：
 
-- `current_lng`
-- `current_lat`
-- `route_geo`
+- 客户：`test1@example.com` / `password123`
+- 客户：`test2@example.com` / `password123`
+- 商家：`merchant1@example.com`、`merchant2@example.com`、`merchant3@example.com`、`merchant4@example.com` / `password123`
 
-后端可结合 AMap geocode 将路线节点转成地理点，用于：
+演示数据覆盖：
 
-- 订单详情地图展示
-- 物流当前位置推断
-- 运输路线可视化
+- 4 个中文店铺：数码、智能家居、办公设备、户外生活。
+- 20 个商品：手机、笔记本、显示器、智能门锁、扫地机、耳机、办公椅、户外装备等。
+- 商品字段补全：`category`、`brand`、`model`、`sku_code`、`tags`、`spec_highlights`、评分、销量、库存、发货时效和保修天数。
+- `test1@example.com` 预置浏览历史和同店购物车商品，便于演示“推荐”和“帮我下单”。
+- 保留兼容订单：`ORD202603300001`、`ORD202603300002`。
+- 订单覆盖待发货、运输中、已签收、历史售后等状态。
+- 售后覆盖 `submitted`、`merchant_approved`、`processing`、`completed` 状态。
+- 商品图和店铺 Logo 均引用 `/demo-assets/...` 本地资源。
 
-### 9.2 WebSocket 实时事件
+典型演示链路：
 
-后端开放：
+- 推荐：用户询问“推荐一台适合写论文和轻量开发的银色笔记本，预算 6000 以内。”
+- 下单：用户要求“帮我把购物车里的商品下单，地址...邮箱...”
+- 查询：用户询问 `ORD202603300001` 或 `ORD202603300002` 的订单、物流、售后状态。
+- 售后：用户要求对已签收订单申请退货或换货。
+- 商家：商家账号查看待发货订单和待处理售后，并执行发货或售后状态流转。
 
-- `GET /ws/realtime`
+## 12. 商品推荐设计
 
-用于向用户侧和商家侧广播：
+推荐能力不是独立推荐系统，而是嵌入客服链路的轻量业务推荐模块。
 
-- 库存变化
-- 购物车变化
-- 订单变化
-- 售后变化
-- 物流投诉变化
+输入来源：
 
-这使前端页面不必完全依赖轮询，尤其适合商家中心、订单页和购物车页的状态同步。
+- 用户当前自然语言查询。
+- 用户浏览历史。
+- 商品基础属性、标签、规格亮点和运营指标。
 
-## 10. 模型服务与 LoRA 训练链路
+推荐处理：
 
-### 10.1 运行时模型分工
+1. 从查询中提取预算、颜色、类目、规格等显式约束。
+2. 将商品名称、描述、标签、规格统一归一化。
+3. 先用硬约束过滤不满足条件的商品。
+4. 再结合浏览历史、评分、销量和文本匹配进行排序。
+5. 返回商品卡片和推荐理由。
 
-当前推荐口径：
+这样可以避免“预算不符”“颜色不符”“规格不符”的商品混入推荐结果，提升答辩演示稳定性。
+
+## 13. 聊天记忆设计
+
+服务端记忆分为两层：
+
+- 会话级记忆：`chat_sessions`、`chat_messages`、`chat_context_snapshots`
+- 用户级全局记忆：`chat_user_global_memory`
+
+会话级记忆保存当前会话的最近消息、上下文快照和压缩摘要。用户级全局记忆沉淀长期偏好，例如预算、颜色、品牌、使用场景和相关订单。
+
+记忆同时持久化到 PostgreSQL，并生成 Markdown 派生产物，便于人工审查、调试和答辩展示。Redis 负责缓存记忆 bundle 和刷新锁。
+
+benchmark 会话使用 `benchmark_` 前缀 session id。后端识别后会跳过真实用户记忆加载与刷新，避免实验样本污染实际会话记忆。
+
+## 14. 知识库与多模态设计
+
+知识库能力由后端统一维护：
+
+- 文档切块。
+- embedding 生成。
+- pgvector 检索。
+- 将检索结果注入 Agent 或图片分析链路。
+
+典型知识源包括售后政策、商品说明书、benchmark 种子知识文档。
+
+图片售后采用两步流程：
+
+1. 前端调用 `/api/v1/chat/upload-image` 上传图片，获取 `attachment_id`。
+2. 前端调用 `/api/v1/chat/send` 时携带 `attachments`。
+
+后端校验 MIME、大小和归属关系后，调用视觉模型生成结构化图片分析，并可继续生成售后待确认草稿。
+
+## 15. 物流与实时通知设计
+
+物流数据不仅保存文本状态，还保存：
+
+- 当前经纬度：`current_lng`、`current_lat`
+- 路线节点：`route_geo`
+- 物流说明和签收状态
+
+商家可以执行发货和物流推进，客户可以查看物流状态或发起物流投诉。
+
+WebSocket 实时通道用于通知：
+
+- 购物车变更。
+- 订单变更。
+- 库存变更。
+- 售后状态变更。
+- 物流投诉状态变更。
+
+前端仍保留主动刷新逻辑，WebSocket 只作为加速状态同步的通道，不作为唯一可靠来源。
+
+## 16. 模型服务与 LoRA 链路
+
+运行时模型分工：
+
+- Ollama：基础聊天模型、视觉模型和 embedding 模型。
+- vLLM / OpenAI-compatible：加载 LoRA adapter 的 Agent 推理入口。
+- 后端 LLM client：统一适配 `ollama` 和 `openai_compat` provider，并支持主备模型故障切换。
+
+默认配置口径：
 
 - 基础聊天模型：`qwen3.5:2b`
-- Agent 默认模型：`qwen3.5-2b-lora`
-- 多模态模型：`qwen3-vl:2b`
+- Agent LoRA 模型：`qwen3.5-2b-lora`
+- 视觉模型：`qwen3-vl:2b`
 - 向量模型：`mxbai-embed-large`
 
-### 10.2 LoRA 训练工程 `LoRA/`
+LoRA 工程位于 `LoRA/`，负责 SFT 数据准备、训练、评估和导出。当前实验结论更适合表述为：LoRA 在扩展推荐场景出现正向信号，但在共享核心能力上尚未形成稳定增益。
 
-LoRA 工程与运行时后端解耦，负责：
+## 17. Benchmark 设计
 
-- SFT 数据准备
-- 数据源过滤
-- QLoRA 训练
-- 评估
-- 导出 Ollama / 其他格式
+benchmark 是独立 uv 工程，目标是做黑盒、可复现、可分析的客服能力评测。
 
-默认部署链路不是把 LoRA 合并回基础模型，而是输出 adapter，由 vLLM / OpenAI-Compatible 在推理时动态加载。
+评测对象：
 
-### 10.3 提示词外置
+- 纯 Rasa。
+- Rasa + LLM。
+- Rasa + LoRA LLM。
 
-当前关键提示词全部外置：
+榜单拆分：
 
-- `backend/prompts/agent_final_answer.md`
-- `backend/prompts/rasa_review.md`
-- `backend/prompts/image_analysis.md`
+- `shared_core`：订单、物流、售后、基础推荐等所有系统都应具备的核心能力。
+- `agent_extension`：知识检索、多模态、待确认动作、复杂推荐等增强能力。
 
-好处有三点：
-
-- 业务逻辑与提示词解耦
-- benchmark 可以记录提示词版本
-- 便于迭代提示词而不污染代码主体
-
-## 11. Benchmark 架构设计
-
-### 11.1 独立工程化
-
-当前 benchmark 已从旧版后端内嵌脚本演化为独立工程 `benchmark/`，拥有自己的：
-
-- `pyproject.toml`
-- 数据集目录
-- 执行器
-- 评分器
-- 报告生成器
-
-这使业务运行和实验运行可以独立演进。
-
-### 11.2 双榜设计
-
-当前正式结果不再输出单一综合冠军，而是拆成：
-
-- `shared_core`
-- `agent_extension`
-
-含义：
-
-- `shared_core` 评估各系统都应具备的共享核心客服能力。
-- `agent_extension` 评估知识检索、多模态、待确认动作等增强能力。
-
-这样可以避免纯规则系统和带智能体扩展系统被强行放进同一条结论线上比较。
-
-### 11.3 数据集结构
-
-当前数据集位于：
+数据集结构：
 
 - `benchmark/datasets/core/`
 - `benchmark/datasets/extended/`
 - `benchmark/datasets/manifest.json`
 
-场景族固定为：
+评测原则：
 
-- `recommendation`
-- `order_query`
-- `logistics_query`
-- `after_sales_query`
-- `knowledge_and_multimodal`
-- `transactional_action`
+- 只通过登录、聊天、图片上传、待确认动作、知识库索引等外部接口执行。
+- 不直接调用后端内部函数。
+- 记录提示词版本、失败原因、覆盖率、双榜排名和分析图表。
+- 使用 benchmark session id 隔离真实记忆。
 
-其中：
+## 18. 安全与可靠性边界
 
-- `core` 用于正式实验主集
-- `extended` 用于回归和补充实验
+当前系统的关键边界：
 
-### 11.4 黑盒执行原则
+- 模型不直接写数据库。
+- 所有高风险事务写入必须经过待确认动作。
+- 用户只能访问自己的订单、购物车、售后和附件。
+- 商家只能管理自己店铺的商品、订单、地址和售后。
+- Rasa 内部接口可配置 `RASA_INTERNAL_TOKEN` 保护。
+- Redis 是缓存和锁，不是业务事实来源。
+- 上传图片限制 MIME、大小和所有权。
+- benchmark 不污染真实用户长期记忆。
 
-benchmark 只通过外部接口工作：
+可靠性措施：
 
-- 聊天发送接口
-- 图片上传接口
-- 待确认决策接口
-- 登录接口
-- 知识库写入接口
+- 后端支持 LLM 主备模型故障切换。
+- 聊天接口和图片上传使用独立超时配置。
+- pending action 使用过期时间，并在确认时重新校验业务状态。
+- 订单金额以订单明细计算，初始化数据中保持总额一致。
+- 本地演示图片避免外链失效。
+- 前端对商品图提供本地兜底。
 
-不允许直接调用内部 Python 函数，因此结果更接近真实部署场景。
+## 19. 本地演示启动顺序
 
-### 11.5 结果与分析创新
+完整演示建议顺序：
 
-当前 benchmark 输出新增了以下分析能力：
+1. 启动 PostgreSQL 容器。
+2. 启动 Redis 容器。
+3. 启动 Ollama，并确认模型可用。
+4. 初始化数据库：`backend/scripts/init_postgres.ps1`。
+5. 启动 FastAPI 后端。
+6. 启动 Rasa Server。
+7. 启动 Rasa Action Server。
+8. 按需启动 vLLM / OpenAI-compatible LoRA 服务。
+9. 启动前端 Vite 服务。
+10. 按需运行 benchmark。
 
-- 样本级唯一区分与覆盖率统计
-- `failure_breakdown.csv` 主失败原因
-- `failure_flags.csv` 多标签失败诊断
-- `prompt_versions.json` 提示词版本记录
-- 中文化分析报告与图表
-- `shared_core` / `agent_extension` 双榜 SVG 图表
+Windows 常用命令以 `README.md` 为准。
 
-正式排序优先依据：
+## 20. 当前验证口径
 
-1. `suite_family_macro_pass_rate`
-2. `suite_unique_micro_pass_rate`
-3. `suite_family_macro_success_rate`
-4. `eligibility_rate`
+当前项目变更后的关键验证项：
 
-### 11.6 benchmark 与业务系统的接口契约
+- 后端语法检查：`uv run python -m py_compile app\main.py app\models.py app\cache.py`
+- 核心逻辑测试：`uv run --project backend python -m unittest tests.test_product_recommendation_logic tests.test_chat_router_logic -v`
+- 前端类型检查：`vue-tsc --noEmit`
+- 前端构建：`vite build`
+- 数据库初始化：`backend/scripts/init_postgres.ps1`
+- 数据断言：商品图片无缺失、无外链图；兼容订单存在；订单金额与明细一致；售后状态覆盖完整。
+- API 冒烟：客户侧商品、购物车、订单、售后、推荐接口；商家侧店铺、商品、订单、售后接口。
+- 聊天冒烟：推荐返回商品卡片，下单和售后返回待确认动作，订单查询返回订单卡片。
 
-benchmark 不要求业务为测试专门新增协议，而是复用现有聊天协议，因此它同时起到了：
+## 21. 后续演进方向
 
-- 回归测试
-- 能力基线测试
-- 论文实验评测
-
-三种角色。
-
-## 12. 数据层设计
-
-### 12.1 PostgreSQL
-
-PostgreSQL 是主数据库，负责：
-
-- 用户、商家、店铺
-- 商品、购物车、订单、物流、售后、投诉
-- 聊天会话、消息、上下文快照、全局记忆、待确认操作
-- 知识库文档与向量元数据
-
-### 12.2 Redis
-
-Redis 主要承担：
-
-- 商品筛选元数据缓存
-- 订单/物流/售后摘要缓存
-- 会话记忆 bundle 缓存
-- pending action 状态缓存
-- 分布式锁与去抖
-
-设计原则是缓存“摘要和派生结果”，而不是全量复制业务表。
-
-### 12.3 文件系统
-
-本地文件系统承担两类派生产物：
-
-- `backend/data/chat_uploads/`：用户上传附件
-- `backend/data/chat_memory/`：会话记忆与全局记忆 Markdown
-
-这种设计降低了对象存储依赖，适合本地部署和实验演示。
-
-## 13. 安全边界与可靠性设计
-
-当前架构明确保留以下边界：
-
-- 聊天协议统一，但底层实现可替换。
-- Rasa 与 Agent 共存，而不是互相覆盖。
-- 模型无直接数据库写权限。
-- 所有写操作必须经过显式确认。
-- benchmark 不污染真实用户记忆。
-- 提示词、路由、失败原因都可追踪。
-
-为保证稳定性，系统还做了以下处理：
-
-- 路由元数据持久化，便于排查错路由。
-- `session_id` SQL 参数显式类型转换，避免 asyncpg 推断冲突。
-- 物流与发货流程做幂等保护，降低并发重复提交影响。
-- 实时通知与页面刷新结合，避免单纯依赖 WebSocket 单点。
-
-## 14. 推荐启动顺序
-
-完整开发或演示环境推荐按以下顺序启动：
-
-1. PostgreSQL
-2. Redis
-3. FastAPI 后端
-4. Ollama
-5. vLLM / OpenAI-Compatible LoRA 服务
-6. Rasa Server
-7. Action Server
-8. 前端
-9. benchmark（按需）
-
-如果只跑 benchmark，可以只启动与目标系统对应的最小依赖集合。
-
-## 15. 后续扩展方向
-
-- 继续把会话记忆从规则提取升级为更细粒度的长期偏好建模，但仍保留当前可审计的 Markdown 产物。
-- 把推荐链路扩展为“硬约束过滤 + 个性化排序 + 解释生成”的更稳定模块。
-- 将待确认动作抽象为统一事务框架，进一步减少聊天链路中的重复业务模板。
-- 继续增强 benchmark 的错误归因、回放能力和论文附录自动产出。
-- 在不破坏黑盒原则的前提下，为路由、工具调用和多模态分析增加更细的可观测性。
+- 将当前推荐能力进一步模块化，形成更清晰的“约束解析、候选召回、排序、解释”边界。
+- 增强事务型动作的可观测性，记录草稿生成、确认、执行、失败的完整事件链。
+- 继续优化 Rasa 与 Agent 的分工，让 Rasa 更聚焦结构化查询和流程控制。
+- 将 benchmark 失败样本回放能力做得更细，降低定位模型、路由、数据和前端展示问题的成本。
+- 继续围绕推荐场景训练和评估 LoRA，避免把 LoRA 描述为全局增强器。
+- 在保持本地演示稳定性的前提下，逐步补充更真实的商品图、店铺素材和售后图片样本。
