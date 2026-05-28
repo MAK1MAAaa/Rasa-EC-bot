@@ -302,7 +302,7 @@ class NexAUAgentOrchestrator:
                 {
                     "query": message,
                     "user_id": user_id if is_authenticated else "",
-                    "limit": 5,
+                    "limit": 1,
                 },
             )
 

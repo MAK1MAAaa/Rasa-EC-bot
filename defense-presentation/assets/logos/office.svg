@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240" viewBox="0 0 240 240" role="img" aria-label="Office shop logo">
+  <rect width="240" height="240" rx="48" fill="#475569"/>
+  <rect x="60" y="70" width="120" height="104" rx="18" fill="#f8fafc"/>
+  <path d="M82 102h76M82 130h76M82 158h48" stroke="#475569" stroke-width="12" stroke-linecap="round"/>
+</svg>

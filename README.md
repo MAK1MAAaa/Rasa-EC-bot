@@ -1,8 +1,151 @@
 # Rasa-EC-bot
 
+## Docker 一键启动
+
+该方式会用 Docker Compose 启动前端、FastAPI 后端、Rasa Server、Rasa Action Server、PostgreSQL 和 Redis。Ollama 不在 Compose 内启动，需要你先在宿主机手动启动，并确保容器可通过 `http://host.docker.internal:11434` 访问。
+
+### 启动
+
+```powershell
+docker compose up --build
+```
+
+默认访问地址：
+
+| 服务 | 地址 |
+| --- | --- |
+| 前端商城 | `http://localhost:5173` |
+| 后端 API | `http://localhost:8000` |
+| Rasa Server | `http://localhost:5005` |
+
+首次创建 PostgreSQL volume 时，Compose 会自动执行 `backend/db/init_db.sql` 和 `backend/db/seed_data.sql`。后续再次 `docker compose up` 会复用已有数据，不会自动重置演示数据。
+
+### 可选配置
+
+默认命令不依赖额外环境文件。如需修改端口、模型名、CORS、`FRONTEND_BASE_URL` 或 token，可复制 Docker 样例配置后启动：
+
+```powershell
+Copy-Item .env.docker.sample .env.docker
+docker compose --env-file .env.docker up --build
+```
+
+默认 LLM 配置走宿主机 Ollama：
+
+```text
+OLLAMA_BASE_URL=http://host.docker.internal:11434
+AGENT_LLM_PROVIDER=ollama
+AGENT_LLM_BASE_URL=http://host.docker.internal:11434
+AGENT_LLM_MODEL=qwen3.5:2b
+```
+
+如果模型名不同，修改 `.env.docker` 中的 `OLLAMA_MODEL`、`AGENT_LLM_MODEL`、`OLLAMA_EMBED_MODEL` 和 `OLLAMA_VLM_MODEL`。
+
+### 重置演示数据
+
+只有显式删除 volume 才会重置 PostgreSQL 和 Redis 数据：
+
+```powershell
+docker compose down -v
+docker compose up --build
+```
+
+### 常见问题
+
+- 如果聊天链路连接 Ollama 失败，先确认宿主机 Ollama 已启动，并可在宿主机访问 `http://127.0.0.1:11434`。
+- 如果 Rasa 构建时间较长，这是因为镜像构建阶段会安装 Rasa 依赖并训练模型，避免依赖本地已生成但被 gitignore 的 `rasa/models/`。
+- 如果要让另一台设备访问前端，把 `.env.docker` 中的 `FRONTEND_BASE_URL` 改成对方可访问的地址，并按需扩展 `BACKEND_CORS_ALLOW_ORIGINS`。
+
+### Tailscale 远端访问慢
+
+同一 Tailscale 网络里的另一台电脑访问前端时，建议优先使用 Docker Nginx 版本：
+
+```powershell
+docker compose up -d
+```
+
+前端已做三项远端访问优化：移除 Google Fonts 外链，避免远端浏览器等待外网字体；路由页面按需加载，减少首屏 JavaScript 体积；Docker Nginx 对 `/assets/` 和 `/demo-assets/` 启用 gzip 与缓存头。
+
+## 毕设答辩 HTML PPT
+
+项目新增独立普通 HTML 答辩演示页：`defense-presentation/index.html`。该页面不替换原有 `report_presentation.html`，不依赖 HyperFrames、Vite 或外部 CDN，可直接像 PPT 一样手动翻页讲解毕业设计，内容聚焦电商业务闭环、Rasa + LLM/Agent 混合客服、安全待确认动作、商家端处理闭环和 benchmark 结论。
+
+另有一个动画试验副本：`defense-presentation/index-animated.html`。它用于尝试标题、卡片、流程线和进度条的短入场动画；答辩正式使用时优先选择稳定的 `index.html`，需要更强展示感时再使用动画版。
+
+实现聚焦版：`defense-presentation/index-implementation.html`。该版本从普通版复制而来，重点讲已完成能力、系统设计、关键接口、安全写入机制、商家端闭环和技术实现亮点。
+
+### 打开方式
+
+最简单方式是直接用浏览器打开：
+
+```text
+defense-presentation/index.html
+```
+
+动画版：
+
+```text
+defense-presentation/index-animated.html
+```
+
+实现聚焦版：
+
+```text
+defense-presentation/index-implementation.html
+```
+
+如果希望通过本地 HTTP 地址预览，可在项目根目录运行：
+
+```powershell
+python -m http.server 3025
+```
+
+然后访问：
+
+```text
+http://localhost:3025/defense-presentation/
+```
+
+动画版 HTTP 地址：
+
+```text
+http://localhost:3025/defense-presentation/index-animated.html
+```
+
+实现聚焦版 HTTP 地址：
+
+```text
+http://localhost:3025/defense-presentation/index-implementation.html
+```
+
+### 翻页
+
+- `ArrowRight`、`PageDown`、空格：下一页。
+- `ArrowLeft`、`PageUp`：上一页。
+- `Home`：回到第一页。
+- `End`：跳到最后一页。
+- URL hash 支持直接跳页，例如 `#slide-9`。
+
+### 原版 15 页答辩主线
+
+1. 毕设题目与系统完成情况。
+2. 用户端、智能客服和商家端功能范围。
+3. 系统分层设计。
+4. 实现重点：稳定、真实、可控。
+5. 本地演示数据与图片资产。
+6. 商品推荐链路。
+7. 待确认事务机制。
+8. 购物车下单草稿。
+9. 订单、物流、售后查询。
+10. 售后申请草稿。
+11. 用户侧到商家侧的业务流转。
+12. 商家工作台闭环。
+13. 技术实现亮点。
+14. benchmark 与方案选择。
+15. 收尾总结。
+
 ## 毕设演示数据
 
-`backend/db/seed_data.sql` 内置一套面向答辩演示的中文初始化数据，覆盖客服推荐、购物车下单、订单查询、物流查询、售后申请和商家售后处理。商品图、店铺 Logo 和前端缺省商品图均使用 `frontend/public/demo-assets/` 下的本地资源，初始化后商品图不依赖外部图片站点。
+`backend/db/seed_data.sql` 内置一套面向答辩演示的中文初始化数据，包含 4 个中文店铺、36 个演示商品，覆盖客服推荐、购物车下单、订单查询、物流查询、售后申请和商家售后处理。商品图、店铺 Logo 和前端缺省商品图均使用 `frontend/public/demo-assets/` 下的本地资源，初始化后商品图不依赖外部图片站点。
 
 ### 演示账号
 
@@ -31,6 +174,8 @@ bash scripts/init_postgres.sh
 ```
 
 ### 推荐演示话术
+
+聊天推荐默认只返回 1 个最匹配商品，正文推荐和商品卡片保持一致；内部推荐接口仍可通过显式 `limit` 参数支持多商品场景。
 
 ```text
 推荐一台适合写论文和轻量开发的银色笔记本，预算 6000 以内。

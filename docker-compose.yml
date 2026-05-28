@@ -1,0 +1,188 @@
+name: rasa-ec-bot
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: rasa-ec-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-rasa_ec_bot}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/db/init_db.sql:/docker-entrypoint-initdb.d/01-init-db.sql:ro
+      - ./backend/db/seed_data.sql:/docker-entrypoint-initdb.d/02-seed-data.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  redis:
+    image: redis:7
+    container_name: rasa-ec-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: rasa-ec-backend
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-rasa_ec_bot}
+      REDIS_URL: redis://redis:6379/0
+      REDIS_CACHE_TTL_SEC: ${REDIS_CACHE_TTL_SEC:-180}
+      CHAT_ACTION_TTL_SEC: ${CHAT_ACTION_TTL_SEC:-300}
+      RASA_SERVER_URL: http://rasa-server:5005
+      RASA_REST_WEBHOOK_PATH: /webhooks/rest/webhook
+      RASA_PARSE_PATH: /model/parse
+      RASA_REQUEST_TIMEOUT_SEC: ${RASA_REQUEST_TIMEOUT_SEC:-30}
+      RASA_INTERNAL_TOKEN: ${RASA_INTERNAL_TOKEN:-change-me-in-production}
+      FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-http://localhost:5173}
+      BACKEND_CORS_ALLOW_ORIGINS: ${BACKEND_CORS_ALLOW_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173,http://localhost:8000,http://127.0.0.1:8000}
+      BACKEND_CORS_ALLOW_ORIGIN_REGEX: ${BACKEND_CORS_ALLOW_ORIGIN_REGEX:-}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3.5:2b}
+      OLLAMA_TIMEOUT_SEC: ${OLLAMA_TIMEOUT_SEC:-45}
+      CHAT_ROUTER_ENABLE_AGENT: ${CHAT_ROUTER_ENABLE_AGENT:-true}
+      CHAT_ROUTER_RASA_CONFIDENCE_THRESHOLD: ${CHAT_ROUTER_RASA_CONFIDENCE_THRESHOLD:-0.72}
+      CHAT_ROUTER_LLM_REVIEW_ENABLED: ${CHAT_ROUTER_LLM_REVIEW_ENABLED:-true}
+      CHAT_ROUTER_LLM_REVIEW_THRESHOLD: ${CHAT_ROUTER_LLM_REVIEW_THRESHOLD:-0.90}
+      AGENT_LLM_PROVIDER: ${AGENT_LLM_PROVIDER:-ollama}
+      AGENT_LLM_BASE_URL: ${AGENT_LLM_BASE_URL:-http://host.docker.internal:11434}
+      AGENT_LLM_MODEL: ${AGENT_LLM_MODEL:-qwen3.5:2b}
+      AGENT_LLM_API_KEY: ${AGENT_LLM_API_KEY:-EMPTY}
+      AGENT_LLM_TIMEOUT_SEC: ${AGENT_LLM_TIMEOUT_SEC:-45}
+      AGENT_LLM_FALLBACK_PROVIDER: ${AGENT_LLM_FALLBACK_PROVIDER:-}
+      AGENT_LLM_FALLBACK_BASE_URL: ${AGENT_LLM_FALLBACK_BASE_URL:-}
+      AGENT_LLM_FALLBACK_MODEL: ${AGENT_LLM_FALLBACK_MODEL:-}
+      AGENT_LLM_FALLBACK_API_KEY: ${AGENT_LLM_FALLBACK_API_KEY:-}
+      AGENT_LLM_FALLBACK_TIMEOUT_SEC: ${AGENT_LLM_FALLBACK_TIMEOUT_SEC:-45}
+      OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL:-mxbai-embed-large}
+      OLLAMA_VLM_MODEL: ${OLLAMA_VLM_MODEL:-qwen3-vl:2b}
+      KB_EMBEDDING_DIM: ${KB_EMBEDDING_DIM:-1024}
+      KB_RETRIEVAL_TOP_K: ${KB_RETRIEVAL_TOP_K:-4}
+      KB_CHUNK_SIZE: ${KB_CHUNK_SIZE:-500}
+      KB_CHUNK_OVERLAP: ${KB_CHUNK_OVERLAP:-80}
+      CHAT_UPLOAD_DIR: ${CHAT_UPLOAD_DIR:-data/chat_uploads}
+      CHAT_UPLOAD_MAX_MB: ${CHAT_UPLOAD_MAX_MB:-8}
+      AMAP_WEB_KEY: ${AMAP_WEB_KEY:-}
+      AMAP_WEB_SIG: ${AMAP_WEB_SIG:-}
+      AMAP_TIMEOUT_MS: ${AMAP_TIMEOUT_MS:-3000}
+      AMAP_QPS_LIMIT: ${AMAP_QPS_LIMIT:-5}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - backend_data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/', timeout=3).read()\""]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  rasa-actions:
+    build:
+      context: ./rasa
+      dockerfile: Dockerfile
+    container_name: rasa-ec-actions
+    command: ["uv", "run", "rasa", "run", "actions", "--actions", "actions", "--port", "5055"]
+    environment:
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_CHAT_PATH: ${OLLAMA_CHAT_PATH:-/api/chat}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3.5:2b}
+      BACKEND_API_URL: http://backend:8000/api/v1
+      FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-http://localhost:5173}
+      RASA_INTERNAL_TOKEN: ${RASA_INTERNAL_TOKEN:-change-me-in-production}
+      ACTION_HTTP_TIMEOUT_SEC: ${ACTION_HTTP_TIMEOUT_SEC:-20}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${RASA_ACTION_PORT:-5055}:5055"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  rasa-server:
+    build:
+      context: ./rasa
+      dockerfile: Dockerfile
+    container_name: rasa-ec-server
+    command:
+      - uv
+      - run
+      - rasa
+      - run
+      - --enable-api
+      - --cors
+      - "*"
+      - --credentials
+      - credentials.yml
+      - --endpoints
+      - endpoints.docker.yml
+      - --model
+      - models
+      - --interface
+      - 0.0.0.0
+      - --port
+      - "5005"
+    ports:
+      - "${RASA_PORT:-5005}:5005"
+    depends_on:
+      rasa-actions:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:5005/status', timeout=5).read()\""]
+      interval: 10s
+      timeout: 8s
+      retries: 30
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_ENABLE_LOGISTICS_MAP: ${VITE_ENABLE_LOGISTICS_MAP:-false}
+        VITE_AMAP_JS_KEY: ${VITE_AMAP_JS_KEY:-}
+        VITE_AMAP_SECURITY_JS_CODE: ${VITE_AMAP_SECURITY_JS_CODE:-}
+    container_name: rasa-ec-frontend
+    ports:
+      - "${FRONTEND_PORT:-5173}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+      rasa-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  backend_data:

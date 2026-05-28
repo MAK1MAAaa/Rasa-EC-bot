@@ -1,0 +1,1555 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rasa-EC-bot 毕设答辩 HTML PPT 动画版</title>
+  <style>
+    :root {
+      --paper: #f4efe4;
+      --paper-2: #fff9ec;
+      --ink: #171717;
+      --soft-ink: #3f3a35;
+      --muted: #746c61;
+      --line: #d8cbb7;
+      --line-dark: #2c2925;
+      --teal: #0f766e;
+      --teal-soft: #d8ece7;
+      --amber: #c57b1f;
+      --amber-soft: #f2dfbd;
+      --red: #c2413a;
+      --red-soft: #f1d6d3;
+      --green: #2e7d4f;
+      --blue: #285ea8;
+      --blue-soft: #d9e4f3;
+      --deck-w: 1920px;
+      --deck-h: 1080px;
+      --sans: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Source Han Sans SC", sans-serif;
+      --serif: "Source Han Serif SC", "Noto Serif CJK SC", "SimSun", serif;
+      --mono: "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #111;
+      color: var(--ink);
+      font-family: var(--sans);
+    }
+
+    body {
+      background:
+        linear-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+        #141414;
+      background-size: 44px 44px;
+    }
+
+    #deck {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: var(--deck-w);
+      height: var(--deck-h);
+      transform: translate(-50%, -50%) scale(var(--deck-scale, 1));
+      transform-origin: center center;
+      overflow: hidden;
+      background: var(--paper);
+      box-shadow: 0 28px 90px rgba(0, 0, 0, 0.42);
+      isolation: isolate;
+    }
+
+    .slide {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      grid-template-rows: 1fr auto;
+      padding: 68px 78px 54px 92px;
+      overflow: hidden;
+      opacity: 0;
+      transform: translateY(28px) scale(0.988);
+      pointer-events: none;
+      transition: opacity 360ms ease, transform 460ms cubic-bezier(0.2, 0.9, 0.18, 1);
+      background:
+        linear-gradient(90deg, rgba(23, 23, 23, 0.96) 0 14px, transparent 14px),
+        linear-gradient(135deg, rgba(15, 118, 110, 0.12), transparent 34%),
+        linear-gradient(315deg, rgba(197, 123, 31, 0.12), transparent 31%),
+        var(--paper);
+    }
+
+    .slide::before {
+      content: "";
+      position: absolute;
+      inset: 26px;
+      border: 1px solid rgba(23, 23, 23, 0.12);
+      pointer-events: none;
+    }
+
+    .slide::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 14px;
+      background: linear-gradient(180deg, var(--teal), var(--amber), var(--red));
+    }
+
+    .slide.active {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+      pointer-events: auto;
+      z-index: 5;
+    }
+
+    .slide.active .stage > * {
+      animation: rise-in 520ms cubic-bezier(0.2, 0.9, 0.18, 1) both;
+    }
+
+    .slide.active .stage > *:nth-child(2) {
+      animation-delay: 80ms;
+    }
+
+    .slide.active .stage > *:nth-child(3) {
+      animation-delay: 150ms;
+    }
+
+    .slide.active .stage > *:nth-child(4) {
+      animation-delay: 210ms;
+    }
+
+    .slide.active .panel,
+    .slide.active .card,
+    .slide.active .fact,
+    .slide.active .metric,
+    .slide.active .node,
+    .slide.active .state,
+    .slide.active .asset,
+    .slide.active .table,
+    .slide.active .quote,
+    .slide.active .script {
+      animation: surface-in 560ms cubic-bezier(0.2, 0.9, 0.18, 1) both;
+    }
+
+    .slide.active .grid-3 > *:nth-child(2),
+    .slide.active .grid-4 > *:nth-child(2),
+    .slide.active .metric-grid > *:nth-child(2),
+    .slide.active .state-list > *:nth-child(2),
+    .slide.active .asset-strip > *:nth-child(2),
+    .slide.active .arch-row > *:nth-child(2) {
+      animation-delay: 80ms;
+    }
+
+    .slide.active .grid-3 > *:nth-child(3),
+    .slide.active .grid-4 > *:nth-child(3),
+    .slide.active .metric-grid > *:nth-child(3),
+    .slide.active .state-list > *:nth-child(3),
+    .slide.active .asset-strip > *:nth-child(3),
+    .slide.active .arch-row > *:nth-child(3) {
+      animation-delay: 140ms;
+    }
+
+    .slide.active .grid-4 > *:nth-child(4),
+    .slide.active .state-list > *:nth-child(4),
+    .slide.active .asset-strip > *:nth-child(4),
+    .slide.active .arch-row > *:nth-child(4) {
+      animation-delay: 200ms;
+    }
+
+    .slide.active .asset-strip > *:nth-child(5),
+    .slide.active .arch-row > *:nth-child(5) {
+      animation-delay: 260ms;
+    }
+
+    .slide.active .asset-strip > *:nth-child(6) {
+      animation-delay: 320ms;
+    }
+
+    .slide.active .arrow {
+      animation: line-draw 520ms ease both;
+      transform-origin: left center;
+    }
+
+    .slide.active .bar {
+      animation: progress-glow 520ms ease both;
+    }
+
+    .slide.previous {
+      transform: translateY(-22px) scale(0.992);
+    }
+
+    .slide.dark {
+      color: #fff9ec;
+      background:
+        linear-gradient(90deg, var(--paper) 0 14px, transparent 14px),
+        linear-gradient(135deg, rgba(15, 118, 110, 0.34), transparent 34%),
+        linear-gradient(315deg, rgba(197, 123, 31, 0.25), transparent 30%),
+        #151515;
+    }
+
+    .slide.dark::before {
+      border-color: rgba(244, 239, 228, 0.15);
+    }
+
+    .slide.dark h1,
+    .slide.dark h2,
+    .slide.dark h3,
+    .slide.dark strong {
+      color: #fff9ec;
+    }
+
+    .slide.dark p,
+    .slide.dark li,
+    .slide.dark .inline-note {
+      color: rgba(255, 249, 236, 0.76);
+    }
+
+    .slide.dark .panel,
+    .slide.dark .fact,
+    .slide.dark .metric,
+    .slide.dark .node,
+    .slide.dark .card,
+    .slide.dark .quote,
+    .slide.dark .script {
+      background: rgba(255, 249, 236, 0.075);
+      border-color: rgba(255, 249, 236, 0.2);
+      color: #fff9ec;
+      box-shadow: none;
+    }
+
+    .slide.dark .eyebrow,
+    .slide.dark .footer,
+    .slide.dark .label,
+    .slide.dark .small,
+    .slide.dark .tag {
+      color: rgba(255, 249, 236, 0.66);
+    }
+
+    .stage {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      align-content: center;
+      gap: 30px;
+      min-height: 0;
+    }
+
+    .stage.top {
+      align-content: start;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.05fr) 650px;
+      gap: 72px;
+      align-items: center;
+    }
+
+    .split {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 32px;
+      align-items: stretch;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 22px;
+    }
+
+    .grid-4 {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .eyebrow {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 18px;
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 17px;
+      text-transform: uppercase;
+    }
+
+    .eyebrow::before {
+      content: "";
+      width: 52px;
+      height: 2px;
+      background: currentColor;
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      margin: 0;
+    }
+
+    h1 {
+      max-width: 1150px;
+      color: var(--ink);
+      font-family: var(--serif);
+      font-size: 92px;
+      font-weight: 900;
+      line-height: 1.02;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      max-width: 1260px;
+      color: var(--ink);
+      font-family: var(--serif);
+      font-size: 66px;
+      font-weight: 900;
+      line-height: 1.08;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      color: var(--ink);
+      font-size: 29px;
+      line-height: 1.24;
+      letter-spacing: 0;
+    }
+
+    p,
+    li {
+      color: var(--soft-ink);
+      font-size: 24px;
+      line-height: 1.52;
+    }
+
+    ul {
+      margin: 0;
+      padding-left: 28px;
+    }
+
+    li + li {
+      margin-top: 12px;
+    }
+
+    strong {
+      color: var(--ink);
+      font-weight: 900;
+    }
+
+    code {
+      padding: 2px 7px;
+      border: 1px solid rgba(23, 23, 23, 0.12);
+      border-radius: 5px;
+      background: rgba(255, 249, 236, 0.72);
+      color: var(--ink);
+      font-family: var(--mono);
+      font-size: 0.82em;
+    }
+
+    .deck-title {
+      display: inline-flex;
+      align-items: center;
+      gap: 14px;
+      margin-top: 34px;
+      color: rgba(255, 249, 236, 0.74);
+      font-family: var(--mono);
+      font-size: 21px;
+    }
+
+    .deck-title span {
+      width: 13px;
+      height: 13px;
+      border-radius: 999px;
+      background: var(--teal);
+      box-shadow: 24px 0 0 var(--amber), 48px 0 0 var(--red);
+    }
+
+    .kicker {
+      width: fit-content;
+      padding: 9px 14px;
+      border: 1px solid rgba(23, 23, 23, 0.18);
+      border-radius: 6px;
+      background: rgba(255, 249, 236, 0.66);
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 17px;
+    }
+
+    .panel,
+    .card,
+    .fact,
+    .metric,
+    .quote,
+    .script {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 249, 236, 0.78);
+      box-shadow: 0 16px 46px rgba(23, 23, 23, 0.08);
+    }
+
+    .panel {
+      padding: 30px;
+    }
+
+    .card {
+      display: grid;
+      gap: 18px;
+      padding: 28px;
+    }
+
+    .fact {
+      display: grid;
+      gap: 12px;
+      padding: 26px;
+      min-height: 158px;
+    }
+
+    .fact .num {
+      color: var(--teal);
+      font-family: var(--mono);
+      font-size: 22px;
+      font-weight: 800;
+    }
+
+    .label,
+    .tag,
+    .small {
+      color: var(--muted);
+      font-family: var(--mono);
+    }
+
+    .label {
+      font-size: 17px;
+      text-transform: uppercase;
+    }
+
+    .small {
+      font-size: 18px;
+      line-height: 1.45;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      width: fit-content;
+      min-height: 35px;
+      padding: 6px 11px;
+      border: 1px solid rgba(23, 23, 23, 0.14);
+      border-radius: 999px;
+      background: rgba(255, 249, 236, 0.72);
+      font-size: 15px;
+    }
+
+    .accent-teal {
+      color: var(--teal);
+    }
+
+    .accent-amber {
+      color: var(--amber);
+    }
+
+    .accent-red {
+      color: var(--red);
+    }
+
+    .accent-blue {
+      color: var(--blue);
+    }
+
+    .hero-visual {
+      display: grid;
+      gap: 18px;
+      padding: 30px;
+      border: 1px solid rgba(255, 249, 236, 0.2);
+      border-radius: 8px;
+      background:
+        linear-gradient(135deg, rgba(255, 249, 236, 0.08), rgba(255, 249, 236, 0.02)),
+        #1e1e1e;
+    }
+
+    .terminal {
+      display: grid;
+      gap: 12px;
+      padding: 24px;
+      border: 1px solid rgba(255, 249, 236, 0.16);
+      border-radius: 8px;
+      background: #111;
+      color: #f7f0e4;
+      font-family: var(--mono);
+      font-size: 19px;
+      line-height: 1.5;
+    }
+
+    .terminal .ok {
+      color: #7bd9b4;
+    }
+
+    .terminal .warn {
+      color: #f5c36a;
+    }
+
+    .timeline {
+      display: grid;
+      gap: 14px;
+    }
+
+    .time-row {
+      display: grid;
+      grid-template-columns: 170px minmax(0, 1fr) 430px;
+      gap: 18px;
+      align-items: center;
+      padding: 16px 20px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 249, 236, 0.7);
+    }
+
+    .time-row strong {
+      font-size: 24px;
+    }
+
+    .time-row .small {
+      text-align: right;
+    }
+
+    .architecture {
+      display: grid;
+      gap: 18px;
+    }
+
+    .arch-row {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 18px;
+      align-items: stretch;
+    }
+
+    .node {
+      position: relative;
+      display: grid;
+      align-content: start;
+      gap: 12px;
+      min-height: 190px;
+      padding: 24px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 249, 236, 0.78);
+    }
+
+    .node::after {
+      content: "";
+      position: absolute;
+      right: -18px;
+      top: 50%;
+      width: 18px;
+      height: 2px;
+      background: var(--line-dark);
+    }
+
+    .node:last-child::after {
+      display: none;
+    }
+
+    .node h3 {
+      font-size: 27px;
+    }
+
+    .node p {
+      font-size: 21px;
+    }
+
+    .stack {
+      display: grid;
+      gap: 18px;
+    }
+
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .asset-strip {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 16px;
+      align-items: stretch;
+    }
+
+    .asset {
+      display: grid;
+      align-content: center;
+      justify-items: center;
+      gap: 12px;
+      min-height: 178px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 249, 236, 0.74);
+    }
+
+    .asset img {
+      width: 106px;
+      height: 86px;
+      object-fit: contain;
+    }
+
+    .route {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 20px;
+      align-items: stretch;
+    }
+
+    .route .card {
+      min-height: 310px;
+    }
+
+    .arrow-line {
+      display: grid;
+      grid-template-columns: 1fr 52px 1fr 52px 1fr;
+      gap: 0;
+      align-items: center;
+    }
+
+    .arrow-line .node {
+      min-height: 235px;
+    }
+
+    .arrow {
+      height: 2px;
+      background: var(--line-dark);
+    }
+
+    .arrow::after {
+      content: "";
+      display: block;
+      width: 12px;
+      height: 12px;
+      margin-left: auto;
+      margin-top: -5px;
+      border-top: 2px solid var(--line-dark);
+      border-right: 2px solid var(--line-dark);
+      transform: rotate(45deg);
+    }
+
+    .risk-band {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 26px;
+      align-items: stretch;
+    }
+
+    .risk-band .panel {
+      border-left: 8px solid var(--red);
+    }
+
+    .risk-band .panel.ok {
+      border-left-color: var(--teal);
+    }
+
+    .draft-card {
+      display: grid;
+      grid-template-columns: 380px minmax(0, 1fr);
+      gap: 26px;
+      align-items: stretch;
+      padding: 28px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 249, 236, 0.78);
+    }
+
+    .product-preview {
+      display: grid;
+      align-content: center;
+      justify-items: center;
+      gap: 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fffdf5;
+    }
+
+    .product-preview img {
+      width: 248px;
+      height: 180px;
+      object-fit: contain;
+    }
+
+    .pending {
+      display: inline-flex;
+      align-items: center;
+      width: fit-content;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: var(--amber-soft);
+      color: #664012;
+      font-family: var(--mono);
+      font-size: 16px;
+      font-weight: 700;
+    }
+
+    .state-list {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .state {
+      display: grid;
+      gap: 10px;
+      min-height: 170px;
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 249, 236, 0.74);
+    }
+
+    .state::before {
+      content: "";
+      width: 42px;
+      height: 6px;
+      border-radius: 999px;
+      background: var(--teal);
+    }
+
+    .state.warn::before {
+      background: var(--amber);
+    }
+
+    .state.danger::before {
+      background: var(--red);
+    }
+
+    .state.info::before {
+      background: var(--blue);
+    }
+
+    .role-switch {
+      display: grid;
+      grid-template-columns: 1fr 260px 1fr;
+      gap: 24px;
+      align-items: center;
+    }
+
+    .switch-arrow {
+      display: grid;
+      place-items: center;
+      height: 118px;
+      border-top: 2px solid rgba(255, 249, 236, 0.34);
+      border-bottom: 2px solid rgba(255, 249, 236, 0.34);
+      color: #fff9ec;
+      font-family: var(--mono);
+      font-size: 22px;
+    }
+
+    .dashboard {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 24px;
+      align-items: stretch;
+    }
+
+    .table {
+      display: grid;
+      gap: 0;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 249, 236, 0.78);
+    }
+
+    .table-row {
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr 0.8fr 0.8fr;
+      gap: 14px;
+      padding: 17px 20px;
+      border-bottom: 1px solid var(--line);
+      font-size: 20px;
+    }
+
+    .table-row:last-child {
+      border-bottom: 0;
+    }
+
+    .table-row.head {
+      background: rgba(23, 23, 23, 0.05);
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 16px;
+      text-transform: uppercase;
+    }
+
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 20px;
+    }
+
+    .metric {
+      display: grid;
+      align-content: start;
+      gap: 12px;
+      min-height: 188px;
+      padding: 25px;
+    }
+
+    .metric strong {
+      font-size: 40px;
+      line-height: 1.08;
+    }
+
+    .quote {
+      padding: 34px;
+      border-left: 8px solid var(--teal);
+    }
+
+    .quote p {
+      font-family: var(--serif);
+      font-size: 42px;
+      line-height: 1.32;
+      color: var(--ink);
+    }
+
+    .script {
+      display: grid;
+      gap: 12px;
+      padding: 20px 22px;
+      border-left: 6px solid var(--amber);
+    }
+
+    .script p {
+      font-size: 21px;
+    }
+
+    .inline-note {
+      margin-top: 18px;
+      padding: 14px 16px;
+      border-left: 4px solid var(--amber);
+      color: var(--muted);
+      font-size: 18px;
+      line-height: 1.45;
+      background: rgba(255, 249, 236, 0.52);
+      transition: opacity 180ms ease;
+    }
+
+    .footer {
+      position: relative;
+      z-index: 2;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto 260px;
+      gap: 22px;
+      align-items: center;
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 17px;
+    }
+
+    .progress {
+      display: block;
+      height: 6px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: rgba(23, 23, 23, 0.12);
+    }
+
+    .slide.dark .progress {
+      background: rgba(255, 249, 236, 0.16);
+    }
+
+    .bar {
+      display: block;
+      height: 100%;
+      width: 0;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--teal), var(--amber), var(--red));
+      transition: width 240ms ease;
+    }
+
+    .rail {
+      position: absolute;
+      z-index: 8;
+      top: 50%;
+      right: 28px;
+      display: grid;
+      gap: 9px;
+      transform: translateY(-50%);
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: rgba(23, 23, 23, 0.26);
+      transition: transform 180ms ease, background 180ms ease;
+    }
+
+    .dot.active {
+      background: var(--teal);
+      transform: scale(1.7);
+    }
+
+    @keyframes rise-in {
+      from {
+        opacity: 0;
+        transform: translateY(26px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    @keyframes surface-in {
+      from {
+        opacity: 0;
+        transform: translateY(18px) scale(0.985);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+
+    @keyframes line-draw {
+      from {
+        opacity: 0;
+        transform: scaleX(0);
+      }
+      to {
+        opacity: 1;
+        transform: scaleX(1);
+      }
+    }
+
+    @keyframes progress-glow {
+      0% {
+        filter: saturate(0.8);
+      }
+      55% {
+        filter: saturate(1.25) brightness(1.1);
+      }
+      100% {
+        filter: saturate(1);
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .slide,
+      .slide.active .stage > *,
+      .slide.active .panel,
+      .slide.active .card,
+      .slide.active .fact,
+      .slide.active .metric,
+      .slide.active .node,
+      .slide.active .state,
+      .slide.active .asset,
+      .slide.active .table,
+      .slide.active .quote,
+      .slide.active .script,
+      .slide.active .arrow,
+      .slide.active .bar {
+        animation: none;
+        transition: none;
+      }
+    }
+
+    @media print {
+      body {
+        overflow: visible;
+        display: block;
+        background: white;
+      }
+
+      #deck {
+        position: static;
+        width: auto;
+        height: auto;
+        transform: none;
+        box-shadow: none;
+      }
+
+      .slide {
+        position: relative;
+        page-break-after: always;
+        opacity: 1;
+        transform: none;
+      }
+
+      .rail {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main
+    id="deck"
+  >
+      <section id="slide-01" class="slide dark active">
+        <div class="stage hero">
+          <div>
+            <div class="eyebrow">Rasa-EC-bot Defense</div>
+            <h1>能回答只是入口，能安全办事才是客服系统</h1>
+            <div class="deck-title"><span></span>电商智能客服毕业设计答辩演示</div>
+          </div>
+          <div class="hero-visual">
+            <div class="terminal">
+              <div><span class="ok">OK</span> 商品浏览 / 购物车 / 订单 / 售后</div>
+              <div><span class="ok">OK</span> Rasa + LLM/Agent 混合客服</div>
+              <div><span class="warn">WAIT</span> 写操作进入 pending action</div>
+              <div><span class="ok">OK</span> 商家工作台闭环处理</div>
+            </div>
+            <p>这页定调：答辩不是展示聊天窗口，而是展示一个能被控制地执行业务的实验系统。</p>
+          </div>
+        </div>
+        <footer class="footer"><span>Opening thesis</span><span class="counter"></span><span class="progress"><span class="bar"></span></span></footer>
+      </section>
+
+      <section id="slide-02" class="slide">
+        <div class="stage top">
+          <div>
+            <div class="eyebrow">Problem framing</div>
+            <h2>传统客服停在问答，本系统要证明业务闭环可以被安全串起来</h2>
+          </div>
+          <div class="grid-3">
+            <div class="fact">
+              <span class="num">01</span>
+              <h3>不是纯聊天</h3>
+              <p>用户能真实浏览商品、加入购物车、查询订单、申请售后。</p>
+            </div>
+            <div class="fact">
+              <span class="num">02</span>
+              <h3>不是模型裸奔</h3>
+              <p>模型负责理解与草稿，业务状态由后端校验后写入。</p>
+            </div>
+            <div class="fact">
+              <span class="num">03</span>
+              <h3>不是孤立前台</h3>
+              <p>用户侧问题会进入商家工作台，形成订单和售后处理闭环。</p>
+            </div>
+          </div>
+          <div class="quote">
+            <p>答辩主线：电商业务事实 + 智能客服入口 + 可控事务执行 + 商家端闭环。</p>
+          </div>
+        </div>
+        <footer class="footer"><span>Problem framing</span><span class="counter"></span><span class="progress"><span class="bar"></span></span></footer>
+      </section>
+
+      <section id="slide-03" class="slide">
+        <div class="stage top">
+          <div>
+            <div class="eyebrow">System architecture</div>
+            <h2>五层架构把“理解、流程、事实、写入”拆开，各自承担边界</h2>
+          </div>
+          <div class="architecture">
+            <div class="arch-row">
+              <div class="node">
+                <span class="tag">Frontend</span>
+                <h3>Vue 3 前端</h3>
+                <p>商城、客服页、订单页、商家工作台。</p>
+              </div>
+              <div class="node">
+                <span class="tag">API</span>
+                <h3>FastAPI 后端</h3>
+                <p>统一业务入口、权限校验、事务写入。</p>
+              </div>
+              <div class="node">
+                <span class="tag">Dialog</span>
+                <h3>Rasa</h3>
+                <p>稳定意图、规则流程、低风险查询。</p>
+              </div>
+              <div class="node">
+                <span class="tag">Reasoning</span>
+                <h3>LLM / Agent</h3>
+                <p>复杂理解、推荐解释、多轮上下文。</p>
+              </div>
+              <div class="node">
+                <span class="tag">Data</span>
+                <h3>PostgreSQL / Redis</h3>
+                <p>业务事实、缓存、锁、待确认动作。</p>
+              </div>
+            </div>
+          </div>
+          <div class="panel">
+            <p><strong>关键边界：</strong>Rasa 和 Agent 都不直接写库；所有写操作回到后端受控接口，确认后再次校验权限、状态和参数。</p>
+          </div>
+        </div>
+        <footer class="footer"><span>Architecture</span><span class="counter"></span><span class="progress"><span class="bar"></span></span></footer>
+      </section>
+
+      <section id="slide-04" class="slide dark">
+        <div class="stage">
+          <div>
+            <div class="eyebrow">Evaluation lens</div>
+            <h2>接下来请只看三个判断标准：稳定、真实、可控</h2>
+          </div>
+          <div class="grid-3">
+            <div class="metric">
+              <span class="label">Stable</span>
+              <strong class="accent-teal">稳定</strong>
+              <p>图片、本地数据、演示账号、关键订单都可复现。</p>
+            </div>
+            <div class="metric">
+              <span class="label">Factual</span>
+              <strong class="accent-amber">真实</strong>
+              <p>订单、物流、售后来自数据库，不让模型编造业务事实。</p>
+            </div>
+            <div class="metric">
+              <span class="label">Controlled</span>
+              <strong class="accent-red">可控</strong>
+              <p>下单和售后先生成草稿，用户确认后才执行。</p>
+            </div>
+          </div>
+        </div>
+        <footer class="footer"><span>Evaluation lens</span><span class="counter"></span><span class="progress"><span class="bar"></span></span></footer>
+      </section>
+
+      <section id="slide-05" class="slide">
+        <div class="stage top">
+          <div>
+            <div class="eyebrow">Run of show</div>
+            <h2>15 分钟内只走主线，不被代码细节拖散</h2>
+          </div>
+          <div class="timeline">
+            <div class="time-row"><strong>0-3 分钟</strong><p>项目定位、架构说明、登录与商品浏览。</p><span class="small">证明演示数据完整</span></div>
+            <div class="time-row"><strong>3-7 分钟</strong><p>客服推荐、购物车下单草稿。</p><span class="small">证明智能入口与安全边界</span></div>
+            <div class="time-row"><strong>7-11 分钟</strong><p>订单、物流、售后查询与售后草稿。</p><span class="small">证明业务事实来自数据库</span></div>
+            <div class="time-row"><strong>11-15 分钟</strong><p>商家工作台闭环、工程亮点、benchmark 结论。</p><span class="small">证明系统完整性</span></div>
+          </div>
+        </div>
+        <footer class="footer"><span>Timeline</span><span class="counter"></span><span class="progress"><span class="bar"></span></span></footer>
+      </section>
+
+      <section id="slide-06" class="slide">
+        <div class="stage top">
+          <div>
+            <div class="eyebrow">Local demo assets</div>
+            <h2>先证明演示数据可靠：商品图全部从本地 demo-assets 加载</h2>
+          </div>
+          <div class="asset-strip">
+            <div class="asset"><img src="assets/products/laptop.svg" alt="笔记本"><span class="small">Laptop</span></div>
+            <div class="asset"><img src="assets/products/monitor.svg" alt="显示器"><span class="small">Monitor</span></div>
+            <div class="asset"><img src="assets/products/phone.svg" alt="手机"><span class="small">Phone</span></div>
+            <div class="asset"><img src="assets/products/default.svg" alt="默认商品图"><span class="small">Fallback</span></div>
+            <div class="asset"><img src="assets/logos/digital.svg" alt="数码店 Logo"><span class="small">Digital shop</span></div>
+            <div class="asset"><img src="assets/logos/office.svg" alt="办公店 Logo"><span class="small">Office shop</span></div>
+          </div>
+          <div class="split">
+            <div class="panel">
+              <h3>初始化数据覆盖</h3>
+              <p>4 个中文店铺、20 个演示商品、购物车、订单、物流、售后全状态。</p>
+            </div>
+            <div class="panel">
+              <h3>答辩稳定性</h3>
+              <p>商品图和店铺 Logo 不依赖外部图片站点，弱网或离线场景也能展示。</p>
+            </div>
+          </div>
+        </div>
+        <footer class="footer"><span>Demo data</span><span class="counter"></span><span class="progress"><span class="bar"></span></span></footer>
+      </section>
+
+      <section id="slide-07" class="slide">
+        <div class="stage top">
+          <div>
+            <div class="eyebrow">Recommendation</div>
+            <h2>推荐不是关键词匹配，而是把预算、用途、标签和历史行为一起约束</h2>
+          </div>
+          <div class="draft-card">
+            <div class="product-preview">
+              <img src="assets/products/recommendation-laptop.svg" alt="推荐笔记本">
+              <span class="tag">预算 6000 内</span>
+            </div>
+            <div class="stack">
+              <span class="label">User query</span>
+              <h3>推荐一台适合写论文和轻量开发的银色笔记本</h3>
+              <div class="chips">
+                <span class="tag">场景：论文</span>
+                <span class="tag">场景：轻量开发</span>
+                <span class="tag">颜色：银色</span>
+                <span class="tag">预算：6000</span>
+                <span class="tag">行为：浏览历史</span>
+              </div>
+              <p>后端结合商品标签、规格、评分、销量和用户浏览历史生成推荐，前端以商品卡片展示并可跳转详情。</p>
+            </div>
+          </div>
+        </div>
+        <footer class="footer"><span>Recommendation</span><span class="counter"></span><span class="progress"><span class="bar"></span></span></footer>
+      </section>
+
+      <section id="slide-08" class="slide dark">
+        <div class="stage">
+          <div>
+            <div class="eyebrow">Safety boundary</div>
+            <h2>真正的风险不在模型答错一句话，而在模型越权写库</h2>
+          </div>
+          <div class="risk-band">
+            <div class="panel">
+              <h3 class="accent-red">禁止路径</h3>
+              <p>用户一句话触发模型直接创建订单、申请售后、取消订单或修改地址。</p>
+              <div class="inline-note">风险：权限绕过、状态错误、数据污染、现场演示不可恢复。</div>
+            </div>
+            <div class="panel ok">
+              <h3 class="accent-teal">实际路径</h3>
+              <p>模型只生成待确认草稿；用户确认后，后端重新校验并执行事务。</p>
+              <div class="inline-note">收益：自然语言入口保留，业务写入边界清晰。</div>
+            </div>
+          </div>
+        </div>
+        <footer class="footer"><span>Safety boundary</span><span class="counter"></span><span class="progress"><span class="bar"></span></span></footer>
+      </section>
+
+      <section id="slide-09" class="slide">
+        <div class="stage top">
+          <div>
+            <div class="eyebrow">Checkout draft</div>
+            <h2>购物车下单只生成草稿，确认后才真正创建订单</h2>
+          </div>
+          <div class="arrow-line">
+            <div class="node">
+              <span class="tag">用户请求</span>
+              <h3>帮我把购物车里的商品下单</h3>
+              <p>地址和邮箱从自然语言中提取。</p>
+            </div>
+            <div class="arrow"></div>
+            <div class="node">
+              <span class="pending">pending_action</span>
+              <h3>下单草稿卡片</h3>
+              <p>展示商品、金额、收货信息、确认和取消按钮。</p>
+            </div>
+            <div class="arrow"></div>
+            <div class="node">
+              <span class="tag">后端事务</span>
+              <h3>确认后写入</h3>
+              <p>再次校验购物车、店铺、库存、地址和用户权限。</p>
+            </div>
+          </div>
+          <div class="script">
+            <span class="label">Demo phrase</span>
+            <p>帮我把购物车里的商品下单，地址：北京市海淀区中关村软件园二期 8 号楼，邮箱：test1@example.com</p>
+          </div>
+        </div>
+        <footer class="footer"><span>Checkout draft</span><span class="counter"></span><span class="progress"><span class="bar"></span></span></footer>
+      </section>
+
+      <section id="slide-10" class="slide">
+        <div class="stage top">
+          <div>
+            <div class="eyebrow">Order facts</div>
+            <h2>订单、物流和售后查询都回到真实种子数据，不让模型编事实</h2>
+          </div>
+          <div class="state-list">
+            <div class="state">
+              <h3>订单状态</h3>
+              <p><code>ORD202603300001</code> 待发货，用于订单查询和售后草稿。</p>
+            </div>
+            <div class="state info">
+              <h3>物流进度</h3>
+              <p><code>ORD202603300002</code> 运输中，可展示物流节点。</p>
+            </div>
+            <div class="state warn">
+              <h3>售后进度</h3>
+              <p>售后状态覆盖 submitted、processing、completed。</p>
+            </div>
+            <div class="state danger">
+              <h3>事实边界</h3>
+              <p>客服回答基于后端摘要接口，不直接生成数据库事实。</p>
+            </div>
+          </div>
+          <div class="panel">
+            <p><strong>讲解重点：</strong>Rasa 和 Agent 都通过后端受控接口读取业务摘要，避免直接访问数据库，也避免模型绕过权限。</p>
+          </div>
+        </div>
+        <footer class="footer"><span>Order facts</span><span class="counter"></span><span class="progress"><span class="bar"></span></span></footer>
+      </section>
+
+      <section id="slide-11" class="slide">
+        <div class="stage top">
+          <div>
+            <div class="eyebrow">After-sales draft</div>
+            <h2>售后申请也走草稿机制，把模型建议和业务写入隔离开</h2>
+          </div>
+          <div class="split">
+            <div class="card">
+              <span class="pending">pending_action</span>
+              <h3>申请退货 ORD202603300001</h3>
+              <p>原因：尺寸不合适。客服生成草稿，用户确认后才提交售后记录。</p>
+              <div class="chips">
+                <span class="tag">订单归属校验</span>
+                <span class="tag">状态校验</span>
+                <span class="tag">售后类型校验</span>
+              </div>
+            </div>
+            <div class="card">
+              <span class="label">Backend checks</span>
+              <h3>后端仍是裁判</h3>
+              <p>即使模型理解正确，也必须由后端判断订单是否允许售后、是否重复申请、是否超出业务规则。</p>
+              <p>这保证了演示中的每次写入都有明确责任边界。</p>
+            </div>
+          </div>
+        </div>
+        <footer class="footer"><span>After-sales draft</span><span class="counter"></span><span class="progress"><span class="bar"></span></span></footer>
+      </section>
+
+      <section id="slide-12" class="slide dark">
+        <div class="stage">
+          <div>
+            <div class="eyebrow">Role switch</div>
+            <h2>现在切换角色：用户侧产生的问题，必须能被商家侧接住</h2>
+          </div>
+          <div class="role-switch">
+            <div class="card">
+              <span class="label">Customer side</span>
+              <h3>用户</h3>
+              <p>浏览、咨询、下单、查物流、发起售后。</p>
+            </div>
+            <div class="switch-arrow">Business handoff</div>
+            <div class="card">
+              <span class="label">Merchant side</span>
+              <h3>商家</h3>
+              <p>查看订单、发货、推进物流、处理售后。</p>
+            </div>
+          </div>
+        </div>
+        <footer class="footer"><span>Role switch</span><span class="counter"></span><span class="progress"><span class="bar"></span></span></footer>
+      </section>
+
+      <section id="slide-13" class="slide">
+        <div class="stage top">
+          <div>
+            <div class="eyebrow">Merchant console</div>
+            <h2>商家工作台证明系统不是孤立客服，而是可处理的业务后台</h2>
+          </div>
+          <div class="dashboard">
+            <div class="table">
+              <div class="table-row head"><span>订单</span><span>状态</span><span>店铺</span><span>动作</span></div>
+              <div class="table-row"><span>ORD202603300001</span><span>待发货</span><span>数码店</span><span>发货</span></div>
+              <div class="table-row"><span>ORD202603300002</span><span>运输中</span><span>数码店</span><span>查看物流</span></div>
+              <div class="table-row"><span>售后申请</span><span>待处理</span><span>数码店</span><span>同意 / 拒绝</span></div>
+            </div>
+            <div class="stack">
+              <div class="panel">
+                <h3>账号</h3>
+                <p><code>merchant1@example.com</code> / <code>password123</code></p>
+              </div>
+              <div class="panel">
+                <h3>证明点</h3>
+                <p>商家只能看到自己店铺数据，并能推进订单和售后状态。</p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <footer class="footer"><span>Merchant console</span><span class="counter"></span><span class="progress"><span class="bar"></span></span></footer>
+      </section>
+
+      <section id="slide-14" class="slide">
+        <div class="stage top">
+          <div>
+            <div class="eyebrow">Engineering choices</div>
+            <h2>系统价值来自五个边界清晰的工程选择</h2>
+          </div>
+          <div class="grid-4">
+            <div class="fact">
+              <span class="num">Rasa</span>
+              <h3>稳定流程</h3>
+              <p>处理高频、确定、结构化客服任务。</p>
+            </div>
+            <div class="fact">
+              <span class="num">Agent</span>
+              <h3>复杂理解</h3>
+              <p>处理推荐解释、多轮上下文和复杂意图。</p>
+            </div>
+            <div class="fact">
+              <span class="num">API</span>
+              <h3>受控写入</h3>
+              <p>后端统一校验权限、状态和事务。</p>
+            </div>
+            <div class="fact">
+              <span class="num">Data</span>
+              <h3>事实来源</h3>
+              <p>PostgreSQL 为准，Redis 只做缓存和辅助。</p>
+            </div>
+          </div>
+          <div class="panel">
+            <p>第五个选择是 <strong>本地化可复现</strong>：模型、数据库、图片、benchmark 都可以在本机链路中完成演示和实验。</p>
+          </div>
+        </div>
+        <footer class="footer"><span>Engineering choices</span><span class="counter"></span><span class="progress"><span class="bar"></span></span></footer>
+      </section>
+
+      <section id="slide-15" class="slide">
+        <div class="stage top">
+          <div>
+            <div class="eyebrow">Benchmark</div>
+            <h2>LoRA 在推荐扩展上有正向信号，但不是全局增强器</h2>
+          </div>
+          <div class="metric-grid">
+            <div class="metric">
+              <span class="label">Rasa only</span>
+              <strong>规则稳定</strong>
+              <p>适合固定流程，但不适合承担复杂推荐和多模态任务。</p>
+            </div>
+            <div class="metric">
+              <span class="label">Rasa + LLM</span>
+              <strong>综合主线</strong>
+              <p>规则稳定性与复杂理解能力互补，是当前系统主线方案。</p>
+            </div>
+            <div class="metric">
+              <span class="label">Rasa + LoRA</span>
+              <strong>局部增强</strong>
+              <p>推荐扩展有正向信号，但不能简单宣称全场景提升。</p>
+            </div>
+          </div>
+          <div class="panel">
+            <p><strong>答辩表述：</strong>benchmark 用来说明能力边界和方案选择，不把局部实验结果夸大为全局结论。</p>
+          </div>
+        </div>
+        <footer class="footer"><span>Benchmark</span><span class="counter"></span><span class="progress"><span class="bar"></span></span></footer>
+      </section>
+
+      <section id="slide-16" class="slide dark">
+        <div class="stage hero">
+          <div>
+            <div class="eyebrow">Closing</div>
+            <h2>最后留下这句话：能回答只是入口，能安全办事才是客服系统</h2>
+            <div class="deck-title"><span></span>Rasa-EC-bot 电商智能客服系统</div>
+          </div>
+          <div class="hero-visual">
+            <div class="terminal">
+              <div><span class="ok">Stable</span> 本地数据与图片保证演示稳定</div>
+              <div><span class="ok">Factual</span> 订单和售后来自数据库事实</div>
+              <div><span class="ok">Controlled</span> 写操作必须用户确认</div>
+              <div><span class="ok">Closed-loop</span> 商家端接住用户侧问题</div>
+            </div>
+            <p>这就是本项目的毕业设计价值：把智能客服从回答问题推进到可控业务协同。</p>
+          </div>
+        </div>
+        <footer class="footer"><span>Closing</span><span class="counter"></span><span class="progress"><span class="bar"></span></span></footer>
+      </section>
+
+    <div class="rail" aria-hidden="true"></div>
+  </main>
+
+  <script>
+    const deck = document.getElementById("deck");
+    const slides = Array.from(document.querySelectorAll(".slide"));
+    const rail = document.querySelector(".rail");
+    let index = 0;
+    let wheelDelta = 0;
+    let wheelLocked = false;
+    let touchStartY = null;
+
+    rail.innerHTML = slides.map(() => '<span class="dot"></span>').join("");
+    const dots = Array.from(document.querySelectorAll(".dot"));
+
+    function clamp(value, min, max) {
+      return Math.max(min, Math.min(max, value));
+    }
+
+    function fitDeck() {
+      const scale = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
+      deck.style.setProperty("--deck-scale", String(scale));
+    }
+
+    function render() {
+      slides.forEach((slide, slideIndex) => {
+        slide.classList.toggle("active", slideIndex === index);
+        slide.classList.toggle("previous", slideIndex < index);
+        const counter = slide.querySelector(".counter");
+        const bar = slide.querySelector(".bar");
+        if (counter) counter.textContent = `${slideIndex + 1} / ${slides.length}`;
+        if (bar) bar.style.width = `${((slideIndex + 1) / slides.length) * 100}%`;
+      });
+
+      dots.forEach((dot, dotIndex) => {
+        dot.classList.toggle("active", dotIndex === index);
+      });
+
+      const nextHash = `slide-${index + 1}`;
+      if (window.location.hash.slice(1) !== nextHash) {
+        history.replaceState(null, "", `#${nextHash}`);
+      }
+    }
+
+    function go(delta) {
+      const nextIndex = clamp(index + delta, 0, slides.length - 1);
+      if (nextIndex === index) return;
+      index = nextIndex;
+      render();
+    }
+
+    function jumpFromHash() {
+      const match = window.location.hash.match(/slide-(\d+)/);
+      if (!match) return;
+      const target = Number(match[1]) - 1;
+      if (Number.isInteger(target)) index = clamp(target, 0, slides.length - 1);
+    }
+
+    function lockWheel() {
+      wheelLocked = true;
+      window.setTimeout(() => {
+        wheelLocked = false;
+        wheelDelta = 0;
+      }, 520);
+    }
+
+    document.addEventListener("wheel", (event) => {
+      event.preventDefault();
+      if (wheelLocked) return;
+      wheelDelta += event.deltaY;
+      if (Math.abs(wheelDelta) < 48) return;
+      go(wheelDelta > 0 ? 1 : -1);
+      lockWheel();
+    }, { passive: false });
+
+    document.addEventListener("keydown", (event) => {
+      if (["ArrowRight", "PageDown", " "].includes(event.key)) {
+        event.preventDefault();
+        go(1);
+      }
+      if (["ArrowLeft", "PageUp"].includes(event.key)) {
+        event.preventDefault();
+        go(-1);
+      }
+      if (event.key === "Home") {
+        event.preventDefault();
+        index = 0;
+        render();
+      }
+      if (event.key === "End") {
+        event.preventDefault();
+        index = slides.length - 1;
+        render();
+      }
+    });
+
+    document.addEventListener("touchstart", (event) => {
+      touchStartY = event.touches[0].clientY;
+    }, { passive: true });
+
+    document.addEventListener("touchend", (event) => {
+      if (touchStartY === null) return;
+      const delta = touchStartY - event.changedTouches[0].clientY;
+      if (Math.abs(delta) > 48) go(delta > 0 ? 1 : -1);
+      touchStartY = null;
+    }, { passive: true });
+
+    window.addEventListener("resize", fitDeck);
+    window.addEventListener("hashchange", () => {
+      jumpFromHash();
+      render();
+    });
+
+    fitDeck();
+    jumpFromHash();
+    render();
+  </script>
+</body>
+</html>

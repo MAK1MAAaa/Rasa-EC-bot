@@ -256,7 +256,7 @@ uv run uvicorn app.main:app --host 127.0.0.1 --port 8001
 ## 说明
 
 - `backend/prompts/*.md` 是当前后端使用的正式 prompt 来源。
-- 商品推荐链路会解析用户消息里的显式预算、颜色和部分规格词，并优先过滤不满足硬约束的候选商品。
+- 商品推荐链路会解析用户消息里的显式预算、颜色和部分规格词，并优先过滤不满足硬约束的候选商品；聊天推荐默认只返回 1 个最匹配商品，内部推荐接口仍支持显式 `limit` 获取多条结果。
 - 登录用户的服务端记忆以 PostgreSQL 为主存储，Markdown 文件落在 `backend/data/chat_memory/`，仅作为派生产物。
 - 聊天待确认动作持久化在 `chat_pending_actions`，过期时间统一按 UTC 归一化后比较，兼容 PostgreSQL `TIMESTAMP WITH TIME ZONE` 返回的带时区时间。
 - 聊天下单和修改地址草案支持 `地址:`、`地址为`、`地址是`、`收货地址为` 等表达，避免漏提取地址后误用最近订单地址。

@@ -1,0 +1,10 @@
+.env
+.env.*
+!.env.sample
+.venv/
+.uv-cache/
+.rasa/
+models/
+__pycache__/
+**/__pycache__/
+*.pyc

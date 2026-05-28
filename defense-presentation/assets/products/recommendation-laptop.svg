@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="720" viewBox="0 0 960 720" role="img" aria-label="Laptop">
+  <rect width="960" height="720" fill="#f3f6fb"/>
+  <rect x="190" y="118" width="580" height="366" rx="28" fill="#263241"/>
+  <rect x="226" y="154" width="508" height="294" rx="14" fill="#c7ddf6"/>
+  <path d="M136 512h688l62 76H74z" fill="#9aa7b7"/>
+  <rect x="392" y="530" width="176" height="20" rx="10" fill="#6b7280"/>
+  <path d="M290 238h380M290 304h300M290 370h214" stroke="#2f80ed" stroke-width="24" stroke-linecap="round"/>
+</svg>

@@ -1,15 +1,15 @@
 ﻿import { createRouter, createWebHistory } from 'vue-router'
-import Login from '@/views/Login.vue'
-import Register from '@/views/Register.vue'
-import Products from '@/views/Products.vue'
-import ProductDetail from '@/views/ProductDetail.vue'
-import Cart from '@/views/Cart.vue'
-import Checkout from '@/views/Checkout.vue'
-import OrderList from '@/views/OrderList.vue'
-import OrderDetail from '@/views/OrderDetail.vue'
-import History from '@/views/History.vue'
-import ChatSupport from '@/views/ChatSupport.vue'
-import MerchantCenter from '@/views/MerchantCenter.vue'
+const Login = () => import('@/views/Login.vue')
+const Register = () => import('@/views/Register.vue')
+const Products = () => import('@/views/Products.vue')
+const ProductDetail = () => import('@/views/ProductDetail.vue')
+const Cart = () => import('@/views/Cart.vue')
+const Checkout = () => import('@/views/Checkout.vue')
+const OrderList = () => import('@/views/OrderList.vue')
+const OrderDetail = () => import('@/views/OrderDetail.vue')
+const History = () => import('@/views/History.vue')
+const ChatSupport = () => import('@/views/ChatSupport.vue')
+const MerchantCenter = () => import('@/views/MerchantCenter.vue')
 
 const router = createRouter({
   history: createWebHistory(),

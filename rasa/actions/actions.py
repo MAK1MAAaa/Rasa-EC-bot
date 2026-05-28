@@ -175,7 +175,7 @@ class ActionRecommendProducts(Action):
         frontend_base_url = frontend_base_url.rstrip('/')
 
         params: dict[str, Any] = {
-            'limit': 5,
+            'limit': 1,
             'query': user_text,
         }
         if category:
@@ -231,13 +231,13 @@ class ActionRecommendProducts(Action):
                 }
             )
 
-        prefix = '给你推荐这几款商品：'
+        prefix = '给你推荐这款商品：'
         if personalized:
-            prefix = '结合你最近浏览的商品，为你推荐这几款：'
+            prefix = '结合你最近浏览的商品，为你推荐这款：'
         if category:
-            prefix = f'给你推荐几款 {category} 商品：'
+            prefix = f'给你推荐这款 {category} 商品：'
             if personalized:
-                prefix = f'结合你最近浏览的偏好，为你推荐几款 {category} 商品：'
+                prefix = f'结合你最近浏览的偏好，为你推荐这款 {category} 商品：'
         dispatcher.utter_message(text=prefix, json_message={'cards': cards})
         return []
 
