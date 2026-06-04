@@ -40,6 +40,16 @@ AGENT_LLM_MODEL=qwen3.5:2b
 
 如果模型名不同，修改 `.env.docker` 中的 `OLLAMA_MODEL`、`AGENT_LLM_MODEL`、`OLLAMA_EMBED_MODEL` 和 `OLLAMA_VLM_MODEL`。
 
+Compose 会按服务读取现有环境文件：
+
+| 服务 | 自动读取 |
+| --- | --- |
+| 后端 | `backend/.env`、`.env.docker` |
+| Rasa Action Server | `rasa/.env`、`.env.docker` |
+| 前端 | `frontend/.env`、`.env.docker` |
+
+其中 Docker 内部网络地址仍由 `docker-compose.yml` 覆盖：后端连接 PostgreSQL 使用 `postgres`，连接 Redis 使用 `redis`，连接 Rasa 使用 `rasa-server`，连接宿主机 Ollama 使用 `host.docker.internal`。高德后端地理编码读取 `backend/.env` 的 `AMAP_WEB_KEY`，前端地图构建读取 `frontend/.env` 的 `VITE_AMAP_JS_KEY` 和 `VITE_AMAP_SECURITY_JS_CODE`。
+
 ### 重置演示数据
 
 只有显式删除 volume 才会重置 PostgreSQL 和 Redis 数据：
